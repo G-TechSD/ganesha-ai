@@ -5,7 +5,11 @@
 WARNING - EXPERIMENTAL - CURRENTLY IN BETA
 ---
 
-
+## Add your OpenAI API key to ganesha.py
+**Open ganesha.py and locate #OPENAI_API_KEY = "", uncomment and paste your key**
+```shell
+OPENAI_API_KEY = "YOUR KEY HERE"
+```
 
 ## Installation
 **The following command will install all dependencies and make the "ganesha" command available**
