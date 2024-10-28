@@ -125,7 +125,7 @@ ganesha [options] [plain English task request]
 ### Options:
 
 - **`--setup`**  
-  Installs all required dependencies, then adds "ganesha" command to the system
+  Installs all required dependencies, then adds "ganesha" command to the system.
   *Example*: `python ganesha.py --setup"`
   
 - **`--rollback [session_id | last]`**  
