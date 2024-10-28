@@ -6,9 +6,15 @@ WARNING - EXPERIMENTAL - CURRENTLY IN BETA
 ---
 
 ### Overview
-Ganesha, the first AI-powered tool of its kind, empowers system administrators across Linux, Mac, and Windows with intuitive, plain English task requests in the terminal. Simply describe your desired actions, and Ganesha—backed by GPT-4—translates them into commands, scripts, or even rollbacks, simplifying system management and troubleshooting.
+Ganesha, the first AI-powered tool of its kind, empowers system administrators across Linux, Mac, and Windows with intuitive, plain English task requests in the terminal. Simply describe your desired actions, and Ganesha—backed by GPT-4o-mini translates them into commands, scripts, or even rollbacks, simplifying system management and troubleshooting.
 
 ---
+
+## YOU NEED AN OPENAI API KEY TO USE THIS VERSION OF GANESHA
+**visit platform.openai.com and obtain an API key with access to gpt-4o-mini**
+```shell
+OPENAI_API_KEY = "YOUR KEY HERE"
+```
 
 ## Get Started: Add your OpenAI API key to ganesha.py
 **Open ganesha.py and locate #OPENAI_API_KEY = "", uncomment and paste your key**
