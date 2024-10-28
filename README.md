@@ -10,6 +10,18 @@ Ganesha, the first AI-powered tool of its kind, empowers system administrators a
 
 ---
 
+## Get Started: Add your OpenAI API key to ganesha.py
+**Open ganesha.py and locate #OPENAI_API_KEY = "", uncomment and paste your key**
+```shell
+OPENAI_API_KEY = "YOUR KEY HERE"
+```
+
+## Installation
+**The following command will install all dependencies and make the "ganesha" command available**
+```shell
+python ganesha.py --setup
+```
+
 ### Key Features
 
 - **Natural Language Processing**: Ganesha interprets plain English task requests, transforming your intentions into executable commands without requiring complex syntax.
@@ -98,18 +110,6 @@ Ganesha simplifies a wide variety of tasks, empowering users with efficient and 
 - **"Display my system's IP address."**
 - **"Install a software package using apt."**
 - **"Change file permissions to make 'script.sh' executable."**
-
-## Add your OpenAI API key to ganesha.py
-**Open ganesha.py and locate #OPENAI_API_KEY = "", uncomment and paste your key**
-```shell
-OPENAI_API_KEY = "YOUR KEY HERE"
-```
-
-## Installation
-**The following command will install all dependencies and make the "ganesha" command available**
-```shell
-python ganesha.py --setup
-```
 
 
 ## Command-Line Usage
