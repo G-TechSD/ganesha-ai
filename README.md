@@ -5,57 +5,6 @@
 WARNING - EXPERIMENTAL - CURRENTLY IN BETA
 ---
 
-## Add your OpenAI API key to ganesha.py
-**Open ganesha.py and locate #OPENAI_API_KEY = "", uncomment and paste your key**
-```shell
-OPENAI_API_KEY = "YOUR KEY HERE"
-```
-
-## Installation
-**The following command will install all dependencies and make the "ganesha" command available**
-```shell
-python ganesha.py --setup
-```
-
-
-## Command-Line Usage
-
-```shell
-ganesha [options] [plain English task request]
-```
-
-### Options:
-
-- **`--setup`**  
-  Installs all required dependencies, then adds "ganesha" command to the system
-  *Example*: `ganesha --setup"`
-  
-- **`--rollback [session_id | last]`**  
-  Reverts changes made in the most recent session or a specified session by session ID. Use `last` to roll back the latest session.  
-  *Example*: `ganesha --rollback last`
-
-- **`--summary`**  
-  Provides a summary of the activities from the most recent session.  
-  *Example*: `ganesha --summary`
-
-- **`--report [criteria]`**  
-  Generates a report based on specified criteria, such as a security audit or disk usage.  
-  *Example*: `ganesha --report "full security audit of open ports"`
-
-- **`--interactive`**  
-  Launches an interactive menu for guided task execution, session summaries, or rollbacks.  
-  *Example*: `ganesha --interactive`
-
-- **`--debug`**  
-  Activates debug mode, displaying raw responses from GPT-4 for detailed insights and troubleshooting.  
-  *Example*: `ganesha --execute "Optimize system memory usage" --debug`
-
-- **`--A`**  
-  Automatically approves all commands, bypassing manual confirmation prompts.  
-  *Example*: `ganesha --execute "Update all system packages" --A`
-
----
-
 ### Overview
 
 **Elevator Pitch:**  
@@ -151,4 +100,57 @@ Ganesha simplifies a wide variety of tasks, empowering users with efficient and 
 - **"Display my system's IP address."**
 - **"Install a software package using apt."**
 - **"Change file permissions to make 'script.sh' executable."**
+
+## Add your OpenAI API key to ganesha.py
+**Open ganesha.py and locate #OPENAI_API_KEY = "", uncomment and paste your key**
+```shell
+OPENAI_API_KEY = "YOUR KEY HERE"
+```
+
+## Installation
+**The following command will install all dependencies and make the "ganesha" command available**
+```shell
+python ganesha.py --setup
+```
+
+
+## Command-Line Usage
+
+```shell
+ganesha [options] [plain English task request]
+```
+
+### Options:
+
+- **`--setup`**  
+  Installs all required dependencies, then adds "ganesha" command to the system
+  *Example*: `ganesha --setup"`
+  
+- **`--rollback [session_id | last]`**  
+  Reverts changes made in the most recent session or a specified session by session ID. Use `last` to roll back the latest session.  
+  *Example*: `ganesha --rollback last`
+
+- **`--summary`**  
+  Provides a summary of the activities from the most recent session.  
+  *Example*: `ganesha --summary`
+
+- **`--report [criteria]`**  
+  Generates a report based on specified criteria, such as a security audit or disk usage.  
+  *Example*: `ganesha --report "full security audit of open ports"`
+
+- **`--interactive`**  
+  Launches an interactive menu for guided task execution, session summaries, or rollbacks.  
+  *Example*: `ganesha --interactive`
+
+- **`--debug`**  
+  Activates debug mode, displaying raw responses from GPT-4 for detailed insights and troubleshooting.  
+  *Example*: `ganesha --execute "Optimize system memory usage" --debug`
+
+- **`--A`**  
+  Automatically approves all commands, bypassing manual confirmation prompts.  
+  *Example*: `ganesha --execute "Update all system packages" --A`
+
+---
+
+
 
