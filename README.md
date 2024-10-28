@@ -1,5 +1,3 @@
-
-@ -1,2 +1,150 @@
 # ganesha-ai
  AI Powered Linux System Administration
 
