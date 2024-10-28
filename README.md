@@ -1,5 +1,4 @@
-<<<<<<< HEAD
-=======
+
 @ -1,2 +1,150 @@
 # ganesha-ai
  AI Powered Linux System Administration
@@ -153,7 +152,7 @@ Ganesha simplifies a wide variety of tasks, empowering users with efficient and 
 - **"Install a software package using apt."**
 - **"Change file permissions to make 'script.sh' executable."**
 
-<<<<<<< HEAD
+
 ---
 =======
 ---
