@@ -566,9 +566,19 @@ def get_inverse_commands(executed_commands, logger, system_info, debug=False):
             logger.warning(f"Failed to get inverse command for: {cmd}")
     return inverse_commands
 
-def rollback_session(session_id, log_dir, logger, debug=False):
+def rollback_session(session_id, log_dir, logger, allow_all=False, debug=False):
     """
-    Rolls back the specified session based on the SESSION_ID.
+    Rolls back the specified session based on the session_id.
+
+    Args:
+        session_id (str): Identifier of the session to rollback.
+        log_dir (str): Directory where log files are stored.
+        logger (logging.LoggerAdapter): Logger for logging messages.
+        allow_all (bool): If True, execute rollback commands without confirmation prompts.
+        debug (bool): Flag to indicate if debug information should be printed.
+
+    Returns:
+        None
     """
     # If 'last', find the most recent non-empty session log with executed commands
     if session_id == 'last':
@@ -627,92 +637,104 @@ def rollback_session(session_id, log_dir, logger, debug=False):
             print(f"{Style.BRIGHT}\nRollback Actions:{Style.RESET_ALL}")
             for cmd in rollback_commands:
                 print(f"{Fore.CYAN}Rollback Command: {cmd}{Style.RESET_ALL}")
-            execute_input = input("Execute rollback commands? (yes to execute): ").strip().lower()
-            if execute_input.startswith("yes"):
-                execute_commands(
-                    rollback_commands,
-                    explanations=["Rollback action" for _ in rollback_commands],
-                    logger=logger,
-                    allow_all=False,  # Prompt before each rollback command
-                    quiet_commands=False,
-                    debug=debug
-                )
+            if not allow_all:
+                execute_input = input("Execute rollback commands? (yes to execute): ").strip().lower()
+                if not execute_input.startswith("yes"):
+                    print(f"{Fore.YELLOW}Rollback canceled by user.{Style.RESET_ALL}")
+                    return
+            execute_success, error_message = execute_commands(
+                rollback_commands,
+                explanations=["Rollback action" for _ in rollback_commands],
+                logger=logger,
+                allow_all=allow_all,  # Use the allow_all flag passed to the function
+                quiet_commands=False,
+                debug=debug
+            )
+            if execute_success:
+                print(f"{Fore.GREEN}Rollback completed successfully.{Style.RESET_ALL}")
+            else:
+                print(f"{Fore.RED}Rollback encountered errors: {error_message}{Style.RESET_ALL}")
         else:
             print(f"{Fore.YELLOW}No rollback commands found in the log file for rollback.{Style.RESET_ALL}")
     except Exception as e:
         print(f"{Fore.RED}Error during rollback: {e}{Style.RESET_ALL}")
 
-def rollback_sessions(session_ids, log_dir, logger, debug=False):
+def rollback_sessions(session_ids, log_dir, logger, allow_all=False, debug=False):
     """
     Rolls back multiple sessions based on the provided session IDs.
 
     Args:
         session_ids (list): List of session identifiers to rollback.
         log_dir (str): Directory where log files are stored.
-        logger (logging.LoggerAdapter or None): Logger for logging messages.
+        logger (logging.LoggerAdapter): Logger for logging messages.
+        allow_all (bool): If True, execute rollback commands without confirmation prompts.
         debug (bool): Flag to indicate if debug information should be printed.
 
     Returns:
         None
     """
     for session_id in session_ids:
-        rollback_session(session_id, log_dir, logger, debug=debug)
+        rollback_session(session_id, log_dir, logger, allow_all=allow_all, debug=debug)
 
 # ------------------------------ Command Executor ------------------------
 
-def execute_commands(commands, explanations, logger, allow_all, quiet_commands, debug=False):
+def execute_commands(commands, explanations, logger, allow_all=False, quiet_commands=False, debug=False):
+    """
+    Executes a list of commands with optional explanations.
+
+    Args:
+        commands (list): List of command strings to execute.
+        explanations (list): Corresponding explanations for each command.
+        logger (logging.LoggerAdapter): Logger for logging messages.
+        allow_all (bool): If True, execute all commands without confirmation prompts.
+        quiet_commands (bool): If True, suppress command output.
+        debug (bool): Flag to indicate if debug information should be printed.
+
+    Returns:
+        tuple: (success (bool), error_message (str))
+    """
     success = True
     error_message = ""
     executed_commands = []  # Collect executed commands
+    all_confirmed = allow_all  # Keep track if the user has chosen to proceed without further prompts
 
     for i, cmd in enumerate(commands, 1):
-        expl = explanations[i-1] if i-1 < len(explanations) else ""
-        print(f"{Fore.CYAN}Command {i}: {cmd}{Style.RESET_ALL}")
+        expl = explanations[i - 1] if i - 1 < len(explanations) else ""
+        print(f"{Fore.CYAN}Command {i}/{len(commands)}: {cmd}{Style.RESET_ALL}")
         print(f"{Fore.GREEN}Explanation: {expl}{Style.RESET_ALL}")
 
-        if not allow_all:
-            confirm_command = input(f"Do you want to execute command {i}? (yes/no): ").strip().lower()
-            if not confirm_command.startswith('yes'):
+        if not all_confirmed:
+            confirm_command = input(f"Do you want to execute command {i}? (yes/no/all): ").strip().lower()
+            if confirm_command == 'all':
+                all_confirmed = True
+                print(f"{Fore.GREEN}Executing command {i} and all subsequent commands...{Style.RESET_ALL}")
+            elif confirm_command.startswith('yes'):
+                pass  # Proceed with execution
+            else:
                 print(f"{Fore.YELLOW}Skipping command {i}: {cmd}{Style.RESET_ALL}")
                 continue
 
         try:
-            # Run the command and capture the output
-            result = subprocess.run(cmd, shell=True, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if quiet_commands:
+                # Suppress output by redirecting to DEVNULL
+                result = subprocess.run(
+                    cmd, shell=True, check=True,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
+            else:
+                # Execute the command and allow output to be displayed
+                result = subprocess.run(cmd, shell=True, check=True)
             logger.info(f"Executed command: {cmd}")
             executed_commands.append(cmd)  # Append to executed commands list
-            # Print the output to the console
-            if result.stdout:
-                print(result.stdout)
-            if result.stderr:
-                print(f"{Fore.RED}{result.stderr}{Style.RESET_ALL}")
         except subprocess.CalledProcessError as e:
             print(f"{Fore.RED}Error executing command {i}: {cmd}{Style.RESET_ALL}")
-            if e.stderr:
-                print(f"{Fore.RED}{e.stderr}{Style.RESET_ALL}")
-                error_message = e.stderr.strip()
-            else:
-                error_message = str(e)
+            print(f"{Fore.RED}{e}{Style.RESET_ALL}")
+            error_message = str(e)
             success = False
             break
 
-    # Log executed commands if any were run
-    if executed_commands:
-        try:
-            # Retrieve system info for rollback generation
-            system_info = gather_system_info()
-            rollback_commands = get_inverse_commands(executed_commands, logger, system_info, debug=debug)
-            rollback_log = {
-                'executed_commands': executed_commands,
-                'rollback_commands': [{'command': cmd} for cmd in rollback_commands]
-            }
-            log_path = logger.logger.handlers[0].baseFilename
-            with open(log_path, 'a') as log_file:
-                log_file.write(json.dumps(rollback_log) + '\n')
-            if debug:
-                print(f"{Fore.GREEN}Successfully logged executed commands and rollback commands.{Style.RESET_ALL}")
-        except Exception as log_error:
-            print(f"{Fore.RED}Failed to log executed commands: {log_error}{Style.RESET_ALL}")
+    # Optionally log executed commands (if needed)
+    # You can add code here to log the executed commands if required
 
     return success, error_message
 
@@ -816,6 +838,48 @@ def generate_readable_report(report_dict):
             value = ', '.join(value)
         report_lines.append(f"{key}: {value}")
     return "\n".join(report_lines)
+
+def display_formatted_report(report_text):
+    """
+    Formats and displays the report with centered headers and footers,
+    word-wrapped text, and color styling.
+
+    Args:
+        report_text (str): The report content to display.
+
+    Returns:
+        None
+    """
+    # Get terminal width
+    terminal_size = shutil.get_terminal_size((80, 20))
+    terminal_width = terminal_size.columns
+
+    # Calculate wrap width (80% of terminal width)
+    wrap_width = int(terminal_width * 0.8)
+
+    # Centered header and footer text
+    header_footer_text = '--------ANSWER--------'
+    footer_text = '-----------END---------'
+
+    # Center the header and footer
+    header = header_footer_text.center(terminal_width)
+    footer = footer_text.center(terminal_width)
+
+    # Apply bold white styling to header and footer
+    styled_header = f"{Style.BRIGHT}{Fore.WHITE}{header}{Style.RESET_ALL}"
+    styled_footer = f"{Style.BRIGHT}{Fore.WHITE}{footer}{Style.RESET_ALL}"
+
+    # Wrap the report text
+    wrapped_report = textwrap.fill(report_text, width=wrap_width)
+
+    # Apply green color to the report text
+    styled_report = f"{Fore.GREEN}{wrapped_report}{Style.RESET_ALL}"
+
+    # Print the formatted report
+    print(f"\n{styled_header}\n")
+    print(styled_report.center(terminal_width))
+    print(f"\n{styled_footer}\n")
+
 
 def generate_report(criteria, logger, debug=False):
     """
@@ -1251,12 +1315,14 @@ def main():
     debug = args.debug
 
     try:
-        # Handle the --install option
+        # Handle the --setup option
         if args.setup:
             print("Setting up the 'ganesha' command...")
             setup_ganesha_command()
             print("Setup complete. You can now run 'ganesha' from any command prompt.")
             return
+
+        # Handle the --install option
         if args.install:
             try:
                 install_dependencies()
@@ -1266,78 +1332,103 @@ def main():
                 logger.error(f"Dependency installation failed: {e}")
             return
 
-        # Proceed only if a task is provided or in interactive mode
-        if not args.task and not args.interactive:
+        # Process other flags and run appropriate functions based on parsed args
+        if args.summary:
+            logger.info("Summarizing last run.")
+            summarize_last_run(LOG_DIR_PATH, logger)
+            return
+
+        if args.rollback is not None:
+            session_ids = args.rollback if args.rollback else ['last']
+            logger.info(f"Rolling back sessions: {session_ids}")
+            rollback_sessions(
+                session_ids,
+                LOG_DIR_PATH,
+                logger,
+                allow_all=args.A,  # Pass the allow_all flag based on --A argument
+                debug=debug
+            )
+            return
+
+        if args.report:
+            criteria = args.report
+            logger.info(f"Generating report based on criteria: {criteria}")
+            generate_report(criteria, logger, debug=debug)
+            return
+
+        if args.interactive:
+            logger.info("Launching interactive menu.")
+            interactive_menu(debug=debug)
+            return
+
+        # Proceed only if a task is provided
+        if not args.task:
             print("Error: No task provided. Please provide a task or use --interactive.")
             parser.print_help()
             logger.error("No task provided and not in interactive mode.")
             sys.exit(1)
 
-        # Convert task list into a single string (command)
-        initial_task = ' '.join(args.task) if args.task else None
-
-        # Process other flags and run appropriate functions based on parsed args
-        if args.summary:
-            logger.info("Summarizing last run.")
-            summarize_last_run(LOG_DIR_PATH, logger)
-
-        elif args.rollback is not None:
-            session_ids = args.rollback if args.rollback else ['last']
-            logger.info(f"Rolling back sessions: {session_ids}")
-            rollback_sessions(session_ids, LOG_DIR_PATH, logger, debug=debug)
-
-        elif args.report:
-            criteria = args.report
-            logger.info(f"Generating report based on criteria: {criteria}")
-            generate_report(criteria, logger, debug=debug)
-
-        elif args.interactive:
-            logger.info("Launching interactive menu.")
-            interactive_menu(debug=debug)
-
-        elif initial_task:
-            # Run the task specified in plain English
-            logger.info(f"Executing task: {initial_task}")
-            conversation_history = [{"role": "user", "content": initial_task}]
-            commands = get_initial_commands(initial_task, logger, conversation_history=conversation_history, debug=debug)
+        # --- Begin Task Processing ---
+        # Join the task arguments into a single string
+        task = ' '.join(args.task).strip()
+        if task:
+            original_prompt = task
+            system_info = gather_system_info()
+            conversation_history = [{"role": "user", "content": task}]
+            commands = get_initial_commands(original_prompt, logger, conversation_history=conversation_history, debug=debug)
             if commands:
-                explanations = [cmd.get('explanation', "No explanation provided.") if isinstance(cmd, dict) else "No explanation provided." for cmd in commands]
-                command_texts = [cmd.get('command') if isinstance(cmd, dict) else cmd for cmd in commands]
                 while True:
-                    # Display proposed commands
-                    total_commands = len(command_texts)
+                    # Display all commands as a batch with explanations
+                    total_commands = len(commands)
                     print(f"\nYou have {total_commands} command(s) to execute:")
-                    for idx, cmd_text in enumerate(command_texts, 1):
-                        explanation = explanations[idx-1]
-                        print(f"{Fore.CYAN}Command {idx}: {cmd_text}{Style.RESET_ALL}")
-                        print(f"{Fore.GREEN}Explanation: {explanation}{Style.RESET_ALL}\n")
+                    for idx, cmd in enumerate(commands, 1):
+                        explanation = "No explanation provided."  # Default explanation
+                        if isinstance(cmd, dict):
+                            cmd_text = cmd.get('command', '')
+                            explanation = cmd.get('explanation', "No explanation provided.")
+                        else:
+                            cmd_text = cmd
+                        print(f"{Fore.CYAN}Command {idx} of {total_commands}: {cmd_text}{Style.RESET_ALL}")
+                        print(f"{Fore.GREEN}Explanation: {explanation}{Style.RESET_ALL}")
+                    print()
 
-                    confirm = input("Would you like to run these commands / scripts now? Yes / No / Reply to GPT: ").strip().lower()
+                    # Determine whether to automatically approve commands
+                    if args.A:
+                        confirm = 'yes'
+                        allow_all = True
+                    else:
+                        confirm = input("Would you like to run these commands? Yes / No / Reply to GPT: ").strip().lower()
+                        allow_all = False  # Default
+
                     if confirm == 'yes':
+                        allow_all = True  # Set allow_all to True, so execute_commands won't prompt per command
+                        command_texts = [cmd['command'] if isinstance(cmd, dict) else cmd for cmd in commands]
+                        explanations = [cmd.get('explanation', "No explanation provided.") if isinstance(cmd, dict) else "No explanation provided." for cmd in commands]
                         execute_success, error_message = execute_commands(
                             command_texts,
                             explanations,
                             logger,
-                            allow_all=True,  # Set to True to avoid per-command prompts
-                            quiet_commands=not debug,
+                            allow_all=allow_all,
+                            quiet_commands=False,
                             debug=debug
                         )
-                        break
+                        if execute_success:
+                            print(f"{Fore.GREEN}Commands executed successfully.{Style.RESET_ALL}")
+                        else:
+                            print(f"{Fore.RED}Error executing commands: {error_message}{Style.RESET_ALL}")
+                        break  # Exit after execution
                     elif confirm == 'no':
                         print(f"{Fore.YELLOW}Skipping execution of commands.{Style.RESET_ALL}")
                         break
                     else:
-                        # Interpret any other input as feedback to GPT
-                        user_feedback = confirm
-                        system_info = gather_system_info()
+                        user_feedback = confirm  # Treat input as feedback to GPT
                         conversation_history.append({"role": "user", "content": user_feedback})
-                        new_response = handle_feedback(initial_task, user_feedback, system_info, conversation_history, logger, debug=debug)
+                        new_response = handle_feedback(original_prompt, user_feedback, system_info, conversation_history, logger, debug=debug)
                         if new_response:
                             if 'commands' in new_response:
                                 commands = new_response['commands']
-                                explanations = [cmd.get('explanation', "No explanation provided.") if isinstance(cmd, dict) else "No explanation provided." for cmd in commands]
-                                command_texts = [cmd.get('command') if isinstance(cmd, dict) else cmd for cmd in commands]
-                                continue  # Loop back to display new commands
+                                # Loop back to display the new commands
+                                continue
                             else:
                                 print(f"{Fore.RED}GPT-4o-mini did not provide new commands. Exiting task execution.{Style.RESET_ALL}")
                                 break
@@ -1345,16 +1436,14 @@ def main():
                             print(f"{Fore.RED}Failed to get a new response from GPT-4o-mini. Exiting task execution.{Style.RESET_ALL}")
                             break
             else:
-                print("No commands generated for the provided task.")
-                logger.error("Failed to generate commands for the provided task.")
-
+                print(f"{Fore.RED}No commands to execute based on the provided task.{Style.RESET_ALL}")
         else:
-            print("Invalid command usage.")
-            parser.print_help()
-            logger.error("Invalid command usage, no matching option.")
+            print(f"{Fore.RED}No task provided.{Style.RESET_ALL}")
+
     except Exception as e:
         logger.error(f"Unhandled exception in main: {e}")
         print(f"Error encountered: {e}")
+
 # ------------------------------ Entry Point ------------------------------
 
 if __name__ == "__main__":
