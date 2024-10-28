@@ -1,3 +1,10 @@
+<<<<<<< HEAD
+=======
+@ -1,2 +1,150 @@
+# ganesha-ai
+ AI Powered Linux System Administration
+>>>>>>> 9923c5b9c567e1c943d82eece7d28884aae8871e
+
 ---
 
 # Ganesha
@@ -145,3 +152,9 @@ Ganesha simplifies a wide variety of tasks, empowering users with efficient and 
 - **"Display my system's IP address."**
 - **"Install a software package using apt."**
 - **"Change file permissions to make 'script.sh' executable."**
+
+<<<<<<< HEAD
+---
+=======
+---
+>>>>>>> 9923c5b9c567e1c943d82eece7d28884aae8871e
