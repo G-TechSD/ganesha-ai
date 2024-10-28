@@ -1,6 +1,9 @@
 # Ganesha
 **The First Cross-Platform AI-Powered System Administration Tool**
+
+---
 WARNING - EXPERIMENTAL - CURRENTLY IN BETA
+---
 
 ---
 
