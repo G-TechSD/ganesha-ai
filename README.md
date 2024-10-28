@@ -28,10 +28,6 @@ ganesha [options] [plain English task request]
   Installs all required dependencies, then adds "ganesha" command to the system
   *Example*: `ganesha --setup"`
   
-- **`--execute [task]`**  
-  Executes a specified task request, interpreting it from natural language into precise system commands.  
-  *Example*: `ganesha --execute "Install Docker and set it to start automatically at boot"`
-
 - **`--rollback [session_id | last]`**  
   Reverts changes made in the most recent session or a specified session by session ID. Use `last` to roll back the latest session.  
   *Example*: `ganesha --rollback last`
