@@ -5,7 +5,7 @@
 WARNING - EXPERIMENTAL - CURRENTLY IN BETA
 ---
 
----
+
 
 ## Installation
 **The following command will install all dependencies and make the "ganesha" command available**
