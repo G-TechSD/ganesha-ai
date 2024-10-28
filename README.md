@@ -83,7 +83,7 @@ python ganesha.py --setup
 - **Context-Aware Rollbacks**: Tailors rollback actions based on the platform, restoring configurations or unmuting sound as necessary.
 
 #### Usage Example
-1. **Execution**: `ganesha --execute "Mute system volume"`
+1. **Execution**: `ganesha "Mute system volume" --A`
 2. **Rollback**: `ganesha --rollback last` – automatically restores the prior settings or installation.
 
 ---
