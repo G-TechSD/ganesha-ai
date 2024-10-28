@@ -25,6 +25,13 @@ OPENAI_API_KEY = "YOUR KEY HERE"
 ```shell
 python ganesha.py --setup
 ```
+Unfortunately this may not work, and you might need to install the modules like so:
+```shell
+pip3 install psutil
+pip3 install setuptools
+pip3 install openai==0.28
+pip3 install colorama
+```
 
 ### Key Features
 
