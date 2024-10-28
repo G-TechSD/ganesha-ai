@@ -6,8 +6,6 @@ WARNING - EXPERIMENTAL - CURRENTLY IN BETA
 ---
 
 ### Overview
-
-**Elevator Pitch:**  
 Ganesha, the first AI-powered tool of its kind, empowers system administrators across Linux, Mac, and Windows with intuitive, plain English task requests. Simply describe your desired actions, and Ganesha—backed by GPT-4—translates them into commands, scripts, or even rollbacks, simplifying system management and troubleshooting.
 
 ---
