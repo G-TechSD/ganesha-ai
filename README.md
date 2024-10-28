@@ -126,7 +126,7 @@ ganesha [options] [plain English task request]
 
 - **`--setup`**  
   Installs all required dependencies, then adds "ganesha" command to the system
-  *Example*: `ganesha --setup"`
+  *Example*: `python ganesha.py --setup"`
   
 - **`--rollback [session_id | last]`**  
   Reverts changes made in the most recent session or a specified session by session ID. Use `last` to roll back the latest session.  
