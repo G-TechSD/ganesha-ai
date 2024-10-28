@@ -1,11 +1,6 @@
-# ganesha-ai
- AI Powered Linux System Administration
-
-
----
-
 # Ganesha
 **The First Cross-Platform AI-Powered System Administration Tool**
+**WARNING - EXPERIMENTAL - CURRENTLY IN BETA**
 
 ---
 
