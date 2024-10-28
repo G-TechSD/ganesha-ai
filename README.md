@@ -6,7 +6,7 @@ WARNING - EXPERIMENTAL - CURRENTLY IN BETA
 ---
 
 ### Overview
-Ganesha, the first AI-powered tool of its kind, empowers system administrators across Linux, Mac, and Windows with intuitive, plain English task requests in the terminal. Simply describe your desired actions, and Ganesha—backed by GPT-4o-mini translates them into commands, scripts, or even rollbacks, simplifying system management and troubleshooting.
+Ganesha, the first advanced cross-platform AI-powered tool of its kind, empowers system administrators across Linux, Mac, and Windows with intuitive, plain English task requests in the terminal. Simply describe your desired actions, and Ganesha—backed by GPT-4o-mini translates them into commands, scripts, or even rollbacks, simplifying system management and troubleshooting.
 
 ---
 
