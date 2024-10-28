@@ -150,8 +150,3 @@ Ganesha simplifies a wide variety of tasks, empowering users with efficient and 
 - **"Install a software package using apt."**
 - **"Change file permissions to make 'script.sh' executable."**
 
-
----
-
----
-
