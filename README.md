@@ -12,9 +12,7 @@ Ganesha, the first AI-powered tool of its kind, empowers system administrators a
 
 ## YOU NEED AN OPENAI API KEY TO USE THIS VERSION OF GANESHA
 **visit platform.openai.com and obtain an API key with access to gpt-4o-mini**
-```shell
-OPENAI_API_KEY = "YOUR KEY HERE"
-```
+
 
 ## Get Started: Add your OpenAI API key to ganesha.py
 **Open ganesha.py and locate #OPENAI_API_KEY = "", uncomment and paste your key**
