@@ -27,10 +27,7 @@ python ganesha.py --setup
 ```
 Unfortunately this may not work, and you might need to install the modules like so:
 ```shell
-pip3 install psutil
-pip3 install setuptools
-pip3 install openai==0.28
-pip3 install colorama
+pip3 install openai==0.28 colorama psutil requests zipfile
 ```
 
 ### Key Features
