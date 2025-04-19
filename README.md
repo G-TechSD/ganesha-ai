@@ -2,6 +2,7 @@
 **The First Cross-Platform AI-Powered System Administration Tool**
 
 OPENAI CODEX CLI IS ALMOST EXACTLY THIS - but they developed it about 6 months later
+
 https://www.youtube.com/watch?v=FUq9qRwrDrI
 
 ---
