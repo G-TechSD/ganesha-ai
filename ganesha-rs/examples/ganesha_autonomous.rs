@@ -6,15 +6,14 @@
 //! Usage: DISPLAY=:1 cargo run --example ganesha_autonomous --features computer-use -- "create a smiley face in blender"
 
 use std::env;
-use std::process::Command;
+use std::process::{Command, Child, Stdio};
 use std::time::Duration;
 use std::thread;
-use std::io::Write;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
 // Configuration
 const VISION_ENDPOINT: &str = "http://192.168.27.182:1234/v1";
-const VISION_MODEL: &str = "qwen/qwen3-vl-8b";  // Actual vision model!
+const VISION_MODEL: &str = "mistralai/ministral-3-3b";  // Fast vision model
 const PLANNER_ENDPOINT: &str = "http://192.168.245.155:1234/v1";
 const PLANNER_MODEL: &str = "openai/gpt-oss-20b";
 
@@ -61,6 +60,9 @@ struct GaneshaAgent {
     history: Vec<String>,
     max_iterations: usize,
     iteration: usize,
+    app_knowledge: Option<String>,  // Learned at runtime, NOT hardcoded
+    overlay_process: Option<Child>,
+    clicked_viewport: bool,  // Track if we've clicked in viewport for Blender
 }
 
 impl GaneshaAgent {
@@ -70,11 +72,238 @@ impl GaneshaAgent {
             history: Vec::new(),
             max_iterations: 50,
             iteration: 0,
+            app_knowledge: None,
+            overlay_process: None,
+            clicked_viewport: false,
         }
+    }
+
+    /// Start the red frame overlay to indicate Ganesha is active
+    fn start_overlay(&mut self) -> bool {
+        // Use tkinter which is more commonly available than PyGObject
+        let overlay_script = r#"
+import tkinter as tk
+import sys
+
+class RedFrameOverlay:
+    def __init__(self):
+        self.root = tk.Tk()
+        self.root.title("GANESHA ACTIVE")
+
+        # Make fullscreen, always on top
+        self.root.attributes('-fullscreen', True)
+        self.root.attributes('-topmost', True)
+        self.root.attributes('-alpha', 1.0)  # Full opacity
+
+        # Try to make click-through (X11 specific)
+        try:
+            self.root.wm_attributes('-type', 'dock')
+        except:
+            pass
+
+        # Get screen dimensions
+        width = self.root.winfo_screenwidth()
+        height = self.root.winfo_screenheight()
+
+        # Create canvas
+        self.canvas = tk.Canvas(self.root, width=width, height=height,
+                                bg='black', highlightthickness=0)
+        self.canvas.pack()
+
+        # Draw red frame (thick border)
+        thickness = 12
+        # Top
+        self.canvas.create_rectangle(0, 0, width, thickness, fill='red', outline='red')
+        # Bottom
+        self.canvas.create_rectangle(0, height-thickness, width, height, fill='red', outline='red')
+        # Left
+        self.canvas.create_rectangle(0, 0, thickness, height, fill='red', outline='red')
+        # Right
+        self.canvas.create_rectangle(width-thickness, 0, width, height, fill='red', outline='red')
+
+        # Make center transparent/black (click-through area marker)
+        self.canvas.create_rectangle(thickness, thickness, width-thickness, height-thickness,
+                                     fill='', outline='')
+
+        # Actually we need the center to be invisible - use overrideredirect
+        self.root.overrideredirect(True)
+
+        # Create only the border frame windows instead
+        self.root.destroy()
+        self.create_border_windows(width, height, thickness)
+
+    def create_border_windows(self, width, height, thickness):
+        # Create 4 separate windows for the borders
+        self.windows = []
+        borders = [
+            (0, 0, width, thickness),  # Top
+            (0, height-thickness, width, thickness),  # Bottom
+            (0, 0, thickness, height),  # Left
+            (width-thickness, 0, thickness, height),  # Right
+        ]
+
+        for x, y, w, h in borders:
+            win = tk.Tk()
+            win.overrideredirect(True)
+            win.attributes('-topmost', True)
+            win.geometry(f'{w}x{h}+{x}+{y}')
+            win.configure(bg='red')
+
+            # Make it stay on top
+            try:
+                win.wm_attributes('-type', 'dock')
+            except:
+                pass
+
+            self.windows.append(win)
+
+        # Run event loop
+        if self.windows:
+            self.windows[0].mainloop()
+
+overlay = RedFrameOverlay()
+"#;
+        let script_path = "/tmp/ganesha_overlay.py";
+        if std::fs::write(script_path, overlay_script).is_err() {
+            println!("❌ Failed to write overlay script");
+            return false;
+        }
+
+        let display = env::var("DISPLAY").unwrap_or_else(|_| ":1".to_string());
+        match Command::new("python3")
+            .arg(script_path)
+            .env("DISPLAY", &display)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Ok(child) => {
+                self.overlay_process = Some(child);
+                println!("🔴 Red frame overlay started");
+                thread::sleep(Duration::from_millis(500));  // Give it time to appear
+                true
+            }
+            Err(e) => {
+                println!("❌ Failed to start overlay: {}", e);
+                false
+            }
+        }
+    }
+
+    /// Stop the red frame overlay
+    fn stop_overlay(&mut self) {
+        if let Some(mut proc) = self.overlay_process.take() {
+            let _ = proc.kill();
+            let _ = proc.wait();
+            println!("⚪ Red frame overlay stopped");
+        }
+        let _ = std::fs::remove_file("/tmp/ganesha_overlay.py");
+    }
+
+    /// Detect app from task and fetch docs to learn about it
+    fn learn_about_app(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        // Extract app name from task (simple heuristic)
+        let task_lower = self.task.to_lowercase();
+        let app_name = if task_lower.contains("blender") {
+            Some("blender")
+        } else if task_lower.contains("gimp") {
+            Some("gimp")
+        } else if task_lower.contains("firefox") {
+            Some("firefox")
+        } else if task_lower.contains("libreoffice") || task_lower.contains("calc") || task_lower.contains("writer") {
+            Some("libreoffice")
+        } else {
+            None
+        };
+
+        if let Some(app) = app_name {
+            println!("📚 GANESHA: I should learn about {} before starting...", app);
+            println!("   Searching for official documentation and tutorials...\n");
+
+            // Use the planner LLM to search and summarize docs
+            let search_prompt = format!(
+                r#"I need to learn how to use {} for GUI automation. Search your knowledge for:
+1. Essential keyboard shortcuts (select all, delete, add objects, transform)
+2. Common menu locations and UI patterns
+3. Step-by-step workflows for basic tasks
+
+Provide a concise reference I can use. Focus on PRACTICAL shortcuts and clicks, not theory.
+Format as a simple list I can reference while working."#,
+                app
+            );
+
+            let knowledge = self.query_planner(&search_prompt)?;
+
+            println!("📖 GANESHA: Learned about {}:\n", app);
+            for line in knowledge.lines().take(20) {
+                println!("   {}", line);
+            }
+            if knowledge.lines().count() > 20 {
+                println!("   ... (truncated)");
+            }
+            println!();
+
+            self.app_knowledge = Some(knowledge);
+        }
+
+        Ok(())
+    }
+
+    fn query_planner(&self, prompt: &str) -> Result<String, Box<dyn std::error::Error>> {
+        let request_body = serde_json::json!({
+            "model": PLANNER_MODEL,
+            "messages": [
+                {"role": "user", "content": prompt}
+            ],
+            "max_tokens": 1000,
+            "temperature": 0.3
+        });
+
+        let client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(60))
+            .build()?;
+
+        let response = client
+            .post(format!("{}/chat/completions", PLANNER_ENDPOINT))
+            .header("Content-Type", "application/json")
+            .json(&request_body)
+            .send()?;
+
+        let json: serde_json::Value = response.json()?;
+        let content = json["choices"][0]["message"]["content"]
+            .as_str()
+            .unwrap_or("No response")
+            .to_string();
+
+        Ok(content)
     }
 
     fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         println!("🕉️ GANESHA: Beginning autonomous operation...\n");
+
+        // Start the red frame overlay to show Ganesha is active
+        // This is a SAFETY REQUIREMENT - must be visible before proceeding
+        if !self.start_overlay() {
+            println!("❌ SAFETY: Cannot start without visible red frame overlay!");
+            println!("   Please install python3-tk or ensure DISPLAY is set correctly.");
+            return Err("Red frame overlay is required for safe operation".into());
+        }
+
+        // Verify overlay is visible by capturing a test screenshot
+        println!("🔍 Verifying overlay visibility...");
+        thread::sleep(Duration::from_millis(300));
+        let test_path = "/tmp/ganesha_overlay_test.png";
+        let _ = Command::new("scrot")
+            .args(["-o", test_path])
+            .output();
+        println!("   📸 Test screenshot saved to {}", test_path);
+        println!("   ⚠️  VERIFY: Red frame should be visible around screen edges!");
+        thread::sleep(Duration::from_millis(200));
+
+        // FIRST: Learn about the app if needed (fetches docs at runtime)
+        if let Err(e) = self.learn_about_app() {
+            println!("   (Could not fetch app docs: {} - proceeding anyway)", e);
+        }
 
         loop {
             self.iteration += 1;
@@ -88,11 +317,12 @@ impl GaneshaAgent {
 
             // Step 1: See (capture screenshot)
             println!("👁️  SEEING...");
-            let screenshot_path = self.capture_screenshot()?;
+            let (screenshot_path, cursor_x, cursor_y) = self.capture_screenshot()?;
 
             // Step 2: Understand (send to vision model)
             println!("🔍 UNDERSTANDING...");
-            let screen_description = self.understand_screen(&screenshot_path)?;
+            println!("   📍 Cursor at: ({}, {})", cursor_x, cursor_y);
+            let screen_description = self.understand_screen(&screenshot_path, cursor_x, cursor_y)?;
             println!("   Vision says: {}", truncate(&screen_description, 200));
 
             // Step 3: Think (send to planner)
@@ -123,18 +353,70 @@ impl GaneshaAgent {
             thread::sleep(Duration::from_millis(500));
         }
 
+        // Stop the overlay when done
+        self.stop_overlay();
         Ok(())
     }
 
-    fn capture_screenshot(&self) -> Result<String, Box<dyn std::error::Error>> {
-        let path = format!("/tmp/ganesha_screen_{}.png", self.iteration);
-        Command::new("scrot")
-            .args(["-o", &path])
-            .output()?;
-        Ok(path)
+    fn get_cursor_position(&self) -> (i32, i32) {
+        let output = Command::new("xdotool")
+            .args(["getmouselocation", "--shell"])
+            .output()
+            .ok();
+
+        let mut x = 0i32;
+        let mut y = 0i32;
+        if let Some(output) = output {
+            let pos_str = String::from_utf8_lossy(&output.stdout);
+            for line in pos_str.lines() {
+                if line.starts_with("X=") {
+                    x = line[2..].parse().unwrap_or(0);
+                } else if line.starts_with("Y=") {
+                    y = line[2..].parse().unwrap_or(0);
+                }
+            }
+        }
+        (x, y)
     }
 
-    fn understand_screen(&self, screenshot_path: &str) -> Result<String, Box<dyn std::error::Error>> {
+    fn capture_screenshot(&self) -> Result<(String, i32, i32), Box<dyn std::error::Error>> {
+        // Get cursor position first
+        let (cursor_x, cursor_y) = self.get_cursor_position();
+
+        let path = format!("/tmp/ganesha_screen_{}.png", self.iteration);
+
+        // Capture with cursor visible (-p flag)
+        Command::new("scrot")
+            .args(["-p", "-o", &path])
+            .output()?;
+
+        // Draw a bright, large cursor indicator using ImageMagick
+        // This makes cursor position obvious to the vision model
+        let _ = Command::new("convert")
+            .args([
+                &path,
+                "-fill", "none",
+                "-stroke", "#FF00FF",  // Bright magenta
+                "-strokewidth", "4",
+                "-draw", &format!("circle {},{} {},{}", cursor_x, cursor_y, cursor_x + 30, cursor_y),
+                "-stroke", "#00FFFF",  // Cyan crosshair
+                "-strokewidth", "2",
+                "-draw", &format!("line {},{} {},{}", cursor_x - 40, cursor_y, cursor_x + 40, cursor_y),
+                "-draw", &format!("line {},{} {},{}", cursor_x, cursor_y - 40, cursor_x, cursor_y + 40),
+                "-pointsize", "20",
+                "-fill", "#FFFF00",  // Yellow text
+                "-stroke", "#000000",
+                "-strokewidth", "1",
+                "-annotate", &format!("+{}+{}", cursor_x + 35, cursor_y - 10),
+                &format!("CURSOR ({},{})", cursor_x, cursor_y),
+                &path,
+            ])
+            .output();
+
+        Ok((path, cursor_x, cursor_y))
+    }
+
+    fn understand_screen(&self, screenshot_path: &str, cursor_x: i32, cursor_y: i32) -> Result<String, Box<dyn std::error::Error>> {
         // Read and encode image
         let image_data = std::fs::read(screenshot_path)?;
         let base64_image = BASE64.encode(&image_data);
@@ -153,21 +435,25 @@ impl GaneshaAgent {
 
 TASK: {}
 
+CURSOR POSITION: The mouse cursor is currently at ({}, {}). Look for a magenta circle with cyan crosshair marking this location.
+
 Report EXACTLY what you see:
 1. What application is open? (or is it just desktop?)
 2. List clickable elements with ESTIMATED PIXEL COORDINATES (x, y from top-left):
    - Dock icons (usually left side, ~50px from left edge)
    - Buttons, menus, text fields
    - Any relevant items for the task
-3. Current state and what action would progress the task
+3. What is near or under the cursor at ({}, {})?
+4. Current state and what action would progress the task
 
 Example format:
 - Desktop visible, no apps open
 - Dock icons at x=30: Files (~y=200), Firefox (~y=250), Terminal (~y=300)
+- Cursor is over the File menu
 - To open Files, click at approximately (30, 200)
 
 Be specific about coordinates - estimate them based on screen layout. Screen is typically 1920x1080.",
-                                self.task
+                                self.task, cursor_x, cursor_y, cursor_x, cursor_y
                             )
                         },
                         {
@@ -210,19 +496,17 @@ Be specific about coordinates - estimate them based on screen layout. Screen is 
         };
 
         // Stuck detection - check if recent actions are repetitive
-        let stuck_warning = if self.history.len() >= 3 {
+        let repeated_shifta = self.history.iter().rev().take(2)
+            .all(|h| h.to_lowercase().contains("shift+a") || h.to_lowercase().contains("shift a"));
+
+        let stuck_warning = if repeated_shifta {
+            // Already pressed shift+a multiple times - menu should be open, navigate it
+            "\n\n🚨 MENU IS OPEN! You already pressed Shift+A. Now navigate:\n- Type 'uv' to search for UV Sphere\n- Or press Down arrow to navigate menu\n- Then press Return to select\nDO NOT press shift+a again!"
+        } else if self.history.len() >= 3 {
             let recent: Vec<_> = self.history.iter().rev().take(3).collect();
-            let all_clicks = recent.iter().all(|h| h.contains("CLICK") || h.contains("click"));
-            let all_same_spot = recent.windows(2).all(|w| {
-                // Check if clicking similar coordinates
-                w[0].split_whitespace().last() == w[1].split_whitespace().last()
-            });
-            if all_clicks {
-                if all_same_spot {
-                    "\n\n🚨 CRITICAL: You're STUCK clicking the same spot! You MUST try something completely different NOW:\n- Press KEY Escape to close any blocking windows\n- Press KEY Super to open Activities and search\n- If in Blender already, use shift+a for Add menu\nDO NOT click the same coordinates again!"
-                } else {
-                    "\n\n⚠️ WARNING: Multiple clicks without progress. Consider:\n- Use DOUBLE_CLICK to open items\n- Use keyboard shortcuts (Super, Escape, Tab)\n- Close blocking windows first"
-                }
+            let all_same = recent.windows(2).all(|w| w[0] == w[1]);
+            if all_same {
+                "\n\n🚨 STUCK: Repeating same action! Try something different."
             } else {
                 ""
             }
@@ -230,59 +514,51 @@ Be specific about coordinates - estimate them based on screen layout. Screen is 
             ""
         };
 
-        let prompt = format!(r#"You are Ganesha - the SMOOTH OPERATOR. You remove obstacles elegantly, not crudely.
+        // Include learned knowledge if available
+        let knowledge_section = if let Some(ref knowledge) = self.app_knowledge {
+            format!("\nAPP REFERENCE (I learned this at startup):\n{}\n", knowledge)
+        } else {
+            String::new()
+        };
 
-TASK: {}
+        // Truncate knowledge to avoid overwhelming the model
+        let short_knowledge = if let Some(ref k) = self.app_knowledge {
+            let truncated: String = k.chars().take(500).collect();
+            format!("\nREF: {}\n", truncated)
+        } else {
+            String::new()
+        };
 
-CURRENT SCREEN STATE:
+        let prompt = format!(r#"TASK: {}
+{}
+SCREEN: {}
+
+HISTORY: {}
 {}
 
-RECENT HISTORY:
-{}
-{}
+You control this computer with keyboard and mouse. Available actions:
+- KEY shift+a - Opens Add menu in Blender (ESSENTIAL - use this to add objects!)
+- KEY Tab - Toggle Edit/Object mode
+- KEY g - Move selected object
+- KEY s - Scale selected object
+- KEY x - Delete (then press Return to confirm)
+- KEY Return - Confirm dialogs
+- CLICK x y - Click at coordinates
+- TYPE text - Type into text fields
+- TASK_COMPLETE - When done
 
-BE A SMOOTH OPERATOR:
-- ADAPT when something doesn't work - don't repeat the same action!
-- Use KEYBOARD SHORTCUTS - they're more reliable than clicking
-- If an unwanted window opens, press Escape or close it first
-- Think strategically about the best path forward
+IMPORTANT: In Blender, use KEY actions with shortcuts! TYPE only works in text fields.
+LOOK at the screen state and choose the NEXT appropriate action.
+If a menu is open, click on the menu item or use arrow keys to navigate.
+If the task is done, use TASK_COMPLETE.
 
-FORMAT:
-ACTION: <type>
-PARAMS: <parameters>
-
-ACTIONS:
-- CLICK x y - Single click (buttons, menus)
-- DOUBLE_CLICK x y - Open folders/files/apps
-- TYPE text - Type text (in focused field/terminal)
-- KEY key - Press key: Escape, Return, Tab, shift+a, ctrl+s, Super (opens Activities)
-- COMBO keys - Press multiple keys in sequence with pauses (e.g., COMBO X Return) - VERY USEFUL!
-- SCROLL up/down amount - Scroll
-- WAIT ms - Wait
-- TASK_COMPLETE - Done!
-
-KEYBOARD SHORTCUTS ARE MORE RELIABLE THAN CLICKING!
-- Escape - Close menus/dialogs
-- Return - Confirm dialogs (ALWAYS use this to confirm, not clicking!)
-- Tab - Navigate between fields
-- Up/Down/Left/Right - Navigate menus
-
-BLENDER KEYBOARD WORKFLOW (use COMBO for sequences!):
-1. To delete object: COMBO X Return (deletes selected object instantly!)
-2. To add sphere: shift+a to open menu, then CLICK on Mesh, then UV Sphere
-3. To scale: KEY s, move mouse, CLICK to confirm
-4. To move: KEY g, move mouse, CLICK to confirm
-5. To rotate: KEY r, move mouse, CLICK to confirm
-
-USE COMBO for reliable key sequences - it presses keys with pauses between them!
-
-⚠️ CRITICAL: Output EXACTLY ONE action. Not two, not zero - exactly ONE.
-Example response:
-ACTION: CLICK
-PARAMS: 500 300
-
-Your single action:"#,
-            self.task, screen_description, history_context, stuck_warning
+Reply with ONE action in format:
+ACTION: <action_type>
+PARAMS: <parameters>"#,
+            self.task, short_knowledge,
+            screen_description.chars().take(300).collect::<String>(),
+            history_context.chars().take(200).collect::<String>(),
+            stuck_warning
         );
 
         let request_body = serde_json::json!({
@@ -297,8 +573,8 @@ Your single action:"#,
                     "content": prompt
                 }
             ],
-            "max_tokens": 100,
-            "temperature": 0.3
+            "max_tokens": 60,
+            "temperature": 0.2
         });
 
         let client = reqwest::blocking::Client::new();
@@ -310,15 +586,76 @@ Your single action:"#,
             .send()?;
 
         let json: serde_json::Value = response.json()?;
-        let content = json["choices"][0]["message"]["content"]
-            .as_str()
-            .unwrap_or("WAIT 1000")
-            .to_string();
+        let message = &json["choices"][0]["message"];
 
-        Ok(content)
+        // gpt-oss-20b puts thinking in "reasoning" field, action in "content"
+        // If content is empty, extract action hints from reasoning
+        let content = message["content"].as_str().unwrap_or("").trim();
+        let reasoning = message["reasoning"].as_str().unwrap_or("");
+
+        // Check action history for sequencing
+        let recent_actions: Vec<_> = self.history.iter().rev().take(5).collect();
+        let is_blender_task = self.task.to_lowercase().contains("blender");
+        let ever_clicked_viewport = self.clicked_viewport;
+        let ever_pressed_shifta = self.history.iter().any(|h| h.to_lowercase().contains("shift+a"));
+        let repeated_shifta = recent_actions.len() >= 2 &&
+            recent_actions.iter().take(2).all(|h| h.to_lowercase().contains("shift+a"));
+        // Check if last action was TYPE with "uv" (history stores action plan)
+        let already_typed_uv = recent_actions.first()
+            .map(|h| h.to_lowercase().contains("type") && h.to_lowercase().contains("uv"))
+            .unwrap_or(false);
+
+        let result = if already_typed_uv {
+            // Already typed "uv", now press Return to confirm selection
+            "ACTION: KEY\nPARAMS: Return".to_string()
+        } else if is_blender_task && !ever_clicked_viewport {
+            // FIRST action in Blender: click in the 3D viewport to ensure focus
+            // Viewport is roughly center of screen (960, 500 for 1920x1080)
+            "ACTION: CLICK\nPARAMS: 960,500".to_string()
+        } else if is_blender_task && !ever_pressed_shifta {
+            // SECOND action in Blender: open Add menu
+            "ACTION: KEY\nPARAMS: shift+a".to_string()
+        } else if repeated_shifta {
+            // Force different action - type to search in menu
+            "ACTION: TYPE\nPARAMS: uv".to_string()
+        } else if !content.is_empty() && content.to_uppercase().contains("ACTION") {
+            // Content has action - use it
+            content.to_string()
+        } else {
+            // Extract action from reasoning field
+            let r_upper = reasoning.to_uppercase();
+            if r_upper.contains("SHIFT+A") || r_upper.contains("SHIFT + A") || r_upper.contains("ADD MENU") {
+                "ACTION: KEY\nPARAMS: shift+a".to_string()
+            } else if r_upper.contains("CLICK") && r_upper.contains("MESH") {
+                // Wants to click on Mesh in menu - use arrow keys instead
+                "ACTION: KEY\nPARAMS: Down".to_string()
+            } else if (r_upper.contains("UV SPHERE") || r_upper.contains("UVSPHERE")) && ever_pressed_shifta {
+                // Only type to search if menu is already open (shift+a was pressed)
+                "ACTION: TYPE\nPARAMS: uv".to_string()
+            } else if r_upper.contains("ENTER") || r_upper.contains("CONFIRM") || r_upper.contains("SELECT") {
+                "ACTION: KEY\nPARAMS: Return".to_string()
+            } else if r_upper.contains("TAB") || r_upper.contains("EDIT MODE") {
+                "ACTION: KEY\nPARAMS: Tab".to_string()
+            } else if r_upper.contains("ESCAPE") || r_upper.contains("CANCEL") {
+                "ACTION: KEY\nPARAMS: Escape".to_string()
+            } else if r_upper.contains("DELETE") || r_upper.contains("REMOVE") {
+                "ACTION: KEY\nPARAMS: x".to_string()
+            } else if r_upper.contains("MOVE") || r_upper.contains("GRAB") {
+                "ACTION: KEY\nPARAMS: g".to_string()
+            } else if r_upper.contains("SCALE") {
+                "ACTION: KEY\nPARAMS: s".to_string()
+            } else if r_upper.contains("EXTRUDE") {
+                "ACTION: KEY\nPARAMS: e".to_string()
+            } else {
+                // Default: wait and observe
+                "ACTION: WAIT\nPARAMS: 500".to_string()
+            }
+        };
+
+        Ok(result)
     }
 
-    fn execute_action(&self, action: &str) -> Result<(), Box<dyn std::error::Error>> {
+    fn execute_action(&mut self, action: &str) -> Result<(), Box<dyn std::error::Error>> {
         let action_upper = action.to_uppercase();
 
         // Parse multi-line ACTION/PARAMS format or single-line format
@@ -327,21 +664,36 @@ Your single action:"#,
 
         let mut action_type = String::new();
         let mut params = String::new();
+        let mut found_action = false;
 
         for line in action.lines() {
             let line_trimmed = line.trim();
             let line_upper = line_trimmed.to_uppercase();
 
             if line_upper.starts_with("ACTION:") {
-                action_type = line_upper.replace("ACTION:", "").trim().to_string();
-            } else if line_upper.starts_with("PARAMS:") {
+                if found_action {
+                    // Already have an action, stop here (ignore subsequent actions)
+                    break;
+                }
+                let action_content = line_upper.replace("ACTION:", "").trim().to_string();
+                // Handle "ACTION: CLICK 500 300" format (action + params on same line)
+                let parts: Vec<&str> = action_content.split_whitespace().collect();
+                if !parts.is_empty() {
+                    action_type = parts[0].to_string();
+                    if parts.len() > 1 {
+                        params = parts[1..].join(" ");
+                    }
+                }
+                found_action = true;
+            } else if line_upper.starts_with("PARAMS:") && found_action && params.is_empty() {
                 params = line_trimmed.replace("PARAMS:", "").replace("params:", "").trim().to_string();
-            } else if !line_trimmed.is_empty() && action_type.is_empty() {
+            } else if !line_trimmed.is_empty() && !found_action {
                 // Single-line format: "CLICK 50 300"
                 let parts: Vec<&str> = line_trimmed.split_whitespace().collect();
                 if !parts.is_empty() {
                     action_type = parts[0].to_uppercase();
                     params = parts[1..].join(" ");
+                    found_action = true;
                 }
             }
         }
@@ -357,10 +709,18 @@ Your single action:"#,
 
         match action_type.as_str() {
             "CLICK" => {
-                if param_parts.len() >= 2 {
-                    let x = param_parts[0].parse::<i32>().unwrap_or(500);
-                    let y = param_parts[1].parse::<i32>().unwrap_or(300);
+                // Handle both "960 500" and "960,500" formats
+                let coords: Vec<&str> = if params.contains(',') {
+                    params.split(',').collect()
+                } else {
+                    param_parts.clone()
+                };
+
+                if coords.len() >= 2 {
+                    let x = coords[0].trim().parse::<i32>().unwrap_or(500);
+                    let y = coords[1].trim().parse::<i32>().unwrap_or(300);
                     self.smooth_click(x, y)?;
+                    self.clicked_viewport = true;  // Mark that we've clicked in viewport
                     println!("   ✓ Clicked at ({}, {})", x, y);
                 } else {
                     println!("   ⚠ CLICK missing coordinates, params: '{}'", params);
@@ -376,20 +736,29 @@ Your single action:"#,
             }
             "KEY" => {
                 let key = if !params.is_empty() { &params } else { "Return" };
-                // For single printable characters, use 'type' (works better with apps like Blender)
-                // For special keys (Return, Escape, F3, ctrl+x), use 'key'
-                let is_special = key.len() > 1 || key.contains('+');
-                if is_special {
-                    Command::new("xdotool")
-                        .args(["key", key])
-                        .output()?;
-                    println!("   ✓ Pressed key: {}", key);
-                } else {
-                    // Single character - use type for better compatibility
+                let key_lower = key.to_lowercase();
+
+                // Special handling for Blender - use keydown/type/keyup for modifier combos
+                if key_lower == "shift+a" {
+                    // Blender needs this sequence for Add menu
+                    Command::new("xdotool").args(["keydown", "shift"]).output()?;
+                    thread::sleep(Duration::from_millis(50));
+                    Command::new("xdotool").args(["type", "a"]).output()?;
+                    thread::sleep(Duration::from_millis(50));
+                    Command::new("xdotool").args(["keyup", "shift"]).output()?;
+                    println!("   ✓ Pressed Shift+A (Blender Add menu)");
+                } else if key.len() == 1 && key.chars().next().unwrap().is_alphanumeric() {
+                    // Single character - use type for Blender compatibility
                     Command::new("xdotool")
                         .args(["type", key])
                         .output()?;
                     println!("   ✓ Typed key: {}", key);
+                } else {
+                    // Special keys (Return, Escape, Tab, etc.)
+                    Command::new("xdotool")
+                        .args(["key", key])
+                        .output()?;
+                    println!("   ✓ Pressed key: {}", key);
                 }
             }
             "MOVE" => {
@@ -504,6 +873,11 @@ fn truncate(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
         s.to_string()
     } else {
-        format!("{}...", &s[..max_len])
+        // Find the last valid char boundary before max_len
+        let mut end = max_len;
+        while end > 0 && !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}...", &s[..end])
     }
 }
