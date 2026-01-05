@@ -134,6 +134,7 @@ class RedFrameOverlay:
 
     def create_border_windows(self, width, height, thickness):
         # Create 4 separate windows for the borders
+        # IMPORTANT: Only ONE Tk() instance, rest are Toplevel()
         self.windows = []
         borders = [
             (0, 0, width, thickness),  # Top
@@ -142,8 +143,16 @@ class RedFrameOverlay:
             (width-thickness, 0, thickness, height),  # Right
         ]
 
-        for x, y, w, h in borders:
-            win = tk.Tk()
+        self.root = None
+        for i, (x, y, w, h) in enumerate(borders):
+            if i == 0:
+                # First window is the main Tk()
+                win = tk.Tk()
+                self.root = win
+            else:
+                # Others are Toplevel windows
+                win = tk.Toplevel(self.root)
+
             win.overrideredirect(True)
             win.attributes('-topmost', True)
             win.geometry(f'{w}x{h}+{x}+{y}')
@@ -157,9 +166,9 @@ class RedFrameOverlay:
 
             self.windows.append(win)
 
-        # Run event loop
-        if self.windows:
-            self.windows[0].mainloop()
+        # Run event loop on root
+        if self.root:
+            self.root.mainloop()
 
 overlay = RedFrameOverlay()
 "#;
@@ -374,7 +383,7 @@ Respond with a concise, practical reference for automating the GUI. Focus on sho
             println!("🔍 UNDERSTANDING...");
             println!("   📍 Cursor at: ({}, {})", cursor_x, cursor_y);
             let screen_description = self.understand_screen(&screenshot_path, cursor_x, cursor_y)?;
-            println!("   Vision says: {}", truncate(&screen_description, 200));
+            println!("   Vision says: {}", truncate(&screen_description, 500));
 
             // Step 3: Think (send to planner)
             println!("🧠 THINKING...");
@@ -486,25 +495,26 @@ Respond with a concise, practical reference for automating the GUI. Focus on sho
 
 TASK: {}
 
-CURSOR POSITION: The mouse cursor is currently at ({}, {}). Look for a magenta circle with cyan crosshair marking this location.
+CURSOR POSITION: ({}, {}) - marked with magenta circle and cyan crosshair.
 
-Report EXACTLY what you see:
-1. What application is open? (or is it just desktop?)
-2. List clickable elements with ESTIMATED PIXEL COORDINATES (x, y from top-left):
-   - Dock icons (usually left side, ~50px from left edge)
-   - Buttons, menus, text fields
-   - Any relevant items for the task
-3. What is near or under the cursor at ({}, {})?
-4. Current state and what action would progress the task
+⚠️ CRITICAL: Look for DESKTOP SHORTCUTS on the RIGHT SIDE of screen (x=1800-1870)!
 
-Example format:
-- Desktop visible, no apps open
-- Dock icons at x=30: Files (~y=200), Firefox (~y=250), Terminal (~y=300)
-- Cursor is over the File menu
-- To open Files, click at approximately (30, 200)
+1. What's on screen? (Desktop? Application? Dialog?)
 
-Be specific about coordinates - estimate them based on screen layout. Screen is typically 1920x1080.",
-                                self.task, cursor_x, cursor_y, cursor_x, cursor_y
+2. If DESKTOP visible, CAREFULLY scan the RIGHT side:
+   - Look for application shortcut icons there (Blender, GIMP, etc.)
+   - These are the PREFERRED way to launch apps - use DOUBLE_CLICK!
+   - If you see a relevant icon, report: \"Blender desktop shortcut at (1830, 920)\"
+
+3. List ALL clickable elements with coordinates:
+   - Desktop shortcuts on RIGHT: \"Blender at (1830, 920)\"
+   - Dock icons on LEFT (~30 x-coordinate)
+   - Buttons/menus if app is open
+
+4. If you need to launch an app and see its desktop shortcut, RECOMMEND using it!
+
+Screen is 1920x1080. Desktop shortcuts are on RIGHT side around x=1800-1870.",
+                                self.task, cursor_x, cursor_y
                             )
                         },
                         {
@@ -584,9 +594,6 @@ Be specific about coordinates - estimate them based on screen layout. Screen is 
 
 🎯 USER'S GOAL: {}
 
-📚 REFERENCE KNOWLEDGE:
-{}
-
 📜 ACTIONS TAKEN SO FAR:
 {}
 {}
@@ -594,39 +601,45 @@ Be specific about coordinates - estimate them based on screen layout. Screen is 
 👁️ CURRENT SCREEN STATE:
 {}
 
-=== PLANNING ===
-Think about:
-1. What is the user trying to achieve? → {}
-2. What progress has been made? (see actions above)
-3. What does the current screen show?
-4. What is the SINGLE NEXT STEP to move toward the goal?
+📚 APP KNOWLEDGE (if relevant):
+{}
+
+=== CRITICAL RULES ===
+
+🚫 NEVER CLICK AT (30, 1050) - that's the app launcher, DO NOT USE IT!
+
+IF you see "DESKTOP" (no app window visible):
+→ DOUBLE_CLICK on app icon at RIGHT side of screen (x≈1870, y≈850)
+→ Example: DOUBLE_CLICK 1870 850
+
+IF you see the TARGET APP (e.g., "Blender") is OPEN:
+→ The app is ready! Start working on the task!
+→ For Blender: CLICK in the 3D viewport center (~960, 400) to give focus
+→ Then use KEY commands: shift+a to add mesh, x to delete, Tab to edit mode
+→ Work step-by-step toward the goal
+
+=== DECIDE: What's on screen for GOAL: {} ===
+- If DESKTOP → DOUBLE_CLICK 1870 850 (app icon)
+- If APP IS OPEN → CLICK inside app, then use KEY/TYPE to work
 
 Available actions:
-- KEY shift+a → Opens Add menu in Blender (ESSENTIAL for adding objects)
-- KEY Tab → Toggle Edit/Object mode
-- KEY g/s/r → Move/Scale/Rotate selected
-- KEY x → Delete (then Return to confirm)
-- KEY Return → Confirm dialogs/selections
-- KEY Down/Up → Navigate menus
-- CLICK x y → Click at pixel coordinates
-- TYPE text → Type text (only in text fields or search boxes)
-- TASK_COMPLETE → When the goal is achieved
+- DOUBLE_CLICK x y → Launch apps from desktop icons
+- CLICK x y → Click inside apps (viewport, menus, buttons)
+- KEY keyname → Press key (shift+a, Tab, x, Return, etc.)
+- TYPE text → Type in text fields
+- TASK_COMPLETE → Goal achieved
 
-IMPORTANT:
-- Each action should move toward the GOAL
-- In Blender menus, TYPE to search (e.g., "uv" for UV Sphere) then Return to select
-- Look at what's ON SCREEN and choose the logical next step
-- If you see the goal is complete (e.g., UV Sphere exists), use TASK_COMPLETE
+🚫 FORBIDDEN: CLICK 30 1050 (app launcher) - NEVER use this!
 
 Reply with ONE action:
-ACTION: <action_type>
-PARAMS: <parameters>"#,
-            self.task, // Goal
-            short_knowledge,
+ACTION: <type>
+PARAMS: <value>"#,
+            self.task, // Goal at top
             history_context.chars().take(300).collect::<String>(),
             stuck_warning,
-            screen_description.chars().take(400).collect::<String>(),
-            self.task // Remind again
+            screen_description.chars().take(500).collect::<String>(),
+            short_knowledge,
+            self.task // Goal reminder
         );
 
         let request_body = serde_json::json!({
@@ -661,62 +674,69 @@ PARAMS: <parameters>"#,
         let content = message["content"].as_str().unwrap_or("").trim();
         let reasoning = message["reasoning"].as_str().unwrap_or("");
 
-        // Check action history for sequencing
-        let recent_actions: Vec<_> = self.history.iter().rev().take(5).collect();
-        let is_blender_task = self.task.to_lowercase().contains("blender");
-        let ever_clicked_viewport = self.clicked_viewport;
-        let ever_pressed_shifta = self.history.iter().any(|h| h.to_lowercase().contains("shift+a"));
-        let repeated_shifta = recent_actions.len() >= 2 &&
-            recent_actions.iter().take(2).all(|h| h.to_lowercase().contains("shift+a"));
-        // Check if last action was TYPE with "uv" (history stores action plan)
-        let already_typed_uv = recent_actions.first()
-            .map(|h| h.to_lowercase().contains("type") && h.to_lowercase().contains("uv"))
-            .unwrap_or(false);
-
-        let result = if already_typed_uv {
-            // Already typed "uv", now press Return to confirm selection
-            "ACTION: KEY\nPARAMS: Return".to_string()
-        } else if is_blender_task && !ever_clicked_viewport {
-            // FIRST action in Blender: click in the 3D viewport to ensure focus
-            // Viewport is roughly center of screen (960, 500 for 1920x1080)
-            "ACTION: CLICK\nPARAMS: 960,500".to_string()
-        } else if is_blender_task && !ever_pressed_shifta {
-            // SECOND action in Blender: open Add menu
-            "ACTION: KEY\nPARAMS: shift+a".to_string()
-        } else if repeated_shifta {
-            // Force different action - type to search in menu
-            "ACTION: TYPE\nPARAMS: uv".to_string()
-        } else if !content.is_empty() && content.to_uppercase().contains("ACTION") {
+        // Let the model decide - no hardcoded app-specific sequences
+        // The model should understand screen state and choose appropriate actions
+        let result = if !content.is_empty() && content.to_uppercase().contains("ACTION") {
             // Content has action - use it
             content.to_string()
         } else {
-            // Extract action from reasoning field
+            // Try to extract action hints from reasoning field (gpt-oss-20b uses this)
             let r_upper = reasoning.to_uppercase();
-            if r_upper.contains("SHIFT+A") || r_upper.contains("SHIFT + A") || r_upper.contains("ADD MENU") {
-                "ACTION: KEY\nPARAMS: shift+a".to_string()
-            } else if r_upper.contains("CLICK") && r_upper.contains("MESH") {
-                // Wants to click on Mesh in menu - use arrow keys instead
-                "ACTION: KEY\nPARAMS: Down".to_string()
-            } else if (r_upper.contains("UV SPHERE") || r_upper.contains("UVSPHERE")) && ever_pressed_shifta {
-                // Only type to search if menu is already open (shift+a was pressed)
-                "ACTION: TYPE\nPARAMS: uv".to_string()
-            } else if r_upper.contains("ENTER") || r_upper.contains("CONFIRM") || r_upper.contains("SELECT") {
+            let screen_upper = screen_description.to_uppercase();
+
+            // Check for stuck patterns
+            let recent: Vec<_> = self.history.iter().rev().take(4).collect();
+            let stuck_clicking_launcher = recent.len() >= 3 &&
+                recent.iter().all(|h| h.to_lowercase().contains("click") && h.contains("1050"));
+
+            // If stuck clicking launcher and screen shows app grid, TYPE to search
+            if stuck_clicking_launcher && (screen_upper.contains("APP") || screen_upper.contains("GRID") || screen_upper.contains("SEARCH")) {
+                // Launcher is open - extract app name from task and type it
+                let task_lower = self.task.to_lowercase();
+                if task_lower.contains("blender") {
+                    "ACTION: TYPE\nPARAMS: blender".to_string()
+                } else if task_lower.contains("gimp") {
+                    "ACTION: TYPE\nPARAMS: gimp".to_string()
+                } else if task_lower.contains("firefox") {
+                    "ACTION: TYPE\nPARAMS: firefox".to_string()
+                } else {
+                    // Generic - try typing the first significant word after "open"
+                    "ACTION: TYPE\nPARAMS: blender".to_string()
+                }
+            } else if r_upper.contains("TYPE") || r_upper.contains("SEARCH") || screen_upper.contains("TYPE TO SEARCH") {
+                // Screen has search prompt or reasoning says to type
+                let task_lower = self.task.to_lowercase();
+                if task_lower.contains("blender") {
+                    "ACTION: TYPE\nPARAMS: blender".to_string()
+                } else {
+                    "ACTION: WAIT\nPARAMS: 300".to_string()
+                }
+            } else if r_upper.contains("ENTER") || r_upper.contains("CONFIRM") || r_upper.contains("RETURN") {
                 "ACTION: KEY\nPARAMS: Return".to_string()
-            } else if r_upper.contains("TAB") || r_upper.contains("EDIT MODE") {
-                "ACTION: KEY\nPARAMS: Tab".to_string()
             } else if r_upper.contains("ESCAPE") || r_upper.contains("CANCEL") {
                 "ACTION: KEY\nPARAMS: Escape".to_string()
-            } else if r_upper.contains("DELETE") || r_upper.contains("REMOVE") {
-                "ACTION: KEY\nPARAMS: x".to_string()
-            } else if r_upper.contains("MOVE") || r_upper.contains("GRAB") {
-                "ACTION: KEY\nPARAMS: g".to_string()
-            } else if r_upper.contains("SCALE") {
-                "ACTION: KEY\nPARAMS: s".to_string()
-            } else if r_upper.contains("EXTRUDE") {
-                "ACTION: KEY\nPARAMS: e".to_string()
             } else {
-                // Default: wait and observe
-                "ACTION: WAIT\nPARAMS: 500".to_string()
+                // Smart fallback based on what's on screen
+                let in_blender = screen_upper.contains("BLENDER");
+                let not_making_progress = recent.iter().all(|h| {
+                    let h_lower = h.to_lowercase();
+                    h_lower.contains("wait") || h_lower.contains("click") ||
+                    (h_lower.contains("key") && h_lower.contains("return"))
+                });
+
+                if in_blender && not_making_progress && recent.len() >= 3 {
+                    // In Blender but stuck - try to add an object with shift+a
+                    println!("   💡 Stuck in Blender - forcing shift+a to add object");
+                    "ACTION: KEY\nPARAMS: shift+a".to_string()
+                } else if screen_upper.contains("DESKTOP") && !in_blender {
+                    // On desktop, try to double-click the app icon
+                    "ACTION: DOUBLE_CLICK\nPARAMS: 1870 850".to_string()
+                } else if in_blender {
+                    // In Blender, try shift+a as default action
+                    "ACTION: KEY\nPARAMS: shift+a".to_string()
+                } else {
+                    "ACTION: WAIT\nPARAMS: 300".to_string()
+                }
             }
         };
 
@@ -776,6 +796,25 @@ PARAMS: <parameters>"#,
         let param_parts: Vec<&str> = params.split_whitespace().collect();
 
         match action_type.as_str() {
+            "DOUBLE_CLICK" => {
+                // Handle both "960 500" and "960,500" formats
+                let coords: Vec<&str> = if params.contains(',') {
+                    params.split(',').collect()
+                } else {
+                    param_parts.clone()
+                };
+
+                if coords.len() >= 2 {
+                    let x = coords[0].trim().parse::<i32>().unwrap_or(500);
+                    let y = coords[1].trim().parse::<i32>().unwrap_or(300);
+                    self.smooth_move(x, y)?;
+                    thread::sleep(Duration::from_millis(50));
+                    Command::new("xdotool").args(["click", "--repeat", "2", "--delay", "100", "1"]).output()?;
+                    println!("   ✓ Double-clicked at ({}, {})", x, y);
+                } else {
+                    println!("   ⚠ DOUBLE_CLICK missing coordinates, params: '{}'", params);
+                }
+            }
             "CLICK" => {
                 // Handle both "960 500" and "960,500" formats
                 let coords: Vec<&str> = if params.contains(',') {
@@ -787,9 +826,14 @@ PARAMS: <parameters>"#,
                 if coords.len() >= 2 {
                     let x = coords[0].trim().parse::<i32>().unwrap_or(500);
                     let y = coords[1].trim().parse::<i32>().unwrap_or(300);
-                    self.smooth_click(x, y)?;
-                    self.clicked_viewport = true;  // Mark that we've clicked in viewport
-                    println!("   ✓ Clicked at ({}, {})", x, y);
+
+                    // SAFETY: Block clicks near app launcher (30, 1050) - causes unwanted behavior
+                    if x < 100 && y > 1000 {
+                        println!("   🚫 BLOCKED: Click at ({}, {}) is near app launcher - skipping!", x, y);
+                    } else {
+                        self.smooth_click(x, y)?;
+                        println!("   ✓ Clicked at ({}, {})", x, y);
+                    }
                 } else {
                     println!("   ⚠ CLICK missing coordinates, params: '{}'", params);
                 }
@@ -855,7 +899,8 @@ PARAMS: <parameters>"#,
                 thread::sleep(Duration::from_millis(ms));
                 println!("   ✓ Waited {}ms", ms);
             }
-            "DOUBLE_CLICK" | "DOUBLECLICK" => {
+            "DOUBLECLICK" => {
+                // Alias for DOUBLE_CLICK (handled above) - just in case model uses no underscore
                 if param_parts.len() >= 2 {
                     let x = param_parts[0].parse::<i32>().unwrap_or(500);
                     let y = param_parts[1].parse::<i32>().unwrap_or(300);
