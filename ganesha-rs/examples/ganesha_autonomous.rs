@@ -195,58 +195,109 @@ overlay = RedFrameOverlay()
         if let Some(mut proc) = self.overlay_process.take() {
             let _ = proc.kill();
             let _ = proc.wait();
-            println!("⚪ Red frame overlay stopped");
         }
+        // Also kill any orphaned overlay processes
+        let _ = Command::new("pkill")
+            .args(["-f", "ganesha_overlay.py"])
+            .output();
         let _ = std::fs::remove_file("/tmp/ganesha_overlay.py");
+        println!("⚪ Red frame overlay stopped");
     }
 
-    /// Detect app from task and fetch docs to learn about it
+    /// Detect app from task and fetch docs from Context7 or fallback to LLM
     fn learn_about_app(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        // Extract app name from task (simple heuristic)
+        // Extract app name and Context7 path
         let task_lower = self.task.to_lowercase();
-        let app_name = if task_lower.contains("blender") {
-            Some("blender")
+        let (app_name, context7_path) = if task_lower.contains("blender") {
+            (Some("blender"), Some("blender/blender"))
         } else if task_lower.contains("gimp") {
-            Some("gimp")
+            (Some("gimp"), Some("gimp/gimp"))
         } else if task_lower.contains("firefox") {
-            Some("firefox")
+            (Some("firefox"), None)  // No Context7 path for Firefox
         } else if task_lower.contains("libreoffice") || task_lower.contains("calc") || task_lower.contains("writer") {
-            Some("libreoffice")
+            (Some("libreoffice"), None)
         } else {
-            None
+            (None, None)
         };
 
         if let Some(app) = app_name {
             println!("📚 GANESHA: I should learn about {} before starting...", app);
-            println!("   Searching for official documentation and tutorials...\n");
 
-            // Use the planner LLM to search and summarize docs
-            let search_prompt = format!(
-                r#"I need to learn how to use {} for GUI automation. Search your knowledge for:
+            // Try Context7 first for real documentation
+            let mut knowledge = None;
+            if let Some(c7_path) = context7_path {
+                println!("   Fetching from Context7 ({})...", c7_path);
+                if let Ok(docs) = self.fetch_context7(c7_path) {
+                    println!("   ✓ Got {} chars from Context7", docs.len());
+                    knowledge = Some(docs);
+                } else {
+                    println!("   ⚠ Context7 unavailable, using LLM knowledge...");
+                }
+            }
+
+            // Fallback to LLM training data if Context7 failed
+            if knowledge.is_none() {
+                println!("   Querying LLM for {} knowledge...", app);
+                let search_prompt = format!(
+                    r#"I need to learn how to use {} for GUI automation. Provide:
 1. Essential keyboard shortcuts (select all, delete, add objects, transform)
 2. Common menu locations and UI patterns
 3. Step-by-step workflows for basic tasks
 
-Provide a concise reference I can use. Focus on PRACTICAL shortcuts and clicks, not theory.
-Format as a simple list I can reference while working."#,
-                app
-            );
-
-            let knowledge = self.query_planner(&search_prompt)?;
-
-            println!("📖 GANESHA: Learned about {}:\n", app);
-            for line in knowledge.lines().take(20) {
-                println!("   {}", line);
+Focus on PRACTICAL shortcuts and clicks, not theory. Format as a concise reference."#,
+                    app
+                );
+                knowledge = Some(self.query_planner(&search_prompt)?);
             }
-            if knowledge.lines().count() > 20 {
-                println!("   ... (truncated)");
-            }
-            println!();
 
-            self.app_knowledge = Some(knowledge);
+            if let Some(ref k) = knowledge {
+                println!("\n📖 GANESHA: Learned about {}:\n", app);
+                for line in k.lines().take(20) {
+                    println!("   {}", line);
+                }
+                if k.lines().count() > 20 {
+                    println!("   ... (truncated)");
+                }
+                println!();
+                self.app_knowledge = knowledge;
+            }
         }
 
         Ok(())
+    }
+
+    /// Fetch documentation from Context7
+    fn fetch_context7(&self, path: &str) -> Result<String, Box<dyn std::error::Error>> {
+        let url = format!("https://context7.com/{}/llms.txt?tokens=3000", path);
+
+        let client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(15))
+            .build()?;
+
+        let response = client.get(&url).send()?;
+
+        if !response.status().is_success() {
+            return Err(format!("Context7 returned {}", response.status()).into());
+        }
+
+        let text = response.text()?;
+
+        // Context7 returns raw documentation - summarize it for GUI automation
+        let summary_prompt = format!(
+            r#"From this documentation, extract ONLY the GUI automation essentials:
+1. Keyboard shortcuts for common actions
+2. Menu navigation patterns
+3. Mouse interaction tips
+
+Documentation:
+{}
+
+Respond with a concise, practical reference for automating the GUI. Focus on shortcuts and clicks."#,
+            text.chars().take(8000).collect::<String>()
+        );
+
+        // Use planner to summarize the docs
+        self.query_planner(&summary_prompt)
     }
 
     fn query_planner(&self, prompt: &str) -> Result<String, Box<dyn std::error::Error>> {
@@ -883,6 +934,22 @@ PARAMS: <parameters>"#,
         thread::sleep(Duration::from_millis(50));
         Command::new("xdotool").args(["click", "1"]).output()?;
         Ok(())
+    }
+}
+
+// Ensure overlay is cleaned up on drop (panic, early exit, Ctrl+C, etc.)
+impl Drop for GaneshaAgent {
+    fn drop(&mut self) {
+        // Kill overlay process
+        if let Some(mut proc) = self.overlay_process.take() {
+            let _ = proc.kill();
+            let _ = proc.wait();
+        }
+        // Kill any orphaned overlay processes
+        let _ = Command::new("pkill")
+            .args(["-f", "ganesha_overlay.py"])
+            .output();
+        let _ = std::fs::remove_file("/tmp/ganesha_overlay.py");
     }
 }
 
