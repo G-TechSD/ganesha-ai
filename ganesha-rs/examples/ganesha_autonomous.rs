@@ -491,29 +491,32 @@ Respond with a concise, practical reference for automating the GUI. Focus on sho
                         {
                             "type": "text",
                             "text": format!(
-                                "You are Ganesha's eyes for GUI automation. Analyze this screenshot carefully.
+                                "You are Ganesha's vision system. Analyze this screenshot to help complete the task.
 
 TASK: {}
 
-CURSOR POSITION: ({}, {}) - marked with magenta circle and cyan crosshair.
+CURSOR: Currently at ({}, {}) - marked with magenta circle/cyan crosshair.
 
-⚠️ CRITICAL: Look for DESKTOP SHORTCUTS on the RIGHT SIDE of screen (x=1800-1870)!
+Describe what you see:
 
-1. What's on screen? (Desktop? Application? Dialog?)
+1. SCREEN TYPE: Is this a desktop, an application window, a dialog, or a menu?
 
-2. If DESKTOP visible, CAREFULLY scan the RIGHT side:
-   - Look for application shortcut icons there (Blender, GIMP, etc.)
-   - These are the PREFERRED way to launch apps - use DOUBLE_CLICK!
-   - If you see a relevant icon, report: \"Blender desktop shortcut at (1830, 920)\"
+2. IF DESKTOP: List any visible icons with their approximate (x, y) coordinates
+   - Desktop icons (shortcuts on the desktop surface)
+   - Dock/taskbar icons
+   - Any way to launch applications
 
-3. List ALL clickable elements with coordinates:
-   - Desktop shortcuts on RIGHT: \"Blender at (1830, 920)\"
-   - Dock icons on LEFT (~30 x-coordinate)
-   - Buttons/menus if app is open
+3. IF APPLICATION: What app is it? What's the current state?
+   - Menus, buttons, tools visible
+   - Any dialogs or popups open
+   - What can be interacted with
 
-4. If you need to launch an app and see its desktop shortcut, RECOMMEND using it!
+4. CLICKABLE ELEMENTS: List items relevant to the task with coordinates
+   Format: \"element_name at (x, y)\"
 
-Screen is 1920x1080. Desktop shortcuts are on RIGHT side around x=1800-1870.",
+5. RECOMMENDATION: What action would progress toward the task?
+
+Screen resolution: 1920x1080. Estimate coordinates based on element positions.",
                                 self.task, cursor_x, cursor_y
                             )
                         },
@@ -590,56 +593,49 @@ Screen is 1920x1080. Desktop shortcuts are on RIGHT side around x=1800-1870.",
             String::new()
         };
 
-        let prompt = format!(r#"=== GOAL-ORIENTED PLANNING ===
+        let prompt = format!(r#"=== AUTONOMOUS GUI AGENT ===
 
-🎯 USER'S GOAL: {}
+🎯 GOAL: {}
 
-📜 ACTIONS TAKEN SO FAR:
+📜 HISTORY (what you've done):
 {}
 {}
 
-👁️ CURRENT SCREEN STATE:
+👁️ CURRENT SCREEN (from vision):
 {}
 
-📚 APP KNOWLEDGE (if relevant):
+📚 APP KNOWLEDGE:
 {}
 
-=== CRITICAL RULES ===
+=== YOUR TASK ===
+Based on what you SEE on screen, decide the SINGLE NEXT ACTION to progress toward the goal.
 
-🚫 NEVER CLICK AT (30, 1050) - that's the app launcher, DO NOT USE IT!
-
-IF you see "DESKTOP" (no app window visible):
-→ DOUBLE_CLICK on app icon at RIGHT side of screen (x≈1870, y≈850)
-→ Example: DOUBLE_CLICK 1870 850
-
-IF you see the TARGET APP (e.g., "Blender") is OPEN:
-→ The app is ready! Start working on the task!
-→ For Blender: CLICK in the 3D viewport center (~960, 400) to give focus
-→ Then use KEY commands: shift+a to add mesh, x to delete, Tab to edit mode
-→ Work step-by-step toward the goal
-
-=== DECIDE: What's on screen for GOAL: {} ===
-- If DESKTOP → DOUBLE_CLICK 1870 850 (app icon)
-- If APP IS OPEN → CLICK inside app, then use KEY/TYPE to work
+Think step by step:
+1. What is currently on screen? (Read the vision description above)
+2. What state am I in? (Desktop? App open? Menu visible? Dialog?)
+3. What action will move me closer to the goal?
 
 Available actions:
-- DOUBLE_CLICK x y → Launch apps from desktop icons
-- CLICK x y → Click inside apps (viewport, menus, buttons)
-- KEY keyname → Press key (shift+a, Tab, x, Return, etc.)
-- TYPE text → Type in text fields
-- TASK_COMPLETE → Goal achieved
+- CLICK x y → Single click at coordinates (use for buttons, menus, selecting)
+- DOUBLE_CLICK x y → Double click (use for opening icons, files, apps)
+- KEY keyname → Press a key (Return, Escape, Tab, shift+a, ctrl+s, etc.)
+- TYPE text → Type text (only when a text field is focused)
+- TASK_COMPLETE → Use ONLY when the goal is fully achieved
 
-🚫 FORBIDDEN: CLICK 30 1050 (app launcher) - NEVER use this!
+IMPORTANT:
+- Use coordinates from the vision description - don't guess!
+- If you need to launch an app, look for its icon and click/double-click it
+- If an app is open, interact with its interface to complete the task
+- Each action should make progress - avoid repeating failed actions
 
-Reply with ONE action:
-ACTION: <type>
-PARAMS: <value>"#,
-            self.task, // Goal at top
-            history_context.chars().take(300).collect::<String>(),
+Output exactly ONE action:
+ACTION: <action_type>
+PARAMS: <parameters>"#,
+            self.task,
+            history_context.chars().take(400).collect::<String>(),
             stuck_warning,
-            screen_description.chars().take(500).collect::<String>(),
-            short_knowledge,
-            self.task // Goal reminder
+            screen_description.chars().take(600).collect::<String>(),
+            short_knowledge
         );
 
         let request_body = serde_json::json!({
@@ -674,70 +670,25 @@ PARAMS: <value>"#,
         let content = message["content"].as_str().unwrap_or("").trim();
         let reasoning = message["reasoning"].as_str().unwrap_or("");
 
-        // Let the model decide - no hardcoded app-specific sequences
-        // The model should understand screen state and choose appropriate actions
+        // TRUST THE MODEL - no hardcoded fallbacks
+        // The model must learn to make decisions based on what it sees
         let result = if !content.is_empty() && content.to_uppercase().contains("ACTION") {
-            // Content has action - use it
             content.to_string()
-        } else {
-            // Try to extract action hints from reasoning field (gpt-oss-20b uses this)
+        } else if !reasoning.is_empty() {
+            // Model put reasoning but no clear action - ask it to be explicit
+            // For now, extract simple hints from reasoning
             let r_upper = reasoning.to_uppercase();
-            let screen_upper = screen_description.to_uppercase();
-
-            // Check for stuck patterns
-            let recent: Vec<_> = self.history.iter().rev().take(4).collect();
-            let stuck_clicking_launcher = recent.len() >= 3 &&
-                recent.iter().all(|h| h.to_lowercase().contains("click") && h.contains("1050"));
-
-            // If stuck clicking launcher and screen shows app grid, TYPE to search
-            if stuck_clicking_launcher && (screen_upper.contains("APP") || screen_upper.contains("GRID") || screen_upper.contains("SEARCH")) {
-                // Launcher is open - extract app name from task and type it
-                let task_lower = self.task.to_lowercase();
-                if task_lower.contains("blender") {
-                    "ACTION: TYPE\nPARAMS: blender".to_string()
-                } else if task_lower.contains("gimp") {
-                    "ACTION: TYPE\nPARAMS: gimp".to_string()
-                } else if task_lower.contains("firefox") {
-                    "ACTION: TYPE\nPARAMS: firefox".to_string()
-                } else {
-                    // Generic - try typing the first significant word after "open"
-                    "ACTION: TYPE\nPARAMS: blender".to_string()
-                }
-            } else if r_upper.contains("TYPE") || r_upper.contains("SEARCH") || screen_upper.contains("TYPE TO SEARCH") {
-                // Screen has search prompt or reasoning says to type
-                let task_lower = self.task.to_lowercase();
-                if task_lower.contains("blender") {
-                    "ACTION: TYPE\nPARAMS: blender".to_string()
-                } else {
-                    "ACTION: WAIT\nPARAMS: 300".to_string()
-                }
-            } else if r_upper.contains("ENTER") || r_upper.contains("CONFIRM") || r_upper.contains("RETURN") {
-                "ACTION: KEY\nPARAMS: Return".to_string()
-            } else if r_upper.contains("ESCAPE") || r_upper.contains("CANCEL") {
-                "ACTION: KEY\nPARAMS: Escape".to_string()
+            if r_upper.contains("CLICK") {
+                // Try to extract coordinates from reasoning
+                "ACTION: WAIT\nPARAMS: 300".to_string() // Model needs to output coordinates
+            } else if r_upper.contains("TYPE") {
+                "ACTION: WAIT\nPARAMS: 300".to_string() // Model needs to output what to type
             } else {
-                // Smart fallback based on what's on screen
-                let in_blender = screen_upper.contains("BLENDER");
-                let not_making_progress = recent.iter().all(|h| {
-                    let h_lower = h.to_lowercase();
-                    h_lower.contains("wait") || h_lower.contains("click") ||
-                    (h_lower.contains("key") && h_lower.contains("return"))
-                });
-
-                if in_blender && not_making_progress && recent.len() >= 3 {
-                    // In Blender but stuck - try to add an object with shift+a
-                    println!("   💡 Stuck in Blender - forcing shift+a to add object");
-                    "ACTION: KEY\nPARAMS: shift+a".to_string()
-                } else if screen_upper.contains("DESKTOP") && !in_blender {
-                    // On desktop, try to double-click the app icon
-                    "ACTION: DOUBLE_CLICK\nPARAMS: 1870 850".to_string()
-                } else if in_blender {
-                    // In Blender, try shift+a as default action
-                    "ACTION: KEY\nPARAMS: shift+a".to_string()
-                } else {
-                    "ACTION: WAIT\nPARAMS: 300".to_string()
-                }
+                "ACTION: WAIT\nPARAMS: 300".to_string()
             }
+        } else {
+            // No content, no reasoning - model didn't respond properly
+            "ACTION: WAIT\nPARAMS: 500".to_string()
         };
 
         Ok(result)
