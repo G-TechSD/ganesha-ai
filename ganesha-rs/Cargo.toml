@@ -1,0 +1,170 @@
+[package]
+name = "ganesha"
+version = "3.0.0"
+edition = "2021"
+authors = ["G-Tech SD <dev@gtechsd.com>"]
+description = "The Remover of Obstacles - AI-Powered System Control"
+license = "MIT"
+repository = "https://github.com/G-TechSD/ganesha-ai"
+keywords = ["ai", "llm", "cli", "system-administration", "automation"]
+categories = ["command-line-utilities", "development-tools"]
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+
+# CLI
+clap = { version = "4.4", features = ["derive", "env"] }
+dialoguer = "0.11"              # Interactive prompts
+console = "0.15"                # Terminal colors/formatting
+indicatif = "0.17"              # Progress bars
+
+# HTTP client for LLM APIs
+reqwest = { version = "0.11", features = ["json", "rustls-tls", "blocking"], default-features = false }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Async utilities
+futures = "0.3"
+async-trait = "0.1"
+
+# Regex for access control
+regex = "1.10"
+lazy_static = "1.4"
+
+# UUID for session IDs
+uuid = { version = "1.6", features = ["v4"] }
+
+# Time/dates
+chrono = { version = "0.4", features = ["serde"] }
+
+# Config files
+directories = "5.0"             # Cross-platform config dirs
+toml = "0.8"
+
+# HTTP server for API
+axum = "0.7"
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors"] }
+
+# Cross-platform logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+
+# Platform-specific logging
+[target.'cfg(target_os = "linux")'.dependencies]
+syslog = "6.1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+oslog = "0.2"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+eventlog = "0.2"
+windows-sys = { version = "0.52", features = ["Win32_System_EventLog"] }
+
+[dev-dependencies]
+tempfile = "3.9"
+tokio-test = "0.4"
+
+[profile.release]
+lto = true                      # Link-time optimization
+codegen-units = 1               # Better optimization
+strip = true                    # Strip symbols for smaller binary
+panic = "abort"                 # Smaller binary
+
+[[bin]]
+name = "ganesha"
+path = "src/main.rs"
+
+[[bin]]
+name = "ganesha-daemon"
+path = "src/bin/daemon.rs"
+
+# Computer Use (Vision + Input)
+# These are OPTIONAL and disabled by default for security
+[dependencies.screenshots]
+version = "0.8"
+optional = true
+
+[dependencies.enigo]
+version = "0.2"
+optional = true
+
+# image crate is provided by xcap, no direct dependency needed
+# [dependencies.image]
+# version = "0.25"
+# optional = true
+
+[dependencies.base64]
+version = "0.21"
+optional = true
+
+[dependencies.png]
+version = "0.17"
+optional = true
+
+[dependencies.xcap]
+version = "0.0.14"
+optional = true
+
+[dependencies.playwright]
+version = "0.0.20"
+optional = true
+
+# Voice/Audio dependencies (for real-time conversation)
+[dependencies.cpal]
+version = "0.15"
+optional = true
+
+[dependencies.rubato]
+version = "0.14"
+optional = true
+
+[dependencies.hound]
+version = "3.5"
+optional = true
+
+[dependencies.tokio-tungstenite]
+version = "0.21"
+features = ["native-tls"]
+optional = true
+
+[dependencies.webrtc-vad]
+version = "0.4"
+optional = true
+
+# Unix-specific for daemon
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.27", features = ["user"] }
+
+[features]
+default = ["cli", "api"]
+cli = []
+api = []
+daemon = []
+
+# DANGEROUS: Enable computer vision (screenshots, screen reading)
+# Requires explicit opt-in: --features vision
+vision = ["screenshots", "base64", "xcap", "png"]
+
+# DANGEROUS: Enable input control (mouse, keyboard, scroll)
+# Requires explicit opt-in: --features input
+input = ["enigo"]
+
+# Enable both vision and input
+computer-use = ["vision", "input"]
+
+# Browser automation via Playwright
+browser = ["playwright"]
+
+# Real-time voice conversation
+voice = ["cpal", "rubato", "hound", "tokio-tungstenite", "webrtc-vad"]
+
+# Full Ganesha experience (eyes, hands, ears, mouth)
+full = ["computer-use", "voice"]
