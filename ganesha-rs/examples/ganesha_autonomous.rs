@@ -559,21 +559,22 @@ Screen resolution: 1920x1080. Estimate coordinates based on element positions.",
             self.history.iter().rev().take(5).cloned().collect::<Vec<_>>().join("\n")
         };
 
-        // Stuck detection - check if recent actions are repetitive
-        let repeated_shifta = self.history.iter().rev().take(2)
-            .all(|h| h.to_lowercase().contains("shift+a") || h.to_lowercase().contains("shift a"));
+        // Effectiveness detection - am I making progress?
+        let recent_actions: Vec<_> = self.history.iter().rev().take(5).collect();
+        let wait_count = recent_actions.iter().filter(|a| a.to_lowercase().contains("wait")).count();
+        let same_action_count = if recent_actions.len() >= 2 {
+            recent_actions.windows(2).filter(|w| w[0] == w[1]).count()
+        } else { 0 };
 
-        let stuck_warning = if repeated_shifta {
-            // Already pressed shift+a multiple times - menu should be open, navigate it
-            "\n\n🚨 MENU IS OPEN! You already pressed Shift+A. Now navigate:\n- Type 'uv' to search for UV Sphere\n- Or press Down arrow to navigate menu\n- Then press Return to select\nDO NOT press shift+a again!"
-        } else if self.history.len() >= 3 {
-            let recent: Vec<_> = self.history.iter().rev().take(3).collect();
-            let all_same = recent.windows(2).all(|w| w[0] == w[1]);
-            if all_same {
-                "\n\n🚨 STUCK: Repeating same action! Try something different."
-            } else {
-                ""
-            }
+        let stuck_warning = if wait_count >= 3 {
+            println!("   🚨 EFFECTIVENESS WARNING: {} waits detected!", wait_count);
+            "\n\n🚨 INEFFECTIVE: You've been waiting repeatedly without progress!\nASK YOURSELF: What concrete action will move toward the goal?\n- If on desktop: find and click/double-click an app icon\n- If app is open: interact with it (click buttons, press keys)\n- WAITING does nothing. Take ACTION!"
+        } else if same_action_count >= 2 {
+            println!("   🚨 STUCK WARNING: repeating same action!");
+            "\n\n🚨 STUCK: Repeating the same action! It's not working.\nTry something DIFFERENT. Look at the screen and choose a new approach."
+        } else if self.history.len() >= 4 && !self.history.iter().any(|h| h.to_lowercase().contains("click") || h.to_lowercase().contains("double")) {
+            println!("   ⚠️ NO CLICKS WARNING!");
+            "\n\n⚠️ NO CLICKS YET: You haven't clicked anything! To interact with GUI, you need to CLICK or DOUBLE_CLICK on elements.\nLook at the screen - what should you click to progress?"
         } else {
             ""
         };
@@ -610,23 +611,28 @@ Screen resolution: 1920x1080. Estimate coordinates based on element positions.",
 === YOUR TASK ===
 Based on what you SEE on screen, decide the SINGLE NEXT ACTION to progress toward the goal.
 
-Think step by step:
-1. What is currently on screen? (Read the vision description above)
-2. What state am I in? (Desktop? App open? Menu visible? Dialog?)
-3. What action will move me closer to the goal?
+THINK STEP BY STEP:
+1. What is on screen RIGHT NOW? (Desktop? Application? Dialog? Menu?)
+2. Am I being EFFECTIVE? (Are my actions making progress toward the goal?)
+3. What CONCRETE action will move me forward?
+
+CRITICAL QUESTIONS:
+- If I see DESKTOP: Where is the app icon I need? What are its coordinates? → DOUBLE_CLICK to open it
+- If I see the APP: What do I need to do inside it? What should I click/press?
+- Am I just WAITING? That's not progress! Take real action!
 
 Available actions:
-- CLICK x y → Single click at coordinates (use for buttons, menus, selecting)
-- DOUBLE_CLICK x y → Double click (use for opening icons, files, apps)
+- CLICK x y → Single click at coordinates (buttons, menus, selecting items)
+- DOUBLE_CLICK x y → Double click (opening icons, files, launching apps)
 - KEY keyname → Press a key (Return, Escape, Tab, shift+a, ctrl+s, etc.)
-- TYPE text → Type text (only when a text field is focused)
-- TASK_COMPLETE → Use ONLY when the goal is fully achieved
+- TYPE text → Type text (only in focused text fields!)
+- TASK_COMPLETE → ONLY when goal is fully achieved
 
-IMPORTANT:
-- Use coordinates from the vision description - don't guess!
-- If you need to launch an app, look for its icon and click/double-click it
-- If an app is open, interact with its interface to complete the task
-- Each action should make progress - avoid repeating failed actions
+⚠️ EFFECTIVENESS CHECK:
+- WAITING repeatedly = NOT effective
+- Repeating same failed action = NOT effective
+- Not clicking anything = NOT effective
+- You must INTERACT with the GUI to make progress!
 
 Output exactly ONE action:
 ACTION: <action_type>
