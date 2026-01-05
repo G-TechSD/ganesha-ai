@@ -1,0 +1,436 @@
+//! LLM Provider Abstraction
+//!
+//! Supports local-first approach:
+//! 1. LM Studio (local)
+//! 2. Ollama (local)
+//! 3. Anthropic Claude (cloud)
+//! 4. OpenAI (cloud)
+
+use async_trait::async_trait;
+use reqwest::Client;
+use serde::{Deserialize, Serialize};
+use std::time::Duration;
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum ProviderError {
+    #[error("HTTP error: {0}")]
+    Http(#[from] reqwest::Error),
+
+    #[error("API error: {0}")]
+    Api(String),
+
+    #[error("No providers available")]
+    NoProviders,
+
+    #[error("Timeout")]
+    Timeout,
+}
+
+/// LLM Provider trait
+#[async_trait]
+pub trait LlmProvider: Send + Sync {
+    fn name(&self) -> &str;
+    fn is_available(&self) -> bool;
+
+    async fn generate(&self, system: &str, user: &str) -> Result<String, ProviderError>;
+}
+
+/// OpenAI-compatible provider (LM Studio, OpenAI, etc.)
+pub struct OpenAiCompatible {
+    name: String,
+    base_url: String,
+    api_key: Option<String>,
+    model: String,
+    client: Client,
+}
+
+#[derive(Serialize)]
+struct ChatRequest {
+    model: String,
+    messages: Vec<Message>,
+    temperature: f32,
+    max_tokens: u32,
+    stream: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Message {
+    role: String,
+    content: String,
+}
+
+#[derive(Deserialize)]
+struct ChatResponse {
+    choices: Vec<Choice>,
+}
+
+#[derive(Deserialize)]
+struct Choice {
+    message: Message,
+}
+
+impl OpenAiCompatible {
+    pub fn lm_studio(url: &str) -> Self {
+        Self {
+            name: "lmstudio".into(),
+            base_url: url.trim_end_matches('/').into(),
+            api_key: None,
+            model: "default".into(),
+            client: Client::builder()
+                .timeout(Duration::from_secs(120))
+                .build()
+                .unwrap(),
+        }
+    }
+
+    pub fn openai(api_key: &str) -> Self {
+        Self {
+            name: "openai".into(),
+            base_url: "https://api.openai.com".into(),
+            api_key: Some(api_key.into()),
+            model: "gpt-4o".into(),
+            client: Client::builder()
+                .timeout(Duration::from_secs(120))
+                .build()
+                .unwrap(),
+        }
+    }
+
+    pub fn with_model(mut self, model: &str) -> Self {
+        self.model = model.into();
+        self
+    }
+}
+
+#[async_trait]
+impl LlmProvider for OpenAiCompatible {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn is_available(&self) -> bool {
+        // Quick sync check
+        let url = format!("{}/v1/models", self.base_url);
+        reqwest::blocking::Client::new()
+            .get(&url)
+            .timeout(Duration::from_secs(2))
+            .send()
+            .map(|r| r.status().is_success())
+            .unwrap_or(false)
+    }
+
+    async fn generate(&self, system: &str, user: &str) -> Result<String, ProviderError> {
+        let url = format!("{}/v1/chat/completions", self.base_url);
+
+        let request = ChatRequest {
+            model: self.model.clone(),
+            messages: vec![
+                Message {
+                    role: "system".into(),
+                    content: system.into(),
+                },
+                Message {
+                    role: "user".into(),
+                    content: user.into(),
+                },
+            ],
+            temperature: 0.3,
+            max_tokens: 2000,
+            stream: false,
+        };
+
+        let mut req = self.client.post(&url).json(&request);
+
+        if let Some(ref key) = self.api_key {
+            req = req.bearer_auth(key);
+        }
+
+        let response = req.send().await?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(ProviderError::Api(format!("{}: {}", status, body)));
+        }
+
+        let chat_response: ChatResponse = response.json().await?;
+
+        chat_response
+            .choices
+            .first()
+            .map(|c| c.message.content.clone())
+            .ok_or_else(|| ProviderError::Api("No response content".into()))
+    }
+}
+
+/// Ollama provider
+pub struct Ollama {
+    base_url: String,
+    model: String,
+    client: Client,
+}
+
+#[derive(Serialize)]
+struct OllamaRequest {
+    model: String,
+    messages: Vec<Message>,
+    stream: bool,
+    options: OllamaOptions,
+}
+
+#[derive(Serialize)]
+struct OllamaOptions {
+    temperature: f32,
+    num_predict: u32,
+}
+
+#[derive(Deserialize)]
+struct OllamaResponse {
+    message: Message,
+}
+
+impl Ollama {
+    pub fn new(url: &str, model: &str) -> Self {
+        Self {
+            base_url: url.trim_end_matches('/').into(),
+            model: model.into(),
+            client: Client::builder()
+                .timeout(Duration::from_secs(120))
+                .build()
+                .unwrap(),
+        }
+    }
+
+    pub fn default() -> Self {
+        Self::new("http://localhost:11434", "llama3")
+    }
+}
+
+#[async_trait]
+impl LlmProvider for Ollama {
+    fn name(&self) -> &str {
+        "ollama"
+    }
+
+    fn is_available(&self) -> bool {
+        let url = format!("{}/api/tags", self.base_url);
+        reqwest::blocking::Client::new()
+            .get(&url)
+            .timeout(Duration::from_secs(2))
+            .send()
+            .map(|r| r.status().is_success())
+            .unwrap_or(false)
+    }
+
+    async fn generate(&self, system: &str, user: &str) -> Result<String, ProviderError> {
+        let url = format!("{}/api/chat", self.base_url);
+
+        let request = OllamaRequest {
+            model: self.model.clone(),
+            messages: vec![
+                Message {
+                    role: "system".into(),
+                    content: system.into(),
+                },
+                Message {
+                    role: "user".into(),
+                    content: user.into(),
+                },
+            ],
+            stream: false,
+            options: OllamaOptions {
+                temperature: 0.3,
+                num_predict: 2000,
+            },
+        };
+
+        let response = self.client.post(&url).json(&request).send().await?;
+
+        if !response.status().is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(ProviderError::Api(body));
+        }
+
+        let ollama_response: OllamaResponse = response.json().await?;
+        Ok(ollama_response.message.content)
+    }
+}
+
+/// Anthropic Claude provider
+pub struct Anthropic {
+    api_key: String,
+    model: String,
+    client: Client,
+}
+
+#[derive(Serialize)]
+struct AnthropicRequest {
+    model: String,
+    max_tokens: u32,
+    system: String,
+    messages: Vec<Message>,
+    temperature: f32,
+}
+
+#[derive(Deserialize)]
+struct AnthropicResponse {
+    content: Vec<ContentBlock>,
+}
+
+#[derive(Deserialize)]
+struct ContentBlock {
+    text: String,
+}
+
+impl Anthropic {
+    pub fn new(api_key: &str) -> Self {
+        Self {
+            api_key: api_key.into(),
+            model: "claude-sonnet-4-20250514".into(),
+            client: Client::builder()
+                .timeout(Duration::from_secs(120))
+                .build()
+                .unwrap(),
+        }
+    }
+
+    pub fn with_model(mut self, model: &str) -> Self {
+        self.model = model.into();
+        self
+    }
+}
+
+#[async_trait]
+impl LlmProvider for Anthropic {
+    fn name(&self) -> &str {
+        "anthropic"
+    }
+
+    fn is_available(&self) -> bool {
+        !self.api_key.is_empty()
+    }
+
+    async fn generate(&self, system: &str, user: &str) -> Result<String, ProviderError> {
+        let request = AnthropicRequest {
+            model: self.model.clone(),
+            max_tokens: 2000,
+            system: system.into(),
+            messages: vec![Message {
+                role: "user".into(),
+                content: user.into(),
+            }],
+            temperature: 0.3,
+        };
+
+        let response = self
+            .client
+            .post("https://api.anthropic.com/v1/messages")
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", "2023-06-01")
+            .header("content-type", "application/json")
+            .json(&request)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(ProviderError::Api(body));
+        }
+
+        let anthropic_response: AnthropicResponse = response.json().await?;
+
+        anthropic_response
+            .content
+            .first()
+            .map(|c| c.text.clone())
+            .ok_or_else(|| ProviderError::Api("No response content".into()))
+    }
+}
+
+/// Provider chain with fallback
+pub struct ProviderChain {
+    providers: Vec<Box<dyn LlmProvider>>,
+}
+
+impl ProviderChain {
+    pub fn new() -> Self {
+        Self { providers: vec![] }
+    }
+
+    pub fn add<P: LlmProvider + 'static>(mut self, provider: P) -> Self {
+        self.providers.push(Box::new(provider));
+        self
+    }
+
+    /// Create default chain (local-first)
+    pub fn default_chain() -> Self {
+        let mut chain = Self::new();
+
+        // LM Studio instances
+        chain = chain.add(OpenAiCompatible::lm_studio("http://192.168.245.155:1234")); // BEAST
+        chain = chain.add(OpenAiCompatible::lm_studio("http://192.168.27.182:1234")); // BEDROOM
+        chain = chain.add(OpenAiCompatible::lm_studio("http://localhost:1234")); // Local
+
+        // Ollama
+        chain = chain.add(Ollama::default());
+
+        // Cloud fallbacks (if API keys present)
+        if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
+            chain = chain.add(Anthropic::new(&key));
+        }
+        if let Ok(key) = std::env::var("OPENAI_API_KEY") {
+            chain = chain.add(OpenAiCompatible::openai(&key));
+        }
+
+        chain
+    }
+
+    pub fn get_available(&self) -> Vec<&str> {
+        self.providers
+            .iter()
+            .filter(|p| p.is_available())
+            .map(|p| p.name())
+            .collect()
+    }
+}
+
+#[async_trait]
+impl LlmProvider for ProviderChain {
+    fn name(&self) -> &str {
+        "chain"
+    }
+
+    fn is_available(&self) -> bool {
+        self.providers.iter().any(|p| p.is_available())
+    }
+
+    async fn generate(&self, system: &str, user: &str) -> Result<String, ProviderError> {
+        let mut errors = vec![];
+
+        for provider in &self.providers {
+            if !provider.is_available() {
+                continue;
+            }
+
+            match provider.generate(system, user).await {
+                Ok(response) => return Ok(response),
+                Err(e) => {
+                    errors.push(format!("{}: {}", provider.name(), e));
+                }
+            }
+        }
+
+        if errors.is_empty() {
+            Err(ProviderError::NoProviders)
+        } else {
+            Err(ProviderError::Api(errors.join("; ")))
+        }
+    }
+}
+
+impl Default for ProviderChain {
+    fn default() -> Self {
+        Self::default_chain()
+    }
+}
