@@ -109,3 +109,4 @@ pub use cursor::{
     SpeedMode, SpeedController,
     smooth_move, smooth_click,
 };
+pub mod app_knowledge;
