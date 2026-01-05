@@ -529,36 +529,53 @@ Be specific about coordinates - estimate them based on screen layout. Screen is 
             String::new()
         };
 
-        let prompt = format!(r#"TASK: {}
+        let prompt = format!(r#"=== GOAL-ORIENTED PLANNING ===
+
+🎯 USER'S GOAL: {}
+
+📚 REFERENCE KNOWLEDGE:
 {}
-SCREEN: {}
 
-HISTORY: {}
+📜 ACTIONS TAKEN SO FAR:
+{}
 {}
 
-You control this computer with keyboard and mouse. Available actions:
-- KEY shift+a - Opens Add menu in Blender (ESSENTIAL - use this to add objects!)
-- KEY Tab - Toggle Edit/Object mode
-- KEY g - Move selected object
-- KEY s - Scale selected object
-- KEY x - Delete (then press Return to confirm)
-- KEY Return - Confirm dialogs
-- CLICK x y - Click at coordinates
-- TYPE text - Type into text fields
-- TASK_COMPLETE - When done
+👁️ CURRENT SCREEN STATE:
+{}
 
-IMPORTANT: In Blender, use KEY actions with shortcuts! TYPE only works in text fields.
-LOOK at the screen state and choose the NEXT appropriate action.
-If a menu is open, click on the menu item or use arrow keys to navigate.
-If the task is done, use TASK_COMPLETE.
+=== PLANNING ===
+Think about:
+1. What is the user trying to achieve? → {}
+2. What progress has been made? (see actions above)
+3. What does the current screen show?
+4. What is the SINGLE NEXT STEP to move toward the goal?
 
-Reply with ONE action in format:
+Available actions:
+- KEY shift+a → Opens Add menu in Blender (ESSENTIAL for adding objects)
+- KEY Tab → Toggle Edit/Object mode
+- KEY g/s/r → Move/Scale/Rotate selected
+- KEY x → Delete (then Return to confirm)
+- KEY Return → Confirm dialogs/selections
+- KEY Down/Up → Navigate menus
+- CLICK x y → Click at pixel coordinates
+- TYPE text → Type text (only in text fields or search boxes)
+- TASK_COMPLETE → When the goal is achieved
+
+IMPORTANT:
+- Each action should move toward the GOAL
+- In Blender menus, TYPE to search (e.g., "uv" for UV Sphere) then Return to select
+- Look at what's ON SCREEN and choose the logical next step
+- If you see the goal is complete (e.g., UV Sphere exists), use TASK_COMPLETE
+
+Reply with ONE action:
 ACTION: <action_type>
 PARAMS: <parameters>"#,
-            self.task, short_knowledge,
-            screen_description.chars().take(300).collect::<String>(),
-            history_context.chars().take(200).collect::<String>(),
-            stuck_warning
+            self.task, // Goal
+            short_knowledge,
+            history_context.chars().take(300).collect::<String>(),
+            stuck_warning,
+            screen_description.chars().take(400).collect::<String>(),
+            self.task // Remind again
         );
 
         let request_body = serde_json::json!({
@@ -566,7 +583,7 @@ PARAMS: <parameters>"#,
             "messages": [
                 {
                     "role": "system",
-                    "content": "You are an AI that controls a computer. Output only the next action to take."
+                    "content": "You are Ganesha, a goal-oriented AI agent. Given a user's goal, the actions taken so far, and the current screen state, determine the SINGLE NEXT ACTION that moves toward completing the goal. Think step-by-step: What's the goal? What's been done? What's on screen? What's next? Output only the action."
                 },
                 {
                     "role": "user",
