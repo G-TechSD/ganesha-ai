@@ -14,8 +14,8 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 // Configuration
 const VISION_ENDPOINT: &str = "http://192.168.27.182:1234/v1";
 const VISION_MODEL: &str = "mistralai/ministral-3-3b";  // Fast vision model
-const PLANNER_ENDPOINT: &str = "http://192.168.245.155:1234/v1";
-const PLANNER_MODEL: &str = "openai/gpt-oss-20b";
+const PLANNER_ENDPOINT: &str = "http://192.168.27.182:1234/v1";  // Same as vision (Bedroom)
+const PLANNER_MODEL: &str = "mistralai/ministral-3-3b";  // Use vision model for planning too
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Get task from command line
@@ -594,54 +594,31 @@ Screen resolution: 1920x1080. Estimate coordinates based on element positions.",
             String::new()
         };
 
-        let prompt = format!(r#"=== AUTONOMOUS GUI AGENT ===
+        // Determine context hint based on screen description
+        let screen_lower = screen_description.to_lowercase();
+        let context_hint = if screen_lower.contains("desktop") && !screen_lower.contains("blender open") {
+            "To open an app icon on desktop, use DOUBLE_CLICK on its coordinates."
+        } else if screen_lower.contains("blender") && screen_lower.contains("open") {
+            "Blender is open. Use KEY shift+a to open Add menu, or CLICK on UI elements."
+        } else if screen_lower.contains("menu") {
+            "Menu is open. Use CLICK on menu item coordinates to select."
+        } else {
+            "Use DOUBLE_CLICK for icons, CLICK for buttons, KEY for shortcuts."
+        };
 
-🎯 GOAL: {}
+        let prompt = format!(r#"GOAL: {}
 
-📜 HISTORY (what you've done):
+SCREEN: {}
 {}
-{}
+HINT: {}
 
-👁️ CURRENT SCREEN (from vision):
-{}
-
-📚 APP KNOWLEDGE:
-{}
-
-=== YOUR TASK ===
-Based on what you SEE on screen, decide the SINGLE NEXT ACTION to progress toward the goal.
-
-THINK STEP BY STEP:
-1. What is on screen RIGHT NOW? (Desktop? Application? Dialog? Menu?)
-2. Am I being EFFECTIVE? (Are my actions making progress toward the goal?)
-3. What CONCRETE action will move me forward?
-
-CRITICAL QUESTIONS:
-- If I see DESKTOP: Where is the app icon I need? What are its coordinates? → DOUBLE_CLICK to open it
-- If I see the APP: What do I need to do inside it? What should I click/press?
-- Am I just WAITING? That's not progress! Take real action!
-
-Available actions:
-- CLICK x y → Single click at coordinates (buttons, menus, selecting items)
-- DOUBLE_CLICK x y → Double click (opening icons, files, launching apps)
-- KEY keyname → Press a key (Return, Escape, Tab, shift+a, ctrl+s, etc.)
-- TYPE text → Type text (only in focused text fields!)
-- TASK_COMPLETE → ONLY when goal is fully achieved
-
-⚠️ EFFECTIVENESS CHECK:
-- WAITING repeatedly = NOT effective
-- Repeating same failed action = NOT effective
-- Not clicking anything = NOT effective
-- You must INTERACT with the GUI to make progress!
-
-Output exactly ONE action:
-ACTION: <action_type>
-PARAMS: <parameters>"#,
+Output ONE action:
+ACTION: <DOUBLE_CLICK|CLICK|KEY|TYPE>
+PARAMS: <x y | keyname | text>"#,
             self.task,
-            history_context.chars().take(400).collect::<String>(),
+            screen_description.chars().take(500).collect::<String>(),
             stuck_warning,
-            screen_description.chars().take(600).collect::<String>(),
-            short_knowledge
+            context_hint
         );
 
         let request_body = serde_json::json!({
@@ -649,15 +626,15 @@ PARAMS: <parameters>"#,
             "messages": [
                 {
                     "role": "system",
-                    "content": "You are Ganesha, a goal-oriented AI agent. Given a user's goal, the actions taken so far, and the current screen state, determine the SINGLE NEXT ACTION that moves toward completing the goal. Think step-by-step: What's the goal? What's been done? What's on screen? What's next? Output only the action."
+                    "content": "GUI automation agent. Output ONLY: ACTION: <type> PARAMS: <value>. Use coordinates from screen description. No explanations."
                 },
                 {
                     "role": "user",
                     "content": prompt
                 }
             ],
-            "max_tokens": 60,
-            "temperature": 0.2
+            "max_tokens": 40,
+            "temperature": 0.1
         });
 
         let client = reqwest::blocking::Client::new();
@@ -701,7 +678,9 @@ PARAMS: <parameters>"#,
     }
 
     fn execute_action(&mut self, action: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let action_upper = action.to_uppercase();
+        // Strip markdown formatting that models sometimes add
+        let action_clean = action.replace("**", "").replace("*", "");
+        let action_upper = action_clean.to_uppercase();
 
         // Parse multi-line ACTION/PARAMS format or single-line format
         // Format 1: "ACTION: CLICK\nPARAMS: 50 300"
@@ -711,7 +690,7 @@ PARAMS: <parameters>"#,
         let mut params = String::new();
         let mut found_action = false;
 
-        for line in action.lines() {
+        for line in action_clean.lines() {
             let line_trimmed = line.trim();
             let line_upper = line_trimmed.to_uppercase();
 
