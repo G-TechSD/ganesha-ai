@@ -48,6 +48,9 @@ pub mod overlay;
 #[cfg(feature = "computer-use")]
 pub mod docs;
 
+// Safety system - multi-layered protection against dangerous actions
+pub mod safety;
+
 // Smell Test - Ganesha's trunk detects the rotten (always available for validation)
 pub mod smell;
 

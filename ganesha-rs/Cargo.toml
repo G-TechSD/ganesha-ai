@@ -168,3 +168,4 @@ voice = ["cpal", "rubato", "hound", "tokio-tungstenite", "webrtc-vad"]
 
 # Full Ganesha experience (eyes, hands, ears, mouth)
 full = ["computer-use", "voice"]
+base64 = ["dep:base64"]
