@@ -383,7 +383,7 @@ When you're done with a task, summarize what was accomplished."#,
             "model": self.model,
             "messages": api_messages,
             "temperature": 0.2,
-            "max_tokens": 4096,
+            "max_tokens": 65536,  // Large output for big file generations
             "stream": false
         });
 

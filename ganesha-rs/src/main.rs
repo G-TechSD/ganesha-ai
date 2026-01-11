@@ -391,6 +391,10 @@ async fn run_repl<C: core::ConsentHandler>(
             style("ganesha>").cyan().bold()
         );
 
+        // Ensure cursor is visible (spinners/animations may hide it)
+        print!("\x1b[?25h");
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+
         match rl.readline(&prompt) {
             Ok(line) => {
                 // Reset interrupt tracking on successful input
@@ -532,7 +536,7 @@ with real GitLab repositories and documentation.
                     println!("{}", style("Bill hopes you enjoy using these tools and that you make things").italic());
                     println!("{}", style("that improve your life or career while making the world better.").italic());
                     println!("\n{}", style("© 2024-2026 G-Tech SD, California").dim());
-                    println!("{}", style("https://github.com/gtechsd/ganesha").dim());
+                    println!("{}", style("https://github.com/G-TechSD/ganesha-ai").dim());
                     println!("{}\n", style("═".repeat(70)).cyan());
                     continue;
                 }

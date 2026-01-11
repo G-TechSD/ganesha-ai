@@ -467,26 +467,29 @@ FOR SYSTEM TASKS (file operations, commands, etc):
 
 FOR QUESTIONS/CONVERSATIONS (no commands needed):
 {{
-  "response": "Your helpful answer here"
+  "response": "Brief, direct answer"
 }}
+
+RESPONSE STYLE:
+- Chat responses: Be QUICK and CONCISE. One or two sentences when possible. No fluff.
+- File generation: Be THOROUGH and COMPLETE. Take your time. Output everything requested.
 
 FILE WRITING - MANDATORY FOR LARGE CONTENT:
 When generating ANY file content (HTML, code, data, etc.):
 - ALWAYS use the actions format with a shell command to write the file
 - Use: cat << 'EOF' > filename.ext ... EOF
 - NEVER dump file content directly into chat - use actions format only
-- NEVER say "copy this and save it" - write the file yourself with a command
-- Include ALL requested content in the file (if user asks for 1000 items, include 1000 items)
-- If you cannot fit everything in one response, say how many you included and offer to add more
+- Include ALL requested content (1000 items means 1000 actual items)
+- NEVER use placeholders like "// ... add more here" or "// 995 more items"
+- Generate REAL content - every item must be actual, unique content
+- You have 65536 output tokens - USE THEM for file content
+- If generating a list of N items, number them 1 to N and include ALL of them
 
 RULES:
-- ALWAYS check conversation history for context on pronouns (it, there, that, they, etc.)
-- For questions, use the response format
-- For file creation/editing, ALWAYS use actions format with shell commands
-- NEVER output raw file content without wrapping in an action command
-- Prefer non-destructive operations
-- Each action should be atomic
-- Be confident and complete - fulfill the full request"#, self.working_directory.display())
+- Chat: quick, precise, not verbose
+- Files: thorough, complete, no shortcuts
+- ALWAYS use actions format for file operations
+- Prefer non-destructive operations"#, self.working_directory.display())
     }
 
     fn parse_actions(&self, response: &str) -> Result<Vec<Action>, GaneshaError> {
@@ -688,6 +691,17 @@ RULES:
 
     /// Sanitize JSON string by escaping control characters within string values
     fn sanitize_json_string(json: &str) -> String {
+        // First, fix JavaScript-style string concatenation that some LLMs produce
+        // Pattern: "text" + "more text" -> "text more text"
+        let json = regex::Regex::new(r#""\s*\+\s*""#)
+            .map(|re| re.replace_all(json, " ").to_string())
+            .unwrap_or_else(|_| json.to_string());
+
+        // Also fix unquoted line continuations like: 79. Cats can...\n, "80. ...
+        let json = regex::Regex::new(r#"(\d+\.)\s+([^"]+)\n,\s*""#)
+            .map(|re| re.replace_all(&json, r#""$1 $2", ""#).to_string())
+            .unwrap_or_else(|_| json);
+
         let mut result = String::with_capacity(json.len());
         let mut in_string = false;
         let mut escape_next = false;
