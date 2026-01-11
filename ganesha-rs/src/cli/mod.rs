@@ -138,6 +138,150 @@ pub fn print_result(success: bool, output: &str, duration_ms: u64) {
     }
 }
 
+/// Describe what an action did in a friendly way
+pub fn describe_action(command: &str, success: bool) -> String {
+    let cmd = command.trim();
+
+    // File creation patterns
+    if cmd.contains('>') && !cmd.contains(">>") {
+        if let Some(file) = extract_redirect_target(cmd) {
+            return if success {
+                format!("📄 Created file: {}", style(&file).cyan())
+            } else {
+                format!("Failed to create file: {}", file)
+            };
+        }
+    }
+
+    // Append to file
+    if cmd.contains(">>") {
+        if let Some(file) = extract_redirect_target(cmd) {
+            return if success {
+                format!("📝 Appended to file: {}", style(&file).cyan())
+            } else {
+                format!("Failed to append to file: {}", file)
+            };
+        }
+    }
+
+    // Directory creation
+    if cmd.starts_with("mkdir ") {
+        let dir = cmd.strip_prefix("mkdir ").unwrap_or("").trim();
+        let dir = dir.trim_start_matches("-p ").trim();
+        return if success {
+            format!("📁 Created directory: {}", style(dir).cyan())
+        } else {
+            format!("Failed to create directory: {}", dir)
+        };
+    }
+
+    // File copy
+    if cmd.starts_with("cp ") {
+        return if success {
+            "📋 Copied file(s)".to_string()
+        } else {
+            "Failed to copy file(s)".to_string()
+        };
+    }
+
+    // File move/rename
+    if cmd.starts_with("mv ") {
+        return if success {
+            "📦 Moved/renamed file(s)".to_string()
+        } else {
+            "Failed to move file(s)".to_string()
+        };
+    }
+
+    // File deletion
+    if cmd.starts_with("rm ") {
+        return if success {
+            "🗑️ Deleted file(s)".to_string()
+        } else {
+            "Failed to delete file(s)".to_string()
+        };
+    }
+
+    // Git operations
+    if cmd.starts_with("git ") {
+        let subcmd = cmd.strip_prefix("git ").unwrap_or("").split_whitespace().next().unwrap_or("");
+        return match subcmd {
+            "add" => "📥 Staged files for commit".to_string(),
+            "commit" => "💾 Created commit".to_string(),
+            "push" => "🚀 Pushed to remote".to_string(),
+            "pull" => "📥 Pulled from remote".to_string(),
+            "clone" => "📦 Cloned repository".to_string(),
+            _ => format!("Git: {}", subcmd),
+        };
+    }
+
+    // Package installation
+    if cmd.starts_with("npm install") || cmd.starts_with("yarn add") || cmd.starts_with("pip install") {
+        return if success {
+            "📦 Installed package(s)".to_string()
+        } else {
+            "Failed to install package(s)".to_string()
+        };
+    }
+
+    // Default - just show the command was executed
+    if success {
+        "✨ Command executed successfully".to_string()
+    } else {
+        "Command failed".to_string()
+    }
+}
+
+/// Extract the target file from a redirect command
+fn extract_redirect_target(cmd: &str) -> Option<String> {
+    // Handle both > and >> redirects
+    let parts: Vec<&str> = if cmd.contains(">>") {
+        cmd.split(">>").collect()
+    } else {
+        cmd.split('>').collect()
+    };
+
+    if parts.len() >= 2 {
+        let target = parts.last()?.trim();
+        // Remove any trailing quotes
+        let target = target.trim_matches('"').trim_matches('\'');
+        if !target.is_empty() {
+            return Some(target.to_string());
+        }
+    }
+    None
+}
+
+/// Print a friendly action summary
+pub fn print_action_summary(command: &str, success: bool, output: &str, duration_ms: u64) {
+    let description = describe_action(command, success);
+
+    if success {
+        println!("{} {}", style("✓").green().bold(), description);
+
+        // Show output if there is any meaningful content
+        let trimmed = output.trim();
+        if !trimmed.is_empty() && trimmed.len() > 1 {
+            // Truncate long output
+            let lines: Vec<&str> = trimmed.lines().collect();
+            if lines.len() > 8 {
+                let shown: Vec<&str> = lines.iter().take(6).copied().collect();
+                println!("{}", style(shown.join("\n")).dim());
+                println!("{}", style(format!("... ({} more lines)", lines.len() - 6)).dim());
+            } else {
+                println!("{}", style(trimmed).dim());
+            }
+        }
+
+        // Show timing for longer operations
+        if duration_ms > 100 {
+            println!("{}", style(format!("  ({}ms)", duration_ms)).dim());
+        }
+    } else {
+        println!("{} {}", style("✗").red().bold(), description);
+    }
+}
+
 /// CLI Consent Handler
 pub struct CliConsent {
     term: Term,
