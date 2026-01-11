@@ -1447,6 +1447,7 @@ dependencies = [
  "oslog",
  "playwright",
  "png 0.17.16",
+ "rand 0.8.5",
  "ratatui",
  "regex",
  "reqwest",

@@ -339,32 +339,90 @@ async fn run_repl<C: core::ConsentHandler>(
     session_log.push(format!("=== Session Ended: {} ===", Local::now().format("%Y-%m-%d %H:%M:%S")));
 }
 
+/// Fun spinner messages for the AI thinking phase
+const THINKING_MESSAGES: &[&str] = &[
+    "🐘 Ganesha is contemplating...",
+    "🔮 Consulting the cosmic trunk...",
+    "✨ Removing obstacles from your path...",
+    "🧠 Processing with elephant-sized wisdom...",
+    "🌟 Channeling divine intelligence...",
+    "🎯 Focusing the third eye...",
+    "💭 Meditating on your request...",
+    "🔥 Igniting the inner flame of knowledge...",
+];
+
+/// Fun spinner messages for execution phase
+const EXECUTING_MESSAGES: &[&str] = &[
+    "⚡ Executing with trunk precision...",
+    "🛠️ Ganesha's trunk is at work...",
+    "🎪 Performing digital magic...",
+    "🚀 Launching your commands...",
+    "⚙️ Turning the cosmic gears...",
+];
+
+/// Create an entertaining spinner
+fn create_spinner(msg: &str) -> indicatif::ProgressBar {
+    use indicatif::{ProgressBar, ProgressStyle};
+
+    let spinner = ProgressBar::new_spinner();
+    spinner.set_style(
+        ProgressStyle::default_spinner()
+            .tick_chars("🕐🕑🕒🕓🕔🕕🕖🕗🕘🕙🕚🕛")
+            .template("{spinner:.cyan} {msg}")
+            .unwrap()
+    );
+    spinner.set_message(msg.to_string());
+    spinner.enable_steady_tick(std::time::Duration::from_millis(100));
+    spinner
+}
+
 /// Run a task and return the output for logging
 async fn run_task_with_log<C: core::ConsentHandler>(
     engine: &mut GaneshaEngine<ProviderChain, C>,
     task: &str,
     code_mode: bool,
 ) -> String {
+    use rand::seq::SliceRandom;
+
     let task = if code_mode {
         format!("[CODE MODE] {}", task)
     } else {
         task.to_string()
     };
 
+    // Pick a random thinking message
+    let thinking_msg = THINKING_MESSAGES
+        .choose(&mut rand::thread_rng())
+        .unwrap_or(&"🐘 Thinking...");
+
+    // Show spinner while planning
+    let spinner = create_spinner(thinking_msg);
+
     // Plan
     let plan = match engine.plan(&task).await {
-        Ok(p) => p,
+        Ok(p) => {
+            spinner.finish_and_clear();
+            p
+        }
         Err(e) => {
+            spinner.finish_and_clear();
             let msg = format!("Planning failed: {}", e);
             print_error(&msg);
             return msg;
         }
     };
 
-    // Execute
+    // Execute with different spinner
+    let exec_msg = EXECUTING_MESSAGES
+        .choose(&mut rand::thread_rng())
+        .unwrap_or(&"⚡ Executing...");
+
+    let spinner = create_spinner(exec_msg);
+
     let mut outputs = vec![];
     match engine.execute(&plan).await {
         Ok(results) => {
+            spinner.finish_and_clear();
             for result in results {
                 print_result(result.success, &result.output, result.duration_ms);
                 outputs.push(result.output.clone());
@@ -375,6 +433,7 @@ async fn run_task_with_log<C: core::ConsentHandler>(
             }
         }
         Err(e) => {
+            spinner.finish_and_clear();
             let msg = format!("{}", e);
             print_error(&msg);
             outputs.push(msg);

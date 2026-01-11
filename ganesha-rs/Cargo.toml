@@ -17,8 +17,9 @@ tokio = { version = "1.35", features = ["full"] }
 clap = { version = "4.4", features = ["derive", "env"] }
 dialoguer = "0.11"              # Interactive prompts
 console = "0.15"                # Terminal colors/formatting
-indicatif = "0.17"              # Progress bars
+indicatif = "0.17"              # Progress bars/spinners
 rustyline = "14.0"              # Readline for REPL (arrow keys, history)
+rand = "0.8"                    # Random selection for fun messages
 
 # TUI
 ratatui = "0.29"                # Terminal UI framework
