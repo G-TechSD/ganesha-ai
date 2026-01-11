@@ -208,17 +208,40 @@ async fn main() {
     }
 }
 
-/// Interactive REPL loop
+/// Interactive REPL loop with proper line editing
 async fn run_repl<C: core::ConsentHandler>(
     engine: &mut GaneshaEngine<ProviderChain, C>,
     code_mode: bool,
 ) {
-    use std::io::{self, Write};
+    use rustyline::error::ReadlineError;
+    use rustyline::{DefaultEditor, Config, EditMode};
 
     // Session log for /log command
     let mut session_log: Vec<String> = vec![
         format!("=== Ganesha Session Started: {} ===", Local::now().format("%Y-%m-%d %H:%M:%S")),
     ];
+
+    // Configure rustyline with emacs-style editing (arrow keys, etc.)
+    let config = Config::builder()
+        .edit_mode(EditMode::Emacs)
+        .build();
+
+    let mut rl = match DefaultEditor::with_config(config) {
+        Ok(editor) => editor,
+        Err(e) => {
+            print_error(&format!("Failed to initialize readline: {}", e));
+            return;
+        }
+    };
+
+    // Load history if exists
+    let history_path = dirs::data_dir()
+        .map(|p| p.join("ganesha").join("history.txt"))
+        .unwrap_or_else(|| std::path::PathBuf::from(".ganesha_history"));
+
+    if history_path.exists() {
+        let _ = rl.load_history(&history_path);
+    }
 
     println!("\n{}", style("─".repeat(60)).dim());
     println!("{}", style("Interactive mode. Type 'exit' or 'quit' to leave.").dim());
@@ -226,72 +249,91 @@ async fn run_repl<C: core::ConsentHandler>(
     println!("{}\n", style("─".repeat(60)).dim());
 
     loop {
-        print!("{} ", style("ganesha>").cyan().bold());
-        io::stdout().flush().unwrap();
+        let prompt = format!("{} ", style("ganesha>").cyan().bold());
 
-        let mut input = String::new();
-        if io::stdin().read_line(&mut input).is_err() {
-            break;
-        }
+        match rl.readline(&prompt) {
+            Ok(line) => {
+                let input = line.trim();
 
-        let input = input.trim();
-
-        if input.is_empty() {
-            continue;
-        }
-
-        // Log user input
-        session_log.push(format!("[{}] USER: {}", Local::now().format("%H:%M:%S"), input));
-
-        // Handle exit commands
-        if matches!(input.to_lowercase().as_str(), "exit" | "quit" | "q" | ":q") {
-            println!("{}", style("Namaste 🙏").yellow());
-            break;
-        }
-
-        // Handle help
-        if input == "/help" || input == "help" {
-            println!("\n{}", style("Ganesha Commands:").bold());
-            println!("  /1: <task>     - Use fast tier (Haiku)");
-            println!("  /2: <task>     - Use balanced tier (Sonnet)");
-            println!("  /3: <task>     - Use premium tier (Opus)");
-            println!("  /vision: <task> - Use vision model");
-            println!("  /log [file]    - Save session to file");
-            println!("  /config        - Reconfigure providers");
-            println!("  exit, quit     - Exit Ganesha\n");
-            continue;
-        }
-
-        // Handle /log command
-        if input.to_lowercase().starts_with("/log") {
-            let filename = input.strip_prefix("/log").map(|s| s.trim()).filter(|s| !s.is_empty());
-            let log_file = filename.map(|f| f.to_string()).unwrap_or_else(|| {
-                format!("ganesha-session-{}.log", Local::now().format("%Y%m%d-%H%M%S"))
-            });
-
-            match std::fs::write(&log_file, session_log.join("\n")) {
-                Ok(_) => {
-                    println!("{} Session saved to: {}", style("✓").green(), log_file);
-                    session_log.push(format!("[{}] SYSTEM: Session saved to {}", Local::now().format("%H:%M:%S"), log_file));
+                if input.is_empty() {
+                    continue;
                 }
-                Err(e) => {
-                    println!("{} Failed to save log: {}", style("✗").red(), e);
+
+                // Add to history
+                let _ = rl.add_history_entry(input);
+
+                // Log user input
+                session_log.push(format!("[{}] USER: {}", Local::now().format("%H:%M:%S"), input));
+
+                // Handle exit commands
+                if matches!(input.to_lowercase().as_str(), "exit" | "quit" | "q" | ":q") {
+                    println!("{}", style("Namaste 🙏").yellow());
+                    break;
                 }
+
+                // Handle help
+                if input == "/help" || input == "help" {
+                    println!("\n{}", style("Ganesha Commands:").bold());
+                    println!("  /1: <task>     - Use fast tier (Haiku)");
+                    println!("  /2: <task>     - Use balanced tier (Sonnet)");
+                    println!("  /3: <task>     - Use premium tier (Opus)");
+                    println!("  /vision: <task> - Use vision model");
+                    println!("  /log [file]    - Save session to file");
+                    println!("  /config        - Reconfigure providers");
+                    println!("  exit, quit     - Exit Ganesha\n");
+                    continue;
+                }
+
+                // Handle /log command
+                if input.to_lowercase().starts_with("/log") {
+                    let filename = input.strip_prefix("/log").map(|s| s.trim()).filter(|s| !s.is_empty());
+                    let log_file = filename.map(|f| f.to_string()).unwrap_or_else(|| {
+                        format!("ganesha-session-{}.log", Local::now().format("%Y%m%d-%H%M%S"))
+                    });
+
+                    match std::fs::write(&log_file, session_log.join("\n")) {
+                        Ok(_) => {
+                            println!("{} Session saved to: {}", style("✓").green(), log_file);
+                            session_log.push(format!("[{}] SYSTEM: Session saved to {}", Local::now().format("%H:%M:%S"), log_file));
+                        }
+                        Err(e) => {
+                            println!("{} Failed to save log: {}", style("✗").red(), e);
+                        }
+                    }
+                    continue;
+                }
+
+                // Handle config
+                if input == "/config" {
+                    println!("{}", style("Run: ganesha --configure").dim());
+                    continue;
+                }
+
+                // Process the task and capture output
+                let output = run_task_with_log(engine, input, code_mode).await;
+                session_log.push(format!("[{}] GANESHA: {}", Local::now().format("%H:%M:%S"), output));
+                println!(); // Add spacing after task completion
             }
-            continue;
+            Err(ReadlineError::Interrupted) => {
+                println!("^C");
+                continue;
+            }
+            Err(ReadlineError::Eof) => {
+                println!("{}", style("Namaste 🙏").yellow());
+                break;
+            }
+            Err(err) => {
+                print_error(&format!("Input error: {}", err));
+                break;
+            }
         }
-
-        // Handle config
-        if input == "/config" {
-            println!("{}", style("Run: ganesha --configure").dim());
-            continue;
-        }
-
-        // Process the task and capture output
-        let output = run_task_with_log(engine, input, code_mode).await;
-        session_log.push(format!("[{}] GANESHA: {}", Local::now().format("%H:%M:%S"), output));
-        println!(); // Add spacing after task completion
     }
+
+    // Save history
+    if let Some(parent) = history_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = rl.save_history(&history_path);
 
     // Add session end
     session_log.push(format!("=== Session Ended: {} ===", Local::now().format("%Y-%m-%d %H:%M:%S")));
