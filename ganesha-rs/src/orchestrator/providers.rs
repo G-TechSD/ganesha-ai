@@ -1,8 +1,9 @@
 //! Provider System with OAuth2 and Dynamic Model Discovery
 //!
 //! Supports:
-//! - Local: LM Studio, Ollama
+//! - Local: LM Studio (BEAST + BEDROOM), Ollama
 //! - Cloud: OpenAI (GPT-5.2), Anthropic (Opus 4.5), Google (Gemini 3)
+//! - Aggregator: OpenRouter (access to many providers with one key)
 //!
 //! Authentication:
 //! - OAuth2 for interactive login
@@ -27,8 +28,7 @@ pub enum ProviderType {
     Anthropic,
     Google,
     Azure,
-    Groq,
-    Together,
+    OpenRouter,  // Aggregator - access to many models
     Custom,
 }
 
@@ -260,27 +260,14 @@ impl ProviderManager {
             });
         }
 
-        // Groq (fast inference)
-        if let Ok(key) = std::env::var("GROQ_API_KEY") {
-            endpoints.insert("groq".into(), ProviderEndpoint {
-                provider_type: ProviderType::Groq,
-                name: "Groq".into(),
-                base_url: "https://api.groq.com/openai".into(),
+        // OpenRouter - Aggregator for many providers
+        if let Ok(key) = std::env::var("OPENROUTER_API_KEY") {
+            endpoints.insert("openrouter".into(), ProviderEndpoint {
+                provider_type: ProviderType::OpenRouter,
+                name: "OpenRouter".into(),
+                base_url: "https://openrouter.ai/api".into(),
                 auth: AuthMethod::ApiKey(key),
-                default_model: "llama-3.3-70b-versatile".into(),
-                enabled: true,
-                priority: 5,
-            });
-        }
-
-        // Together AI
-        if let Ok(key) = std::env::var("TOGETHER_API_KEY") {
-            endpoints.insert("together".into(), ProviderEndpoint {
-                provider_type: ProviderType::Together,
-                name: "Together AI".into(),
-                base_url: "https://api.together.xyz".into(),
-                auth: AuthMethod::ApiKey(key),
-                default_model: "meta-llama/Llama-3.3-70B-Instruct-Turbo".into(),
+                default_model: "anthropic/claude-sonnet-4".into(),
                 enabled: true,
                 priority: 6,
             });
@@ -350,7 +337,7 @@ impl ProviderManager {
             ProviderType::Google => self.fetch_google_models().await?,
             ProviderType::Ollama => self.fetch_ollama_models().await?,
             ProviderType::LmStudio => self.fetch_lmstudio_models().await?,
-            ProviderType::Groq => self.fetch_groq_models().await?,
+            ProviderType::OpenRouter => self.fetch_openrouter_models().await?,
             _ => vec![],
         };
 
@@ -690,45 +677,157 @@ impl ProviderManager {
         Ok(all_models)
     }
 
-    async fn fetch_groq_models(&self) -> Result<Vec<ModelInfo>, Box<dyn std::error::Error + Send + Sync>> {
-        Ok(vec![
+    async fn fetch_openrouter_models(&self) -> Result<Vec<ModelInfo>, Box<dyn std::error::Error + Send + Sync>> {
+        let endpoint = self.endpoints.get("openrouter");
+        let auth = match endpoint {
+            Some(e) => &e.auth,
+            None => return Ok(Self::default_openrouter_models()),
+        };
+
+        let mut req = self.client.get("https://openrouter.ai/api/v1/models");
+        req = self.apply_auth(req, auth);
+
+        match req.send().await {
+            Ok(resp) if resp.status().is_success() => {
+                let json: serde_json::Value = resp.json().await?;
+                let models = json["data"]
+                    .as_array()
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|m| {
+                                let id = m["id"].as_str()?;
+                                let context = m["context_length"].as_u64().unwrap_or(8192) as u32;
+                                let pricing = &m["pricing"];
+                                let input_cost = pricing["prompt"].as_str()
+                                    .and_then(|s| s.parse::<f64>().ok())
+                                    .unwrap_or(0.0) * 1_000_000.0;
+                                let output_cost = pricing["completion"].as_str()
+                                    .and_then(|s| s.parse::<f64>().ok())
+                                    .unwrap_or(0.0) * 1_000_000.0;
+
+                                Some(ModelInfo {
+                                    id: id.to_string(),
+                                    name: m["name"].as_str().unwrap_or(id).to_string(),
+                                    provider: ProviderType::OpenRouter,
+                                    context_window: context,
+                                    max_output: (context / 4).min(32768),
+                                    supports_vision: id.contains("vision") || id.contains("gpt-4") || id.contains("claude") || id.contains("gemini"),
+                                    supports_tools: true,
+                                    input_cost_per_1m: input_cost,
+                                    output_cost_per_1m: output_cost,
+                                    tier: self.infer_openrouter_tier(id),
+                                })
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_else(Self::default_openrouter_models);
+                Ok(models)
+            }
+            _ => Ok(Self::default_openrouter_models()),
+        }
+    }
+
+    fn default_openrouter_models() -> Vec<ModelInfo> {
+        vec![
             ModelInfo {
-                id: "llama-3.3-70b-versatile".into(),
-                name: "Llama 3.3 70B".into(),
-                provider: ProviderType::Groq,
-                context_window: 128000,
+                id: "anthropic/claude-opus-4".into(),
+                name: "Claude Opus 4 (via OpenRouter)".into(),
+                provider: ProviderType::OpenRouter,
+                context_window: 200000,
                 max_output: 32768,
-                supports_vision: false,
+                supports_vision: true,
                 supports_tools: true,
-                input_cost_per_1m: 0.59,
-                output_cost_per_1m: 0.79,
+                input_cost_per_1m: 15.0,
+                output_cost_per_1m: 75.0,
+                tier: ModelTier::Premium,
+            },
+            ModelInfo {
+                id: "anthropic/claude-sonnet-4".into(),
+                name: "Claude Sonnet 4 (via OpenRouter)".into(),
+                provider: ProviderType::OpenRouter,
+                context_window: 200000,
+                max_output: 16384,
+                supports_vision: true,
+                supports_tools: true,
+                input_cost_per_1m: 3.0,
+                output_cost_per_1m: 15.0,
                 tier: ModelTier::Capable,
             },
             ModelInfo {
-                id: "llama-3.2-90b-vision-preview".into(),
-                name: "Llama 3.2 90B Vision".into(),
-                provider: ProviderType::Groq,
+                id: "openai/gpt-4o".into(),
+                name: "GPT-4o (via OpenRouter)".into(),
+                provider: ProviderType::OpenRouter,
                 context_window: 128000,
+                max_output: 16384,
+                supports_vision: true,
+                supports_tools: true,
+                input_cost_per_1m: 2.5,
+                output_cost_per_1m: 10.0,
+                tier: ModelTier::Capable,
+            },
+            ModelInfo {
+                id: "google/gemini-2.0-flash-exp".into(),
+                name: "Gemini 2.0 Flash (via OpenRouter)".into(),
+                provider: ProviderType::OpenRouter,
+                context_window: 1000000,
                 max_output: 8192,
                 supports_vision: true,
                 supports_tools: true,
-                input_cost_per_1m: 0.9,
-                output_cost_per_1m: 0.9,
-                tier: ModelTier::Vision,
+                input_cost_per_1m: 0.0,
+                output_cost_per_1m: 0.0,
+                tier: ModelTier::Fast,
             },
             ModelInfo {
-                id: "mixtral-8x7b-32768".into(),
-                name: "Mixtral 8x7B".into(),
-                provider: ProviderType::Groq,
-                context_window: 32768,
+                id: "meta-llama/llama-3.3-70b-instruct".into(),
+                name: "Llama 3.3 70B (via OpenRouter)".into(),
+                provider: ProviderType::OpenRouter,
+                context_window: 131072,
                 max_output: 8192,
                 supports_vision: false,
                 supports_tools: true,
-                input_cost_per_1m: 0.24,
-                output_cost_per_1m: 0.24,
-                tier: ModelTier::Fast,
+                input_cost_per_1m: 0.4,
+                output_cost_per_1m: 0.4,
+                tier: ModelTier::Capable,
             },
-        ])
+            ModelInfo {
+                id: "qwen/qwen-2.5-72b-instruct".into(),
+                name: "Qwen 2.5 72B (via OpenRouter)".into(),
+                provider: ProviderType::OpenRouter,
+                context_window: 131072,
+                max_output: 8192,
+                supports_vision: false,
+                supports_tools: true,
+                input_cost_per_1m: 0.35,
+                output_cost_per_1m: 0.4,
+                tier: ModelTier::Capable,
+            },
+            ModelInfo {
+                id: "deepseek/deepseek-chat".into(),
+                name: "DeepSeek V3 (via OpenRouter)".into(),
+                provider: ProviderType::OpenRouter,
+                context_window: 64000,
+                max_output: 8192,
+                supports_vision: false,
+                supports_tools: true,
+                input_cost_per_1m: 0.14,
+                output_cost_per_1m: 0.28,
+                tier: ModelTier::Standard,
+            },
+        ]
+    }
+
+    fn infer_openrouter_tier(&self, model_id: &str) -> ModelTier {
+        if model_id.contains("opus") || model_id.contains("gpt-5") || model_id.contains("o3") {
+            ModelTier::Premium
+        } else if model_id.contains("sonnet") || model_id.contains("gpt-4") || model_id.contains("70b") || model_id.contains("72b") {
+            ModelTier::Capable
+        } else if model_id.contains("haiku") || model_id.contains("flash") || model_id.contains("mini") {
+            ModelTier::Fast
+        } else if model_id.contains("vision") || model_id.contains("llava") {
+            ModelTier::Vision
+        } else {
+            ModelTier::Standard
+        }
     }
 
     fn apply_auth(&self, req: reqwest::RequestBuilder, auth: &AuthMethod) -> reqwest::RequestBuilder {
