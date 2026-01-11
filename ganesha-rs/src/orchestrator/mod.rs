@@ -36,6 +36,7 @@ pub mod mcp;
 pub mod rollback;
 pub mod scheduler;
 pub mod vision;
+pub mod providers;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
