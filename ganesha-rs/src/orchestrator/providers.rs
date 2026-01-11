@@ -210,7 +210,20 @@ impl ProviderManager {
             priority: 3,
         });
 
-        // Ollama
+        // OpenRouter - Aggregator (most users have this before local setup)
+        if let Ok(key) = std::env::var("OPENROUTER_API_KEY") {
+            endpoints.insert("openrouter".into(), ProviderEndpoint {
+                provider_type: ProviderType::OpenRouter,
+                name: "OpenRouter".into(),
+                base_url: "https://openrouter.ai/api".into(),
+                auth: AuthMethod::ApiKey(key),
+                default_model: "anthropic/claude-sonnet-4".into(),
+                enabled: true,
+                priority: 4,
+            });
+        }
+
+        // Ollama (local, but requires setup)
         endpoints.insert("ollama".into(), ProviderEndpoint {
             provider_type: ProviderType::Ollama,
             name: "Ollama".into(),
@@ -218,9 +231,10 @@ impl ProviderManager {
             auth: AuthMethod::None,
             default_model: "llama3.3".into(),
             enabled: true,
-            priority: 4,
+            priority: 5,
         });
 
+        // Direct cloud providers (premium, use when specified or escalating)
         // OpenAI - GPT-5.2
         if let Ok(key) = std::env::var("OPENAI_API_KEY") {
             endpoints.insert("openai".into(), ProviderEndpoint {
@@ -228,7 +242,7 @@ impl ProviderManager {
                 name: "OpenAI".into(),
                 base_url: "https://api.openai.com".into(),
                 auth: AuthMethod::ApiKey(key),
-                default_model: "gpt-5.2".into(), // Latest
+                default_model: "gpt-5.2".into(),
                 enabled: true,
                 priority: 10,
             });
@@ -241,7 +255,7 @@ impl ProviderManager {
                 name: "Anthropic".into(),
                 base_url: "https://api.anthropic.com".into(),
                 auth: AuthMethod::ApiKey(key),
-                default_model: "claude-opus-4-5-20251101".into(), // Latest
+                default_model: "claude-opus-4-5-20251101".into(),
                 enabled: true,
                 priority: 11,
             });
@@ -254,26 +268,241 @@ impl ProviderManager {
                 name: "Google AI".into(),
                 base_url: "https://generativelanguage.googleapis.com".into(),
                 auth: AuthMethod::ApiKey(key),
-                default_model: "gemini-3-pro".into(), // Latest
+                default_model: "gemini-3-pro".into(),
                 enabled: true,
                 priority: 12,
             });
         }
 
-        // OpenRouter - Aggregator for many providers
-        if let Ok(key) = std::env::var("OPENROUTER_API_KEY") {
-            endpoints.insert("openrouter".into(), ProviderEndpoint {
-                provider_type: ProviderType::OpenRouter,
-                name: "OpenRouter".into(),
-                base_url: "https://openrouter.ai/api".into(),
-                auth: AuthMethod::ApiKey(key),
-                default_model: "anthropic/claude-sonnet-4".into(),
-                enabled: true,
-                priority: 6,
-            });
+        endpoints
+    }
+
+    /// Check if first-run setup is needed
+    pub fn needs_setup(&self) -> bool {
+        !self.config_path.exists()
+    }
+
+    /// Interactive first-run setup
+    pub async fn first_run_setup(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        println!("\n\x1b[1;36m╭─────────────────────────────────────────╮\x1b[0m");
+        println!("\x1b[1;36m│       GANESHA PROVIDER SETUP            │\x1b[0m");
+        println!("\x1b[1;36m╰─────────────────────────────────────────╯\x1b[0m\n");
+
+        println!("Let's configure your AI providers.\n");
+
+        // Detect available providers
+        println!("\x1b[1mDetecting available providers...\x1b[0m\n");
+
+        let mut detected = Vec::new();
+
+        // Check LM Studio endpoints
+        for name in ["beast", "bedroom", "local"] {
+            if self.check_endpoint(name).await {
+                detected.push(name.to_string());
+                println!("  \x1b[32m✓\x1b[0m {} is online", name);
+            }
         }
 
-        endpoints
+        // Check Ollama
+        if self.check_endpoint("ollama").await {
+            detected.push("ollama".to_string());
+            println!("  \x1b[32m✓\x1b[0m Ollama is online");
+        }
+
+        // Check API keys
+        let has_openrouter = std::env::var("OPENROUTER_API_KEY").is_ok();
+        let has_openai = std::env::var("OPENAI_API_KEY").is_ok();
+        let has_anthropic = std::env::var("ANTHROPIC_API_KEY").is_ok();
+        let has_google = std::env::var("GOOGLE_API_KEY").is_ok();
+
+        if has_openrouter {
+            detected.push("openrouter".to_string());
+            println!("  \x1b[32m✓\x1b[0m OpenRouter API key found");
+        }
+        if has_openai {
+            detected.push("openai".to_string());
+            println!("  \x1b[32m✓\x1b[0m OpenAI API key found");
+        }
+        if has_anthropic {
+            detected.push("anthropic".to_string());
+            println!("  \x1b[32m✓\x1b[0m Anthropic API key found");
+        }
+        if has_google {
+            detected.push("google".to_string());
+            println!("  \x1b[32m✓\x1b[0m Google API key found");
+        }
+
+        if detected.is_empty() {
+            println!("\n\x1b[33m⚠ No providers detected!\x1b[0m");
+            println!("\nTo use Ganesha, you need at least one provider:");
+            println!("  • Set OPENROUTER_API_KEY for easy access to many models");
+            println!("  • Run Ollama locally: ollama serve");
+            println!("  • Run LM Studio on localhost:1234");
+            println!("  • Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or GOOGLE_API_KEY");
+            return Ok(());
+        }
+
+        // Ask for priority preference
+        println!("\n\x1b[1mProvider Priority\x1b[0m");
+        println!("Ganesha uses providers in priority order (lowest number = first choice).\n");
+
+        println!("Current priority:");
+        let mut available: Vec<_> = self.endpoints.iter()
+            .filter(|(name, _)| detected.contains(name))
+            .collect();
+        available.sort_by_key(|(_, e)| e.priority);
+
+        for (i, (name, endpoint)) in available.iter().enumerate() {
+            println!("  {}. {} ({:?})", i + 1, name, endpoint.provider_type);
+        }
+
+        println!("\n\x1b[2mTo change priority later, run: ganesha providers --configure\x1b[0m");
+
+        // Save the configuration
+        self.save()?;
+        println!("\n\x1b[32m✓ Configuration saved to {:?}\x1b[0m", self.config_path);
+
+        Ok(())
+    }
+
+    /// Interactive provider configuration
+    pub async fn configure_interactive(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use std::io::{self, Write};
+
+        println!("\n\x1b[1;36mProvider Configuration\x1b[0m\n");
+
+        // Show current providers
+        println!("\x1b[1mCurrent providers (by priority):\x1b[0m\n");
+
+        let mut providers: Vec<_> = self.endpoints.iter_mut().collect();
+        providers.sort_by_key(|(_, e)| e.priority);
+
+        for (i, (name, endpoint)) in providers.iter().enumerate() {
+            let status = if endpoint.enabled { "\x1b[32m●\x1b[0m" } else { "\x1b[31m○\x1b[0m" };
+            println!("  {} {}. {} - {} (priority {})",
+                status, i + 1, name, endpoint.name, endpoint.priority);
+        }
+
+        println!("\n\x1b[1mCommands:\x1b[0m");
+        println!("  priority <name> <num>  - Set provider priority (lower = preferred)");
+        println!("  enable <name>          - Enable a provider");
+        println!("  disable <name>         - Disable a provider");
+        println!("  add <name> <url>       - Add custom LM Studio/Ollama endpoint");
+        println!("  test                   - Test all providers");
+        println!("  save                   - Save and exit");
+        println!("  quit                   - Exit without saving\n");
+
+        loop {
+            print!("\x1b[36mganesha providers>\x1b[0m ");
+            io::stdout().flush()?;
+
+            let mut input = String::new();
+            io::stdin().read_line(&mut input)?;
+            let parts: Vec<&str> = input.trim().split_whitespace().collect();
+
+            if parts.is_empty() {
+                continue;
+            }
+
+            match parts[0] {
+                "priority" if parts.len() >= 3 => {
+                    let name = parts[1];
+                    if let Ok(priority) = parts[2].parse::<u32>() {
+                        if let Some(endpoint) = self.endpoints.get_mut(name) {
+                            endpoint.priority = priority;
+                            println!("  Set {} priority to {}", name, priority);
+                        } else {
+                            println!("  \x1b[31mProvider '{}' not found\x1b[0m", name);
+                        }
+                    }
+                }
+                "enable" if parts.len() >= 2 => {
+                    let name = parts[1];
+                    if let Some(endpoint) = self.endpoints.get_mut(name) {
+                        endpoint.enabled = true;
+                        println!("  Enabled {}", name);
+                    } else {
+                        println!("  \x1b[31mProvider '{}' not found\x1b[0m", name);
+                    }
+                }
+                "disable" if parts.len() >= 2 => {
+                    let name = parts[1];
+                    if let Some(endpoint) = self.endpoints.get_mut(name) {
+                        endpoint.enabled = false;
+                        println!("  Disabled {}", name);
+                    } else {
+                        println!("  \x1b[31mProvider '{}' not found\x1b[0m", name);
+                    }
+                }
+                "add" if parts.len() >= 3 => {
+                    let name = parts[1];
+                    let url = parts[2];
+                    let provider_type = if url.contains("11434") {
+                        ProviderType::Ollama
+                    } else {
+                        ProviderType::LmStudio
+                    };
+                    let max_priority = self.endpoints.values()
+                        .map(|e| e.priority)
+                        .max()
+                        .unwrap_or(0);
+
+                    self.endpoints.insert(name.to_string(), ProviderEndpoint {
+                        provider_type,
+                        name: format!("Custom: {}", name),
+                        base_url: url.to_string(),
+                        auth: AuthMethod::None,
+                        default_model: "default".into(),
+                        enabled: true,
+                        priority: max_priority + 1,
+                    });
+                    println!("  Added {} at {}", name, url);
+                }
+                "test" => {
+                    println!("\n  Testing providers...\n");
+                    for (name, _) in &self.endpoints {
+                        let online = self.check_endpoint(name).await;
+                        let status = if online { "\x1b[32m✓\x1b[0m" } else { "\x1b[31m✗\x1b[0m" };
+                        println!("  {} {}", status, name);
+                    }
+                    println!();
+                }
+                "save" => {
+                    self.save()?;
+                    println!("  \x1b[32m✓ Configuration saved\x1b[0m");
+                    break;
+                }
+                "quit" | "exit" | "q" => {
+                    println!("  Exiting without saving");
+                    break;
+                }
+                _ => {
+                    println!("  \x1b[31mUnknown command. Try: priority, enable, disable, add, test, save, quit\x1b[0m");
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Set provider priority programmatically
+    pub fn set_priority(&mut self, name: &str, priority: u32) -> bool {
+        if let Some(endpoint) = self.endpoints.get_mut(name) {
+            endpoint.priority = priority;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Enable/disable a provider
+    pub fn set_enabled(&mut self, name: &str, enabled: bool) -> bool {
+        if let Some(endpoint) = self.endpoints.get_mut(name) {
+            endpoint.enabled = enabled;
+            true
+        } else {
+            false
+        }
     }
 
     /// Save current configuration
