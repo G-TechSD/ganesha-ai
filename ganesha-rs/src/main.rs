@@ -8,6 +8,7 @@
 //! ganesha --interactive
 //! ```
 
+mod agent;
 mod cli;
 mod core;
 mod logging;
@@ -58,6 +59,10 @@ struct Args {
     /// Interactive REPL mode
     #[arg(short, long)]
     interactive: bool,
+
+    /// Agent mode - full coding assistant with tool use
+    #[arg(long)]
+    agent: bool,
 
     /// Rollback session
     #[arg(short, long)]
@@ -180,6 +185,22 @@ async fn main() {
     }
 
     print_info(&format!("Provider: {}", available.first().unwrap()));
+
+    // Agent mode - full coding assistant with tool use
+    if args.agent {
+        let (provider_url, model) = chain.get_first_available_url()
+            .unwrap_or_else(|| ("http://192.168.245.155:1234".to_string(), "default".to_string()));
+
+        println!("\n{}", style("─".repeat(60)).dim());
+        println!("{}", style("Starting Agent Mode...").cyan().bold());
+        println!("{}", style("─".repeat(60)).dim());
+
+        if let Err(e) = agent::run_agent(&provider_url, &model, if task.is_empty() { None } else { Some(&task) }, args.auto).await {
+            print_error(&format!("Agent error: {}", e));
+            std::process::exit(1);
+        }
+        return;
+    }
 
     // Create engine with appropriate consent handler
     if args.auto {

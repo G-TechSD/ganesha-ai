@@ -358,11 +358,13 @@ impl LlmProvider for Anthropic {
 /// Provider chain with fallback
 pub struct ProviderChain {
     providers: Vec<Box<dyn LlmProvider>>,
+    /// Provider URLs for agent mode access
+    pub provider_urls: Vec<(String, String)>, // (url, model)
 }
 
 impl ProviderChain {
     pub fn new() -> Self {
-        Self { providers: vec![] }
+        Self { providers: vec![], provider_urls: vec![] }
     }
 
     pub fn add<P: LlmProvider + 'static>(mut self, provider: P) -> Self {
@@ -374,7 +376,11 @@ impl ProviderChain {
     pub fn default_chain() -> Self {
         let mut chain = Self::new();
 
-        // LM Studio instances
+        // LM Studio instances - track URLs for agent mode
+        chain.provider_urls.push(("http://192.168.245.155:1234".into(), "default".into()));
+        chain.provider_urls.push(("http://192.168.27.182:1234".into(), "default".into()));
+        chain.provider_urls.push(("http://localhost:1234".into(), "default".into()));
+
         chain = chain.add(OpenAiCompatible::lm_studio("http://192.168.245.155:1234")); // BEAST
         chain = chain.add(OpenAiCompatible::lm_studio("http://192.168.27.182:1234")); // BEDROOM
         chain = chain.add(OpenAiCompatible::lm_studio("http://localhost:1234")); // Local
@@ -391,6 +397,26 @@ impl ProviderChain {
         }
 
         chain
+    }
+
+    /// Get the first available provider URL and model for agent mode
+    pub fn get_first_available_url(&self) -> Option<(String, String)> {
+        for (url, model) in &self.provider_urls {
+            // Quick check if this URL is available
+            let check_url = format!("{}/v1/models", url);
+            let handle = std::thread::spawn(move || {
+                reqwest::blocking::Client::new()
+                    .get(&check_url)
+                    .timeout(std::time::Duration::from_secs(2))
+                    .send()
+                    .map(|r| r.status().is_success())
+                    .unwrap_or(false)
+            });
+            if handle.join().unwrap_or(false) {
+                return Some((url.clone(), model.clone()));
+            }
+        }
+        None
     }
 
     pub fn get_available(&self) -> Vec<&str> {
