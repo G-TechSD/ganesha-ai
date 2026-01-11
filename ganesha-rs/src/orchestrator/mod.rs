@@ -31,6 +31,7 @@ pub mod minime;
 pub mod tools;
 pub mod wiggum;
 pub mod memory;
+pub mod memory_db;  // SQLite-based scalable memory
 pub mod engine;
 pub mod mcp;
 pub mod rollback;

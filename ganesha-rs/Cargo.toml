@@ -47,6 +47,9 @@ lazy_static = "1.4"
 # UUID for session IDs
 uuid = { version = "1.6", features = ["v4", "serde"] }
 
+# SQLite for scalable local memory (embedded, no server needed)
+rusqlite = { version = "0.32", features = ["bundled"] }
+
 # Time/dates
 chrono = { version = "0.4", features = ["serde"] }
 

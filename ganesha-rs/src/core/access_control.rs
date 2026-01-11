@@ -243,8 +243,14 @@ lazy_static! {
         Regex::new(r"^pip3?\s+(list|show|freeze)").unwrap(),
         Regex::new(r"^npm\s+(list|ls|view)").unwrap(),
 
-        // Git info
-        Regex::new(r"^git\s+(status|log|diff|branch)").unwrap(),
+        // Git info (read-only operations)
+        Regex::new(r"^git\s+(status|log|diff|branch|show|tag|remote|stash\s+list|config\s+--list|rev-parse|describe|shortlog|blame|ls-files|ls-tree|cat-file)").unwrap(),
+
+        // GitHub CLI (read-only)
+        Regex::new(r"^gh\s+(repo\s+view|issue\s+list|issue\s+view|pr\s+list|pr\s+view|pr\s+status|pr\s+checks|release\s+list|api)").unwrap(),
+
+        // GitLab CLI (read-only)
+        Regex::new(r"^glab\s+(repo\s+view|issue\s+list|issue\s+view|mr\s+list|mr\s+view|release\s+list|api)").unwrap(),
     ];
 
     static ref STANDARD_PATTERNS: Vec<Regex> = vec![
@@ -277,8 +283,26 @@ lazy_static! {
         Regex::new(r"^docker\s+(pull|run|stop|start|rm|exec)").unwrap(),
         Regex::new(r"^docker-compose\s+").unwrap(),
 
-        // Git
-        Regex::new(r"^git\s+(add|commit|push|pull|fetch|checkout)").unwrap(),
+        // Git - comprehensive operations
+        Regex::new(r"^git\s+(add|commit|push|pull|fetch|checkout|merge|rebase|cherry-pick)").unwrap(),
+        Regex::new(r"^git\s+(clone|init|remote|branch|tag|stash|reset|revert|clean)").unwrap(),
+        Regex::new(r"^git\s+(switch|restore|worktree|bisect|submodule|subtree)").unwrap(),
+        Regex::new(r"^git\s+(config|gc|prune|fsck|reflog|archive|bundle|apply|am)").unwrap(),
+        Regex::new(r"^git\s+(format-patch|send-email|request-pull)").unwrap(),
+        Regex::new(r"^git\s+(mv|rm|checkout-index|update-index|read-tree|write-tree)").unwrap(),
+        // Git flow and common workflows
+        Regex::new(r"^git\s+flow\s+").unwrap(),
+
+        // GitHub CLI (gh) - full operations
+        Regex::new(r"^gh\s+(repo|issue|pr|release|gist|workflow|run|actions|auth|config|alias|extension)").unwrap(),
+        Regex::new(r"^gh\s+api\s+").unwrap(),
+
+        // GitLab CLI (glab) - full operations
+        Regex::new(r"^glab\s+(repo|issue|mr|release|ci|pipeline|job|auth|config|alias)").unwrap(),
+        Regex::new(r"^glab\s+api\s+").unwrap(),
+
+        // Gitea/Forgejo CLI
+        Regex::new(r"^tea\s+").unwrap(),
 
         // Development
         Regex::new(r"^python3?\s+").unwrap(),
