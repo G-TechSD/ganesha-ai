@@ -293,6 +293,14 @@ lazy_static! {
         Regex::new(r"^(yarn|pnpm|bun)\s+").unwrap(),
         Regex::new(r"^(vite|webpack|parcel|rollup)\s+").unwrap(),
 
+        // Mobile development
+        Regex::new(r"^flutter\s+").unwrap(),
+        Regex::new(r"^dart\s+").unwrap(),
+        Regex::new(r"^pod\s+").unwrap(),  // iOS CocoaPods
+        Regex::new(r"^(gradle|gradlew)\s+").unwrap(),  // Android
+        Regex::new(r"^adb\s+").unwrap(),  // Android Debug Bridge
+        Regex::new(r"^expo\s+").unwrap(),  // React Native
+
         // Shell scripting (bash, sh for running scripts)
         Regex::new(r"^(bash|sh|zsh)\s+").unwrap(),
         Regex::new(r"^source\s+").unwrap(),

@@ -16,7 +16,7 @@ mod orchestrator;
 mod tui;
 
 use clap::{Parser, Subcommand};
-use cli::{print_banner, print_error, print_info, print_result, print_success, AutoConsent, CliConsent};
+use cli::{print_banner, print_error, print_info, print_action_summary, print_success, AutoConsent, CliConsent};
 use console::style;
 use core::access_control::{load_policy, AccessLevel};
 use core::GaneshaEngine;
@@ -215,11 +215,15 @@ async fn run_repl<C: core::ConsentHandler>(
 ) {
     use rustyline::error::ReadlineError;
     use rustyline::{DefaultEditor, Config, EditMode};
+    use std::time::Instant;
 
     // Session log for /log command
     let mut session_log: Vec<String> = vec![
         format!("=== Ganesha Session Started: {} ===", Local::now().format("%Y-%m-%d %H:%M:%S")),
     ];
+
+    // Track Ctrl+C for double-press exit
+    let mut last_interrupt: Option<Instant> = None;
 
     // Configure rustyline with emacs-style editing (arrow keys, etc.)
     let config = Config::builder()
@@ -244,7 +248,7 @@ async fn run_repl<C: core::ConsentHandler>(
     }
 
     println!("\n{}", style("─".repeat(60)).dim());
-    println!("{}", style("Interactive mode. Type 'exit' or 'quit' to leave.").dim());
+    println!("{}", style("Interactive mode. Ctrl+C twice or 'exit' to leave.").dim());
     println!("{}", style("Commands: /1: /2: /3: (tiers) | /vision: | /log | /help").dim());
     println!("{}\n", style("─".repeat(60)).dim());
 
@@ -253,6 +257,9 @@ async fn run_repl<C: core::ConsentHandler>(
 
         match rl.readline(&prompt) {
             Ok(line) => {
+                // Reset interrupt tracking on successful input
+                last_interrupt = None;
+
                 let input = line.trim();
 
                 if input.is_empty() {
@@ -280,6 +287,7 @@ async fn run_repl<C: core::ConsentHandler>(
                     println!("  /vision: <task> - Use vision model");
                     println!("  /log [file]    - Save session to file");
                     println!("  /config        - Reconfigure providers");
+                    println!("  Ctrl+C twice   - Exit Ganesha");
                     println!("  exit, quit     - Exit Ganesha\n");
                     continue;
                 }
@@ -315,8 +323,15 @@ async fn run_repl<C: core::ConsentHandler>(
                 println!(); // Add spacing after task completion
             }
             Err(ReadlineError::Interrupted) => {
-                println!("^C");
-                continue;
+                // Check for double Ctrl+C
+                if let Some(last) = last_interrupt {
+                    if last.elapsed().as_secs() < 2 {
+                        println!("\n{}", style("Namaste 🙏").yellow());
+                        break;
+                    }
+                }
+                last_interrupt = Some(Instant::now());
+                println!("{}", style("(Press Ctrl+C again to exit)").dim());
             }
             Err(ReadlineError::Eof) => {
                 println!("{}", style("Namaste 🙏").yellow());
@@ -424,8 +439,17 @@ async fn run_task_with_log<C: core::ConsentHandler>(
         Ok(results) => {
             spinner.finish_and_clear();
             for result in results {
-                print_result(result.success, &result.output, result.duration_ms);
-                outputs.push(result.output.clone());
+                // Check if this is a conversational Response action (no command)
+                if result.command.is_empty() && !result.explanation.is_empty() {
+                    // This is a Response action - show the actual response nicely
+                    println!("\n{}", style(&result.explanation).cyan());
+                    outputs.push(result.explanation.clone());
+                } else {
+                    // This is a command execution - show friendly summary
+                    print_action_summary(&result.command, result.success, &result.output, result.duration_ms);
+                    outputs.push(result.output.clone());
+                }
+
                 if let Some(ref err) = result.error {
                     print_error(err);
                     outputs.push(format!("Error: {}", err));
@@ -467,7 +491,15 @@ async fn run_task<C: core::ConsentHandler>(
     match engine.execute(&plan).await {
         Ok(results) => {
             for result in results {
-                print_result(result.success, &result.output, result.duration_ms);
+                // Check if this is a conversational Response action (no command)
+                if result.command.is_empty() && !result.explanation.is_empty() {
+                    // This is a Response action - show the actual response nicely
+                    println!("\n{}", console::style(&result.explanation).cyan());
+                } else {
+                    // This is a command execution - show friendly summary
+                    print_action_summary(&result.command, result.success, &result.output, result.duration_ms);
+                }
+
                 if let Some(ref err) = result.error {
                     print_error(err);
                 }

@@ -110,14 +110,17 @@ impl LlmProvider for OpenAiCompatible {
     }
 
     fn is_available(&self) -> bool {
-        // Quick sync check
+        // Quick sync check - use std::thread to avoid async runtime conflicts
         let url = format!("{}/v1/models", self.base_url);
-        reqwest::blocking::Client::new()
-            .get(&url)
-            .timeout(Duration::from_secs(2))
-            .send()
-            .map(|r| r.status().is_success())
-            .unwrap_or(false)
+        let handle = std::thread::spawn(move || {
+            reqwest::blocking::Client::new()
+                .get(&url)
+                .timeout(Duration::from_secs(2))
+                .send()
+                .map(|r| r.status().is_success())
+                .unwrap_or(false)
+        });
+        handle.join().unwrap_or(false)
     }
 
     async fn generate(&self, system: &str, user: &str) -> Result<String, ProviderError> {
@@ -214,13 +217,17 @@ impl LlmProvider for Ollama {
     }
 
     fn is_available(&self) -> bool {
+        // Quick sync check - use std::thread to avoid async runtime conflicts
         let url = format!("{}/api/tags", self.base_url);
-        reqwest::blocking::Client::new()
-            .get(&url)
-            .timeout(Duration::from_secs(2))
-            .send()
-            .map(|r| r.status().is_success())
-            .unwrap_or(false)
+        let handle = std::thread::spawn(move || {
+            reqwest::blocking::Client::new()
+                .get(&url)
+                .timeout(Duration::from_secs(2))
+                .send()
+                .map(|r| r.status().is_success())
+                .unwrap_or(false)
+        });
+        handle.join().unwrap_or(false)
     }
 
     async fn generate(&self, system: &str, user: &str) -> Result<String, ProviderError> {

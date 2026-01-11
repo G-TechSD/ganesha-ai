@@ -95,6 +95,8 @@ impl ExecutionPlan {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionResult {
     pub action_id: String,
+    pub command: String,
+    pub explanation: String,
     pub success: bool,
     pub output: String,
     pub error: Option<String>,
@@ -271,6 +273,8 @@ impl<L: LlmProvider, C: ConsentHandler> GaneshaEngine<L, C> {
             if matches!(action.action_type, ActionType::Response) {
                 results.push(ExecutionResult {
                     action_id: action.id.clone(),
+                    command: String::new(),
+                    explanation: action.explanation.clone(),
                     success: true,
                     output: action.explanation.clone(),
                     error: None,
@@ -286,6 +290,8 @@ impl<L: LlmProvider, C: ConsentHandler> GaneshaEngine<L, C> {
                     .command_denied("user", &action.command, &check.reason);
                 results.push(ExecutionResult {
                     action_id: action.id.clone(),
+                    command: action.command.clone(),
+                    explanation: action.explanation.clone(),
                     success: false,
                     output: String::new(),
                     error: Some(check.reason),
@@ -311,6 +317,8 @@ impl<L: LlmProvider, C: ConsentHandler> GaneshaEngine<L, C> {
                     );
                     results.push(ExecutionResult {
                         action_id: action.id.clone(),
+                        command: action.command.clone(),
+                        explanation: action.explanation.clone(),
                         success: true,
                         output,
                         error: None,
@@ -320,6 +328,8 @@ impl<L: LlmProvider, C: ConsentHandler> GaneshaEngine<L, C> {
                 Err(e) => {
                     results.push(ExecutionResult {
                         action_id: action.id.clone(),
+                        command: action.command.clone(),
+                        explanation: action.explanation.clone(),
                         success: false,
                         output: String::new(),
                         error: Some(e.to_string()),
