@@ -470,22 +470,23 @@ FOR QUESTIONS/CONVERSATIONS (no commands needed):
   "response": "Your helpful answer here"
 }}
 
-FILE WRITING - IMPORTANT:
-When generating large content (HTML pages, code files, lists with many items, etc.):
-- Use shell commands to write directly to files: cat << 'EOF' > filename.ext
-- DO NOT display the full content in chat - it floods the screen
-- Simply confirm: "Writing filename.ext with [description]..."
-- You are CAPABLE of generating large amounts of content (1000+ items, full applications, etc.)
-- Generate the COMPLETE content as requested - do not truncate or use placeholders
-- If writing code, HTML, or data files, write them directly - the user will open/view them
+FILE WRITING - MANDATORY FOR LARGE CONTENT:
+When generating ANY file content (HTML, code, data, etc.):
+- ALWAYS use the actions format with a shell command to write the file
+- Use: cat << 'EOF' > filename.ext ... EOF
+- NEVER dump file content directly into chat - use actions format only
+- NEVER say "copy this and save it" - write the file yourself with a command
+- Include ALL requested content in the file (if user asks for 1000 items, include 1000 items)
+- If you cannot fit everything in one response, say how many you included and offer to add more
 
 RULES:
 - ALWAYS check conversation history for context on pronouns (it, there, that, they, etc.)
 - For questions, use the response format
-- For system tasks, use the actions format with safe, idiomatic commands
+- For file creation/editing, ALWAYS use actions format with shell commands
+- NEVER output raw file content without wrapping in an action command
 - Prefer non-destructive operations
 - Each action should be atomic
-- Be confident - you have extensive knowledge and can generate substantial content"#, self.working_directory.display())
+- Be confident and complete - fulfill the full request"#, self.working_directory.display())
     }
 
     fn parse_actions(&self, response: &str) -> Result<Vec<Action>, GaneshaError> {
@@ -588,6 +589,24 @@ RULES:
     /// Strip LLM control tokens from response (LM Studio special tokens, etc.)
     /// Also normalizes Unicode punctuation to ASCII for better terminal display
     fn strip_control_tokens(response: &str) -> String {
+        let mut result = response.to_string();
+
+        // Strip LM Studio function-calling style prefixes (before JSON)
+        // Pattern: "assistantcommentary to=functions.* json" or similar
+        if let Ok(func_prefix) = regex::Regex::new(r"(?i)^assistant\w*\s+to=\S+\s+json\s*") {
+            result = func_prefix.replace(&result, "").to_string();
+        }
+
+        // Also strip any text before the first { if it looks like garbage prefix
+        if let Some(json_start) = result.find('{') {
+            let prefix = &result[..json_start];
+            // If prefix contains suspicious patterns, strip it
+            if prefix.contains("to=") || prefix.contains("functions") ||
+               prefix.contains("assistant") && prefix.len() < 100 {
+                result = result[json_start..].to_string();
+            }
+        }
+
         // Common LLM control token patterns to remove
         let patterns = [
             "<|channel|>",
@@ -607,7 +626,6 @@ RULES:
             "response",  // Often follows <|constrain|>
         ];
 
-        let mut result = response.to_string();
         for pattern in patterns {
             result = result.replace(pattern, "");
         }
