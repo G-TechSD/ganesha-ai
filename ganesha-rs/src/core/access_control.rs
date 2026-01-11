@@ -220,7 +220,10 @@ lazy_static! {
         Regex::new(r"^head\s+").unwrap(),
         Regex::new(r"^tail\s+").unwrap(),
         Regex::new(r"^ls(\s+|$)").unwrap(),
-        Regex::new(r"^find\s+.*-type").unwrap(),
+        Regex::new(r"^find\s+").unwrap(),  // Allow find for codebase exploration
+        Regex::new(r"^tree(\s+|$)").unwrap(),  // Directory tree view
+        Regex::new(r"^wc\s+").unwrap(),  // Word/line count
+        Regex::new(r"^file\s+").unwrap(),  // File type detection
 
         // System info
         Regex::new(r"^(uname|hostname|uptime|whoami|id|groups)(\s+|$)").unwrap(),

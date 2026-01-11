@@ -44,6 +44,11 @@ pub fn print_banner() {
             .yellow()
             .bold()
     );
+    println!(
+        "{}",
+        style(format!("                        Version {}", env!("CARGO_PKG_VERSION")))
+            .dim()
+    );
     println!();
 }
 
