@@ -6,21 +6,41 @@ use crate::core::{Action, ConsentHandler, ConsentResult, ExecutionPlan, RiskLeve
 use console::{style, Style, Term};
 use dialoguer::{theme::ColorfulTheme, Confirm, Select};
 
-/// ASCII banner
-pub const BANNER: &str = r#"
- ██████╗  █████╗ ███╗   ██╗███████╗███████╗██╗  ██╗ █████╗
-██╔════╝ ██╔══██╗████╗  ██║██╔════╝██╔════╝██║  ██║██╔══██╗
-██║  ███╗███████║██╔██╗ ██║█████╗  ███████╗███████║███████║
-██║   ██║██╔══██║██║╚██╗██║██╔══╝  ╚════██║██╔══██║██╔══██║
-╚██████╔╝██║  ██║██║ ╚████║███████╗███████║██║  ██║██║  ██║
- ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝
+/// ASCII banner - Ganesha the Elephant God
+pub const BANNER_ART: &str = r#"
+                     _.!._
+                   /O*@*O\
+                  <\@(_)@/>
+         ,;,   .--;`     `;--.   ,
+         O@O_ /   |d     b|   \ _hnn
+         | `/ \   |       |   / \` |
+         &&&&  :##;\     /;##;  &&&&
+         |  \ / `##/|   |##'  \ /  |
+         \   %%%%`</|   |#'`%%%%   /
+          '._|_ \   |   |'  / _|_.'
+            _/  /   \   \   \  \
+           / (\(     '.  '-._&&&&
+          (  ()##,    o'--.._`\-)
+           '-():`##########'()()()
+            /:::::/()`Y`()\:::::\
+            \::::( () | () )::::/
+             `"""`\().'.()/'"""`
+"#;
+
+pub const BANNER_TEXT: &str = r#"
+  ██████   █████  ███    ██ ███████ ███████ ██   ██  █████
+ ██       ██   ██ ████   ██ ██      ██      ██   ██ ██   ██
+ ██   ███ ███████ ██ ██  ██ █████   ███████ ███████ ███████
+ ██    ██ ██   ██ ██  ██ ██ ██           ██ ██   ██ ██   ██
+  ██████  ██   ██ ██   ████ ███████ ███████ ██   ██ ██   ██
 "#;
 
 pub fn print_banner() {
-    println!("{}", style(BANNER).cyan().bold());
+    println!("{}", style(BANNER_ART).magenta());
+    println!("{}", style(BANNER_TEXT).cyan().bold());
     println!(
         "{}",
-        style("         ══════ The Remover of Obstacles ══════")
+        style("           ✦  R E M O V E R   O F   O B S T A C L E S  ✦")
             .yellow()
             .bold()
     );
