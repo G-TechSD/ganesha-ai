@@ -545,8 +545,10 @@ impl ProviderManager {
 
         let mut found_any = false;
 
-        // Check common endpoints
+        // Check common endpoints including known network servers
         let local_checks = [
+            ("192.168.245.155:1234", "LM Studio BEAST"),
+            ("192.168.27.182:1234", "LM Studio BEDROOM"),
             ("localhost:1234", "LM Studio (localhost)"),
             ("localhost:11434", "Ollama"),
         ];
@@ -565,7 +567,17 @@ impl ProviderManager {
                     found_any = true;
                     println!("  \x1b[32m✓\x1b[0m {} found at {}", name, addr);
 
-                    let endpoint_name = if is_ollama { "ollama" } else { "local" };
+                    // Determine endpoint name and priority
+                    let (endpoint_name, priority) = if addr.contains("192.168.245.155") {
+                        ("beast", 1)  // Primary capable model
+                    } else if addr.contains("192.168.27.182") {
+                        ("bedroom", 2)  // Secondary fast model
+                    } else if is_ollama {
+                        ("ollama", 5)
+                    } else {
+                        ("local", 3)
+                    };
+
                     self.endpoints.insert(endpoint_name.into(), ProviderEndpoint {
                         provider_type: if is_ollama { ProviderType::Ollama } else { ProviderType::LmStudio },
                         name: name.to_string(),
@@ -573,7 +585,7 @@ impl ProviderManager {
                         auth: AuthMethod::None,
                         default_model: "default".into(),
                         enabled: true,
-                        priority: 1,
+                        priority,
                     });
                 }
             }
@@ -908,7 +920,10 @@ impl ProviderManager {
 
         // Auto-configure based on available endpoints
         let has_openrouter = self.endpoints.contains_key("openrouter");
-        let has_local = self.endpoints.contains_key("local") || self.endpoints.contains_key("ollama");
+        let has_local = self.endpoints.contains_key("beast")
+            || self.endpoints.contains_key("bedroom")
+            || self.endpoints.contains_key("local")
+            || self.endpoints.contains_key("ollama");
         let has_anthropic = self.endpoints.contains_key("anthropic");
 
         if has_openrouter {
@@ -934,12 +949,28 @@ impl ProviderManager {
                 description: "Vision (Sonnet)".into(),
             });
         } else if has_local {
-            let local_name = if self.endpoints.contains_key("local") { "local" } else { "ollama" };
-            println!("Configuring tiers using local models...");
+            // Prefer beast > bedroom > local > ollama
+            let local_name = if self.endpoints.contains_key("beast") {
+                "beast"
+            } else if self.endpoints.contains_key("bedroom") {
+                "bedroom"
+            } else if self.endpoints.contains_key("local") {
+                "local"
+            } else {
+                "ollama"
+            };
+            println!("Configuring tiers using local models ({})...", local_name);
 
             self.tiers.set(1, local_name, "default", "Local model");
             self.tiers.set(2, local_name, "default", "Local model");
             self.tiers.tiers.remove(&3); // Remove premium tier if only local
+
+            // If bedroom is available, use it for fast tier
+            if self.endpoints.contains_key("bedroom") && self.endpoints.contains_key("beast") {
+                self.tiers.set(1, "bedroom", "default", "Fast (BEDROOM)");
+                self.tiers.set(2, "beast", "default", "Capable (BEAST)");
+            }
+
             self.tiers.vision = None;
         }
 
