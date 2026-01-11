@@ -256,6 +256,12 @@ lazy_static! {
         Regex::new(r"^rm\s+").unwrap(),  // rm allowed, but -rf / blocked in DANGEROUS
         Regex::new(r"^chmod\s+").unwrap(),
         Regex::new(r"^ln\s+").unwrap(),
+        Regex::new(r"^tee\s+").unwrap(),
+
+        // File content operations (for creating files)
+        Regex::new(r"^echo\s+").unwrap(),
+        Regex::new(r"^printf\s+").unwrap(),
+        Regex::new(r"^cat\s+").unwrap(),  // Also covers cat > file, cat << EOF
 
         // Text processing
         Regex::new(r"^(grep|awk|sed|sort|uniq|cut)\s+").unwrap(),
@@ -277,8 +283,28 @@ lazy_static! {
         // Development
         Regex::new(r"^python3?\s+").unwrap(),
         Regex::new(r"^node\s+").unwrap(),
-        Regex::new(r"^npm\s+(install|run|start|test)").unwrap(),
+        Regex::new(r"^npm\s+(install|run|start|test|init)").unwrap(),
+        Regex::new(r"^npx\s+").unwrap(),
         Regex::new(r"^cargo\s+").unwrap(),
+        Regex::new(r"^rustc\s+").unwrap(),
+        Regex::new(r"^go\s+").unwrap(),
+
+        // Web development
+        Regex::new(r"^(yarn|pnpm|bun)\s+").unwrap(),
+        Regex::new(r"^(vite|webpack|parcel|rollup)\s+").unwrap(),
+
+        // Shell scripting (bash, sh for running scripts)
+        Regex::new(r"^(bash|sh|zsh)\s+").unwrap(),
+        Regex::new(r"^source\s+").unwrap(),
+
+        // Common utilities
+        Regex::new(r"^(head|tail|wc|diff|comm)\s+").unwrap(),
+        Regex::new(r"^(xargs|tee|tr)\s+").unwrap(),
+        Regex::new(r"^(date|cal|sleep)").unwrap(),
+        Regex::new(r"^(true|false|test|\[)").unwrap(),
+
+        // Directory operations
+        Regex::new(r"^(cd|pwd|pushd|popd)").unwrap(),
     ];
 
     static ref ELEVATED_PATTERNS: Vec<Regex> = vec![
