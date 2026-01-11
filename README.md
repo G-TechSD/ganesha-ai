@@ -1,166 +1,249 @@
 # Ganesha
-**The First Cross-Platform AI-Powered System Administration Tool**
+**The Remover of Obstacles**
 
-OPENAI CODEX CLI IS ALMOST EXACTLY THIS - but they developed it about 6 months later
-
-https://www.youtube.com/watch?v=FUq9qRwrDrI
-
----
-WARNING - EXPERIMENTAL - CURRENTLY IN BETA
----
-
-### Overview
-Ganesha, the first advanced cross-platform AI-powered tool of its kind, empowers system administrators across Linux, Mac, and Windows with intuitive, plain English task requests in the terminal. Simply describe your desired actions, and Ganesha—backed by GPT-4o-mini translates them into commands, scripts, or even rollbacks, simplifying system management and troubleshooting.
-
----
-
-## YOU NEED AN OPENAI API KEY TO USE THIS VERSION OF GANESHA
-**visit platform.openai.com and obtain an API key with access to gpt-4o-mini**
-
-
-## Get Started: Add your OpenAI API key to ganesha.py
-**Open ganesha.py and locate #OPENAI_API_KEY = "", uncomment and paste your key**
-```shell
-OPENAI_API_KEY = "YOUR KEY HERE"
+```
+ ██████╗  █████╗ ███╗   ██╗███████╗███████╗██╗  ██╗ █████╗
+██╔════╝ ██╔══██╗████╗  ██║██╔════╝██╔════╝██║  ██║██╔══██╗
+██║  ███╗███████║██╔██╗ ██║█████╗  ███████╗███████║███████║
+██║   ██║██╔══██║██║╚██╗██║██╔══╝  ╚════██║██╔══██║██╔══██║
+╚██████╔╝██║  ██║██║ ╚████║███████╗███████║██║  ██║██║  ██║
+ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝
 ```
 
-## Installation
-**The following command will install all dependencies and make the "ganesha" command available**
-```shell
-python ganesha.py --setup
-```
-Unfortunately this may not work, and you might need to install the modules like so:
-```shell
-pip3 install openai==0.28 colorama psutil requests zipfile
+**The first cross-platform AI-powered system control tool.**
+
+Originally developed in 2024 - predating Claude Code and OpenAI Codex CLI.
+
+---
+
+## What is Ganesha?
+
+Ganesha translates natural language into safe, executable system commands. Just describe what you want to do, and Ganesha figures out how to do it.
+
+```bash
+ganesha "install docker and configure it to start on boot"
+ganesha "find all files larger than 1GB and show me"
+ganesha "set up nginx as a reverse proxy for port 3000"
 ```
 
 ### Key Features
 
-- **Natural Language Processing**: Ganesha interprets plain English task requests, transforming your intentions into executable commands without requiring complex syntax.
-- **Automated Execution**: With user approval, Ganesha executes commands directly, streamlining workflows and minimizing manual intervention.
-- **Intelligent Troubleshooting**: Upon encountering an error, Ganesha analyzes output, identifies the issue, and offers alternative solutions or commands.
-- **Rollback Capability**: Track and undo executed commands easily with an automated rollback feature.
-- **Clear Explanations**: Each command includes a description, empowering users with understanding and serving as a learning tool.
+- **Natural Language Control** - Speak plainly, get results
+- **Local-First LLMs** - Works with LM Studio, Ollama - no cloud required
+- **Safe by Default** - User consent required before execution
+- **Rollback Support** - Undo any session's changes
+- **Cross-Platform** - Linux, macOS, Windows
+- **MCP Compatible** - Use as a tool in Claude Code or any MCP client
+- **HTTP API** - Integrate with web apps like Claudia Admin
+
+---
+
+## Installation
+
+```bash
+# Clone
+git clone https://github.com/G-TechSD/ganesha-ai.git
+cd ganesha-ai
+
+# Install (basic)
+pip install -e .
+
+# Install (all features)
+pip install -e ".[all]"
+```
 
 ### Requirements
 
-- **OpenAI API Key**: Ganesha currently requires an OpenAI API key (not included) for GPT-4 functionality.
-- **Alternative Setup**: Ganesha can potentially run with local models like GPT4All, although this setup is experimental and untested.
+- Python 3.10+
+- A local LLM server (LM Studio or Ollama) OR cloud API key
 
 ---
 
-### Core Benefits
+## Quick Start
 
-1. **Unmatched AI Integration**: Ganesha is the only cross-platform tool to leverage GPT-4 for intuitive, natural language-based system management.
-2. **Versatility**: Perform administrative tasks across Linux, Mac, and Windows, covering software management, security, network setup, and more.
-3. **User-Friendly**: Designed for all skill levels, Ganesha makes advanced system administration accessible and intuitive.
-4. **Time-Saving Automation**: Speeds up routine tasks by automating command execution, while reducing human error.
-5. **Educational Insights**: Clear explanations enhance user understanding, making it an ideal learning resource.
+### CLI Mode
 
----
+```bash
+# Execute a task
+ganesha "show disk usage"
 
-### Key Capabilities
+# Auto-approve (dangerous!)
+ganesha --auto "update all packages"
 
-#### Troubleshooting and Recovery
-- Describe a problem, and Ganesha diagnoses and executes commands to resolve it.
-- Utilize rollback commands to reverse changes made in previous sessions, with cross-platform reliability.
+# Interactive REPL
+ganesha --interactive
 
-#### Installation and Configuration
-- Automate complex software installations and dependency configurations with straightforward task requests.
+# Code generation mode
+ganesha --code "create a React login form"
 
-#### Security and System Optimization
-- **Security Audits**: Run security assessments and apply configuration updates for enhanced protection.
-- **Performance Tuning**: Optimize CPU, memory, and disk usage to improve system performance.
-
-#### Network and Connectivity Management
-- Configure network settings, troubleshoot connectivity issues, and manage firewall rules without requiring in-depth networking knowledge.
-
-#### Data Management and Backup
-- Set up automated backups and restore routines, or manage disk space efficiently by identifying large or unused files.
-
-#### Task Automation and Scripting
-- Generate custom scripts to handle repetitive tasks, enhancing productivity.
-
----
-
-### Rollback and Recovery System
-
-#### Rollback Features
-- **Automated Rollback Commands**: Logs all executed commands and generates inverse commands to undo applied changes.
-- **Multi-Platform Reliability**: Rollback functionality is tested and verified on Linux, Mac, and Windows.
-- **Context-Aware Rollbacks**: Tailors rollback actions based on the platform, restoring configurations or unmuting sound as necessary.
-
-#### Usage Example
-1. **Execution**: `ganesha "Mute system volume" --A`
-2. **Rollback**: `ganesha --rollback last` – automatically restores the prior settings or installation.
-
----
-
-### Real-World Applications
-
-Ganesha simplifies a wide variety of tasks, empowering users with efficient and intuitive system management:
-
-#### Routine Administration
-- **Service Control**: Start, stop, restart, or troubleshoot system services.
-- **System Updates**: Automate package updates for security and stability.
-- **Resource Monitoring**: Set up monitoring and alerting for system resources like CPU and memory.
-
-#### Developer and Compliance Support
-- **Environment Setup**: Quickly configure development environments with required tools and dependencies.
-- **Compliance Enforcement**: Automate compliance checks to maintain organizational standards.
-
-#### Prompts for Sysadmins
-- **"Install Docker and configure it to start on boot."**
-- **"Generate a list of all active services and restart any failed ones."**
-- **"Set up Nginx as a reverse proxy for a local service on port 5000."**
-- **"Rollback the most recent changes and summarize the undone actions."**
-- **"Install Fail2ban for SSH brute-force protection."**
-
-#### Beginner Prompts
-- **"List all files in my current folder."**
-- **"Move 'notes.txt' to the 'Documents' folder."**
-- **"Display my system's IP address."**
-- **"Install a software package using apt."**
-- **"Change file permissions to make 'script.sh' executable."**
-
-
-## Command-Line Usage
-
-```shell
-ganesha [options] [plain English task request]
+# Rollback last session
+ganesha --rollback
 ```
 
-### Options:
+### MCP Server
 
-- **`--setup`**  
-  Installs all required dependencies, then adds "ganesha" command to the system.
-  *Example*: `python ganesha.py --setup"`
-  
-- **`--rollback [session_id | last]`**  
-  Reverts changes made in the most recent session or a specified session by session ID. Use `last` to roll back the latest session.  
-  *Example*: `ganesha --rollback last`
+Add to your Claude Desktop config:
 
-- **`--summary`**  
-  Provides a summary of the activities from the most recent session.  
-  *Example*: `ganesha --summary`
+```json
+{
+  "mcpServers": {
+    "ganesha": {
+      "command": "python",
+      "args": ["-m", "ganesha.mcp.server"]
+    }
+  }
+}
+```
 
-- **`--report [criteria]`**  
-  Generates a report based on specified criteria, such as a security audit or disk usage.  
-  *Example*: `ganesha --report "full security audit of open ports"`
+Now Claude Code can use Ganesha tools:
+- `ganesha_execute` - Execute system tasks
+- `ganesha_plan` - Plan without executing
+- `ganesha_rollback` - Undo changes
+- `ganesha_generate_code` - Generate code
 
-- **`--interactive`**  
-  Launches an interactive menu for guided task execution, session summaries, or rollbacks.  
-  *Example*: `ganesha --interactive`
+### HTTP API
 
-- **`--debug`**  
-  Activates debug mode, displaying raw responses from GPT-4 for detailed insights and troubleshooting.  
-  *Example*: `ganesha --execute "Optimize system memory usage" --debug`
+```bash
+# Start the API server
+ganesha-api
 
-- **`--A`**  
-  Automatically approves all commands, bypassing manual confirmation prompts.  
-  *Example*: `ganesha --execute "Update all system packages" --A`
+# Or with uvicorn
+uvicorn ganesha.api.server:app --port 8420
+```
+
+Endpoints:
+- `POST /execute` - Execute a task
+- `POST /plan` - Plan without executing
+- `POST /rollback` - Rollback session
+- `GET /history` - Session history
+- `GET /providers` - Available LLM providers
+- `GET /health` - Health check
 
 ---
 
+## Configuration
 
+### Local LLM Setup
 
+Ganesha works with any OpenAI-compatible local LLM server:
+
+**LM Studio:**
+1. Download from https://lmstudio.ai
+2. Load a model (recommended: deepseek-coder, codellama, or similar)
+3. Start the local server
+4. Ganesha auto-detects at `http://localhost:1234`
+
+**Ollama:**
+1. Install from https://ollama.ai
+2. Pull a model: `ollama pull llama3`
+3. Ganesha auto-detects at `http://localhost:11434`
+
+### Provider Priority
+
+Ganesha tries providers in this order:
+1. LM Studio (local)
+2. Ollama (local)
+3. Anthropic Claude (cloud)
+4. OpenAI (cloud)
+
+Set cloud API keys if you want fallback:
+```bash
+export ANTHROPIC_API_KEY="your-key"
+export OPENAI_API_KEY="your-key"
+```
+
+---
+
+## Safety
+
+Ganesha is **safe by default**:
+
+1. **Planning** - Shows exactly what will run before execution
+2. **Consent** - Requires explicit approval for each action
+3. **Risk Levels** - Flags dangerous operations (high/critical)
+4. **Rollback** - Can undo any session's changes
+5. **Logging** - Full session history in `~/.ganesha/sessions/`
+
+To bypass consent (use carefully):
+```bash
+ganesha --auto "your task"  # Auto-approve all
+```
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     GANESHA 3.0                             │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ┌─────────┐  ┌─────────┐  ┌─────────┐                     │
+│  │   CLI   │  │   MCP   │  │   API   │   ← Interfaces      │
+│  └────┬────┘  └────┬────┘  └────┬────┘                     │
+│       │            │            │                           │
+│       └────────────┼────────────┘                           │
+│                    ▼                                        │
+│           ┌───────────────┐                                 │
+│           │  Core Engine  │  ← Planning, Execution, Safety │
+│           └───────┬───────┘                                 │
+│                   ▼                                        │
+│           ┌───────────────┐                                 │
+│           │   Providers   │  ← LLM Abstraction             │
+│           └───────┬───────┘                                 │
+│                   ▼                                         │
+│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐       │
+│  │LM Studio│  │ Ollama  │  │Anthropic│  │ OpenAI  │       │
+│  └─────────┘  └─────────┘  └─────────┘  └─────────┘       │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## History
+
+Ganesha was originally developed in 2024, before:
+- Claude Code (Anthropic)
+- Codex CLI (OpenAI)
+
+It pioneered concepts that are now standard:
+- Natural language to system commands
+- User consent flows before execution
+- Session rollback capabilities
+- Auto-approve flags for automation
+- Cross-platform compatibility
+
+This rewrite (v3.0) adds:
+- Local LLM support (LM Studio, Ollama)
+- MCP server protocol
+- HTTP API for web integration
+- Async-first architecture
+- Clean, modern codebase
+
+---
+
+## Why "Ganesha"?
+
+In Hindu tradition, **Ganesha** is the deity known as the **Remover of Obstacles**.
+
+This tool removes the obstacles between:
+- Your intentions → Executable commands
+- Natural language → System control
+- Non-technical users → Terminal power
+
+---
+
+## License
+
+MIT License - See LICENSE file.
+
+---
+
+## Author
+
+**G-Tech SD**
+- GitHub: [@G-TechSD](https://github.com/G-TechSD)
+- Repository: [ganesha-ai](https://github.com/G-TechSD/ganesha-ai)
+
+*The first AI-powered system control tool. Predates the rest.*

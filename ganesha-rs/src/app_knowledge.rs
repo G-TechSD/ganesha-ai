@@ -54,11 +54,16 @@ pub struct AppKnowledgeBase {
 
 impl AppKnowledgeBase {
     pub fn new() -> Self {
-        let cache_dir = dirs::cache_dir()
-            .unwrap_or_else(|| PathBuf::from("/tmp"))
-            .join("ganesha")
-            .join("app_knowledge");
+        // Use XDG_CACHE_HOME or fallback to ~/.cache or /tmp
+        let cache_base = std::env::var("XDG_CACHE_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                std::env::var("HOME")
+                    .map(|h| PathBuf::from(h).join(".cache"))
+                    .unwrap_or_else(|_| PathBuf::from("/tmp"))
+            });
 
+        let cache_dir = cache_base.join("ganesha").join("app_knowledge");
         fs::create_dir_all(&cache_dir).ok();
 
         Self {
