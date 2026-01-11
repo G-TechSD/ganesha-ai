@@ -27,13 +27,36 @@ pub enum ProviderError {
     Timeout,
 }
 
+/// Chat message for conversation history
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ChatMessage {
+    pub role: String,
+    pub content: String,
+}
+
+impl ChatMessage {
+    pub fn system(content: &str) -> Self {
+        Self { role: "system".into(), content: content.into() }
+    }
+    pub fn user(content: &str) -> Self {
+        Self { role: "user".into(), content: content.into() }
+    }
+    pub fn assistant(content: &str) -> Self {
+        Self { role: "assistant".into(), content: content.into() }
+    }
+}
+
 /// LLM Provider trait
 #[async_trait]
 pub trait LlmProvider: Send + Sync {
     fn name(&self) -> &str;
     fn is_available(&self) -> bool;
 
+    /// Single-turn generation (for backwards compatibility)
     async fn generate(&self, system: &str, user: &str) -> Result<String, ProviderError>;
+
+    /// Multi-turn generation with conversation history
+    async fn generate_with_history(&self, messages: &[ChatMessage]) -> Result<String, ProviderError>;
 }
 
 /// OpenAI-compatible provider (LM Studio, OpenAI, etc.)
@@ -165,6 +188,43 @@ impl LlmProvider for OpenAiCompatible {
             .map(|c| c.message.content.clone())
             .ok_or_else(|| ProviderError::Api("No response content".into()))
     }
+
+    async fn generate_with_history(&self, messages: &[ChatMessage]) -> Result<String, ProviderError> {
+        let url = format!("{}/v1/chat/completions", self.base_url);
+
+        let request = ChatRequest {
+            model: self.model.clone(),
+            messages: messages.iter().map(|m| Message {
+                role: m.role.clone(),
+                content: m.content.clone(),
+            }).collect(),
+            temperature: 0.3,
+            max_tokens: 16000,  // Large responses for code/HTML generation
+            stream: false,
+        };
+
+        let mut req = self.client.post(&url).json(&request);
+
+        if let Some(ref key) = self.api_key {
+            req = req.bearer_auth(key);
+        }
+
+        let response = req.send().await?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(ProviderError::Api(format!("{}: {}", status, body)));
+        }
+
+        let chat_response: ChatResponse = response.json().await?;
+
+        chat_response
+            .choices
+            .first()
+            .map(|c| c.message.content.clone())
+            .ok_or_else(|| ProviderError::Api("No response content".into()))
+    }
 }
 
 /// Ollama provider
@@ -262,6 +322,33 @@ impl LlmProvider for Ollama {
         let ollama_response: OllamaResponse = response.json().await?;
         Ok(ollama_response.message.content)
     }
+
+    async fn generate_with_history(&self, messages: &[ChatMessage]) -> Result<String, ProviderError> {
+        let url = format!("{}/api/chat", self.base_url);
+
+        let request = OllamaRequest {
+            model: self.model.clone(),
+            messages: messages.iter().map(|m| Message {
+                role: m.role.clone(),
+                content: m.content.clone(),
+            }).collect(),
+            stream: false,
+            options: OllamaOptions {
+                temperature: 0.3,
+                num_predict: 16000,  // Large responses for code/HTML generation
+            },
+        };
+
+        let response = self.client.post(&url).json(&request).send().await?;
+
+        if !response.status().is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(ProviderError::Api(body));
+        }
+
+        let ollama_response: OllamaResponse = response.json().await?;
+        Ok(ollama_response.message.content)
+    }
 }
 
 /// Anthropic Claude provider
@@ -327,6 +414,53 @@ impl LlmProvider for Anthropic {
                 role: "user".into(),
                 content: user.into(),
             }],
+            temperature: 0.3,
+        };
+
+        let response = self
+            .client
+            .post("https://api.anthropic.com/v1/messages")
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", "2023-06-01")
+            .header("content-type", "application/json")
+            .json(&request)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(ProviderError::Api(body));
+        }
+
+        let anthropic_response: AnthropicResponse = response.json().await?;
+
+        anthropic_response
+            .content
+            .first()
+            .map(|c| c.text.clone())
+            .ok_or_else(|| ProviderError::Api("No response content".into()))
+    }
+
+    async fn generate_with_history(&self, messages: &[ChatMessage]) -> Result<String, ProviderError> {
+        // Extract system message and user/assistant messages
+        let system = messages.iter()
+            .find(|m| m.role == "system")
+            .map(|m| m.content.clone())
+            .unwrap_or_default();
+
+        let non_system: Vec<Message> = messages.iter()
+            .filter(|m| m.role != "system")
+            .map(|m| Message {
+                role: m.role.clone(),
+                content: m.content.clone(),
+            })
+            .collect();
+
+        let request = AnthropicRequest {
+            model: self.model.clone(),
+            max_tokens: 16000,  // Large responses for code/HTML generation
+            system,
+            messages: non_system,
             temperature: 0.3,
         };
 
@@ -447,6 +581,29 @@ impl LlmProvider for ProviderChain {
             }
 
             match provider.generate(system, user).await {
+                Ok(response) => return Ok(response),
+                Err(e) => {
+                    errors.push(format!("{}: {}", provider.name(), e));
+                }
+            }
+        }
+
+        if errors.is_empty() {
+            Err(ProviderError::NoProviders)
+        } else {
+            Err(ProviderError::Api(errors.join("; ")))
+        }
+    }
+
+    async fn generate_with_history(&self, messages: &[ChatMessage]) -> Result<String, ProviderError> {
+        let mut errors = vec![];
+
+        for provider in &self.providers {
+            if !provider.is_available() {
+                continue;
+            }
+
+            match provider.generate_with_history(messages).await {
                 Ok(response) => return Ok(response),
                 Err(e) => {
                     errors.push(format!("{}: {}", provider.name(), e));
