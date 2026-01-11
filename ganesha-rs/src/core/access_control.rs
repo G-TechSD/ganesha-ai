@@ -253,7 +253,7 @@ lazy_static! {
         Regex::new(r"^touch\s+").unwrap(),
         Regex::new(r"^cp\s+").unwrap(),
         Regex::new(r"^mv\s+").unwrap(),
-        Regex::new(r"^rm\s+(?!-rf?\s+/)").unwrap(),
+        Regex::new(r"^rm\s+").unwrap(),  // rm allowed, but -rf / blocked in DANGEROUS
         Regex::new(r"^chmod\s+").unwrap(),
         Regex::new(r"^ln\s+").unwrap(),
 
@@ -263,9 +263,9 @@ lazy_static! {
         // Archives
         Regex::new(r"^(tar|gzip|zip|unzip)\s+").unwrap(),
 
-        // Network
-        Regex::new(r"^curl\s+(?!.*(/etc/shadow|\.ssh/))").unwrap(),
-        Regex::new(r"^wget\s+(?!.*(/etc/shadow|\.ssh/))").unwrap(),
+        // Network (sensitive paths blocked in DANGEROUS patterns)
+        Regex::new(r"^curl\s+").unwrap(),
+        Regex::new(r"^wget\s+").unwrap(),
 
         // Docker
         Regex::new(r"^docker\s+(pull|run|stop|start|rm|exec)").unwrap(),

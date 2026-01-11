@@ -16,6 +16,7 @@ mod orchestrator;
 
 use clap::{Parser, Subcommand};
 use cli::{print_banner, print_error, print_info, print_result, print_success, AutoConsent, CliConsent};
+use console::style;
 use core::access_control::{load_policy, AccessLevel};
 use core::GaneshaEngine;
 use providers::ProviderChain;
@@ -163,11 +164,6 @@ async fn main() {
     // Get task
     let task = args.task.join(" ");
 
-    if task.is_empty() && !args.interactive && !args.history && args.rollback.is_none() {
-        eprintln!("No task provided. Use --help for usage.");
-        std::process::exit(1);
-    }
-
     // Load policy
     let policy = load_policy();
 
@@ -187,10 +183,83 @@ async fn main() {
     if args.auto {
         let mut engine = GaneshaEngine::new(chain, AutoConsent, policy);
         engine.auto_approve = true;
-        run_task(&mut engine, &task, args.code).await;
+
+        // Process initial task if provided
+        if !task.is_empty() {
+            run_task(&mut engine, &task, args.code).await;
+        }
+
+        // Enter REPL if interactive mode or no task provided
+        if args.interactive || task.is_empty() {
+            run_repl(&mut engine, args.code).await;
+        }
     } else {
         let mut engine = GaneshaEngine::new(chain, CliConsent::new(), policy);
-        run_task(&mut engine, &task, args.code).await;
+
+        // Process initial task if provided
+        if !task.is_empty() {
+            run_task(&mut engine, &task, args.code).await;
+        }
+
+        // Always enter REPL for interactive experience
+        run_repl(&mut engine, args.code).await;
+    }
+}
+
+/// Interactive REPL loop
+async fn run_repl<C: core::ConsentHandler>(
+    engine: &mut GaneshaEngine<ProviderChain, C>,
+    code_mode: bool,
+) {
+    use std::io::{self, Write};
+
+    println!("\n{}", style("─".repeat(60)).dim());
+    println!("{}", style("Interactive mode. Type 'exit' or 'quit' to leave.").dim());
+    println!("{}", style("Commands: /1: /2: /3: (tiers) | /vision: | /help").dim());
+    println!("{}\n", style("─".repeat(60)).dim());
+
+    loop {
+        print!("{} ", style("ganesha>").cyan().bold());
+        io::stdout().flush().unwrap();
+
+        let mut input = String::new();
+        if io::stdin().read_line(&mut input).is_err() {
+            break;
+        }
+
+        let input = input.trim();
+
+        if input.is_empty() {
+            continue;
+        }
+
+        // Handle exit commands
+        if matches!(input.to_lowercase().as_str(), "exit" | "quit" | "q" | ":q") {
+            println!("{}", style("Namaste 🙏").yellow());
+            break;
+        }
+
+        // Handle help
+        if input == "/help" || input == "help" {
+            println!("\n{}", style("Ganesha Commands:").bold());
+            println!("  /1: <task>     - Use fast tier (Haiku)");
+            println!("  /2: <task>     - Use balanced tier (Sonnet)");
+            println!("  /3: <task>     - Use premium tier (Opus)");
+            println!("  /vision: <task> - Use vision model");
+            println!("  /config        - Reconfigure providers");
+            println!("  exit, quit     - Exit Ganesha\n");
+            continue;
+        }
+
+        // Handle config
+        if input == "/config" {
+            println!("{}", style("Run: ganesha --configure").dim());
+            continue;
+        }
+
+        // Process the task
+        run_task(engine, input, code_mode).await;
+        println!(); // Add spacing after task completion
     }
 }
 
