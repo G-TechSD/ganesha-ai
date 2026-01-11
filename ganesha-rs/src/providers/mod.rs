@@ -199,7 +199,7 @@ impl LlmProvider for OpenAiCompatible {
                 content: m.content.clone(),
             }).collect(),
             temperature: 0.3,
-            max_tokens: 16000,  // Large responses for code/HTML generation
+            max_tokens: 65536,  // Large responses - half of typical 131k context for big generations
             stream: false,
         };
 
@@ -458,7 +458,7 @@ impl LlmProvider for Anthropic {
 
         let request = AnthropicRequest {
             model: self.model.clone(),
-            max_tokens: 16000,  // Large responses for code/HTML generation
+            max_tokens: 65536,  // Large responses - half of typical 131k context for big generations
             system,
             messages: non_system,
             temperature: 0.3,

@@ -398,7 +398,7 @@ When the task is complete, summarize what was accomplished.
             "model": self.primary_provider.model,
             "messages": api_messages,
             "temperature": 0.3,
-            "max_tokens": 4096,
+            "max_tokens": 65536,  // Large output for big file generations (1000+ items)
             "stream": false
         });
 

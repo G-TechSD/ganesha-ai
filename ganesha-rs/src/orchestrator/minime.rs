@@ -174,7 +174,7 @@ async fn call_provider(
 
         json!({
             "model": provider.model,
-            "max_tokens": 4096,
+            "max_tokens": 65536,
             "system": system,
             "messages": messages,
             "temperature": 0.3
@@ -185,7 +185,7 @@ async fn call_provider(
             "model": provider.model,
             "messages": messages,
             "temperature": 0.3,
-            "max_tokens": 4096,
+            "max_tokens": 65536,
             "stream": false
         })
     };
