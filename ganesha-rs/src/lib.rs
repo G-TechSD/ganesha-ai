@@ -13,6 +13,7 @@ pub mod cli;
 pub mod core;
 pub mod logging;
 pub mod providers;
+pub mod tui;
 
 // Computer Use modules (optional, dangerous by default)
 #[cfg(any(feature = "vision", feature = "input", feature = "computer-use"))]
@@ -136,3 +137,6 @@ pub use orchestrator::providers::{
     ModelInfo, ModelTier as ProviderModelTier, OAuth2Config,
     TierConfig, TierMapping, SlashCommand, GaneshaConfig, parse_slash_command,
 };
+
+// TUI
+pub use tui::{TuiApp, ChatMessage, MessageRole, StatusBar, run_tui};

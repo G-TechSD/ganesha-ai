@@ -44,6 +44,7 @@ pub enum ActionType {
     FileDelete,
     ServiceControl,
     PackageInstall,
+    Response,  // Conversational response, no command execution
     Custom(String),
 }
 
@@ -213,8 +214,13 @@ impl<L: LlmProvider, C: ConsentHandler> GaneshaEngine<L, C> {
         let mut plan = ExecutionPlan::new(task);
         plan.actions = self.parse_actions(&response)?;
 
-        // Validate each action against access control
+        // Validate each action against access control (skip Response actions)
         for action in &mut plan.actions {
+            // Response actions don't need access control - they're just text
+            if matches!(action.action_type, ActionType::Response) {
+                continue;
+            }
+
             let check = self.access.check_command(&action.command);
             action.risk_level = check.risk_level;
 
@@ -237,8 +243,11 @@ impl<L: LlmProvider, C: ConsentHandler> GaneshaEngine<L, C> {
     pub async fn execute(&mut self, plan: &ExecutionPlan) -> Result<Vec<ExecutionResult>, GaneshaError> {
         let mut results = vec![];
 
-        // Get consent
-        if !self.auto_approve {
+        // Check if this is a response-only plan (no commands to execute)
+        let has_commands = plan.actions.iter().any(|a| !matches!(a.action_type, ActionType::Response));
+
+        // Get consent only if there are actual commands to run
+        if !self.auto_approve && has_commands {
             match self.consent.request_batch_consent(plan) {
                 ConsentResult::Cancel | ConsentResult::Deny => {
                     if let Some(ref mut session) = self.current_session {
@@ -257,6 +266,18 @@ impl<L: LlmProvider, C: ConsentHandler> GaneshaEngine<L, C> {
         // Execute each action
         for action in &plan.actions {
             let start = std::time::Instant::now();
+
+            // Handle Response actions - just return the text, no execution
+            if matches!(action.action_type, ActionType::Response) {
+                results.push(ExecutionResult {
+                    action_id: action.id.clone(),
+                    success: true,
+                    output: action.explanation.clone(),
+                    error: None,
+                    duration_ms: start.elapsed().as_millis() as u64,
+                });
+                continue;
+            }
 
             // Final access check
             let check = self.access.check_command(&action.command);
@@ -350,11 +371,11 @@ impl<L: LlmProvider, C: ConsentHandler> GaneshaEngine<L, C> {
     }
 
     fn build_planning_prompt(&self) -> String {
-        r#"You are Ganesha, an AI system control assistant.
+        r#"You are Ganesha, an AI system control assistant and knowledgeable helper.
 
-Given a task, output a JSON plan with actions to execute.
+Given a task, determine if it requires system commands or is a question/conversation.
 
-FORMAT:
+FOR SYSTEM TASKS (file operations, commands, etc):
 {
   "actions": [
     {
@@ -366,24 +387,56 @@ FORMAT:
   ]
 }
 
+FOR QUESTIONS/CONVERSATIONS (no commands needed):
+{
+  "response": "Your helpful answer here"
+}
+
 RULES:
-- Use safe, idiomatic commands
+- For questions like "what is X" or "explain Y", use the response format
+- For system tasks, use the actions format with safe, idiomatic commands
 - Prefer non-destructive operations
-- Include verification steps
 - Each action should be atomic
 - Output ONLY valid JSON"#.to_string()
     }
 
     fn parse_actions(&self, response: &str) -> Result<Vec<Action>, GaneshaError> {
+        // Clean up response - remove control characters that break JSON parsing
+        let cleaned: String = response
+            .chars()
+            .map(|c| if c.is_control() && c != '\n' && c != '\t' { ' ' } else { c })
+            .collect();
+
         // Try to extract JSON from response
-        let json_start = response.find('{');
-        let json_end = response.rfind('}');
+        let json_start = cleaned.find('{');
+        let json_end = cleaned.rfind('}');
 
         if let (Some(start), Some(end)) = (json_start, json_end) {
-            let json_str = &response[start..=end];
+            let json_str = &cleaned[start..=end];
 
+            // First try to parse as a conversational response
+            #[derive(Deserialize)]
+            struct ConversationResponse {
+                response: String,
+            }
+
+            if let Ok(conv) = serde_json::from_str::<ConversationResponse>(json_str) {
+                // Return a single Response action (no command execution needed)
+                return Ok(vec![Action {
+                    id: Uuid::new_v4().to_string()[..8].to_string(),
+                    action_type: ActionType::Response,
+                    command: String::new(),
+                    explanation: conv.response,
+                    risk_level: RiskLevel::Low,
+                    reversible: false,
+                    reverse_command: None,
+                }]);
+            }
+
+            // Otherwise parse as action plan
             #[derive(Deserialize)]
             struct PlanResponse {
+                #[serde(default)]
                 actions: Vec<ActionJson>,
             }
 
@@ -413,7 +466,22 @@ RULES:
                 })
                 .collect())
         } else {
-            Err(GaneshaError::LlmError("No valid JSON in response".into()))
+            // No JSON found - treat the entire response as a conversational answer
+            // This handles LLMs that don't follow the JSON format
+            let clean_response = cleaned.trim();
+            if clean_response.is_empty() {
+                Err(GaneshaError::LlmError("Empty response from LLM".into()))
+            } else {
+                Ok(vec![Action {
+                    id: Uuid::new_v4().to_string()[..8].to_string(),
+                    action_type: ActionType::Response,
+                    command: String::new(),
+                    explanation: clean_response.to_string(),
+                    risk_level: RiskLevel::Low,
+                    reversible: false,
+                    reverse_command: None,
+                }])
+            }
         }
     }
 

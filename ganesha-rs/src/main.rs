@@ -13,6 +13,7 @@ mod core;
 mod logging;
 mod providers;
 mod orchestrator;
+mod tui;
 
 use clap::{Parser, Subcommand};
 use cli::{print_banner, print_error, print_info, print_result, print_success, AutoConsent, CliConsent};
@@ -21,6 +22,7 @@ use core::access_control::{load_policy, AccessLevel};
 use core::GaneshaEngine;
 use providers::ProviderChain;
 use orchestrator::providers::ProviderManager;
+use chrono::Local;
 
 #[derive(Parser)]
 #[command(name = "ganesha")]
@@ -213,9 +215,14 @@ async fn run_repl<C: core::ConsentHandler>(
 ) {
     use std::io::{self, Write};
 
+    // Session log for /log command
+    let mut session_log: Vec<String> = vec![
+        format!("=== Ganesha Session Started: {} ===", Local::now().format("%Y-%m-%d %H:%M:%S")),
+    ];
+
     println!("\n{}", style("─".repeat(60)).dim());
     println!("{}", style("Interactive mode. Type 'exit' or 'quit' to leave.").dim());
-    println!("{}", style("Commands: /1: /2: /3: (tiers) | /vision: | /help").dim());
+    println!("{}", style("Commands: /1: /2: /3: (tiers) | /vision: | /log | /help").dim());
     println!("{}\n", style("─".repeat(60)).dim());
 
     loop {
@@ -233,6 +240,9 @@ async fn run_repl<C: core::ConsentHandler>(
             continue;
         }
 
+        // Log user input
+        session_log.push(format!("[{}] USER: {}", Local::now().format("%H:%M:%S"), input));
+
         // Handle exit commands
         if matches!(input.to_lowercase().as_str(), "exit" | "quit" | "q" | ":q") {
             println!("{}", style("Namaste 🙏").yellow());
@@ -246,8 +256,28 @@ async fn run_repl<C: core::ConsentHandler>(
             println!("  /2: <task>     - Use balanced tier (Sonnet)");
             println!("  /3: <task>     - Use premium tier (Opus)");
             println!("  /vision: <task> - Use vision model");
+            println!("  /log [file]    - Save session to file");
             println!("  /config        - Reconfigure providers");
             println!("  exit, quit     - Exit Ganesha\n");
+            continue;
+        }
+
+        // Handle /log command
+        if input.to_lowercase().starts_with("/log") {
+            let filename = input.strip_prefix("/log").map(|s| s.trim()).filter(|s| !s.is_empty());
+            let log_file = filename.map(|f| f.to_string()).unwrap_or_else(|| {
+                format!("ganesha-session-{}.log", Local::now().format("%Y%m%d-%H%M%S"))
+            });
+
+            match std::fs::write(&log_file, session_log.join("\n")) {
+                Ok(_) => {
+                    println!("{} Session saved to: {}", style("✓").green(), log_file);
+                    session_log.push(format!("[{}] SYSTEM: Session saved to {}", Local::now().format("%H:%M:%S"), log_file));
+                }
+                Err(e) => {
+                    println!("{} Failed to save log: {}", style("✗").red(), e);
+                }
+            }
             continue;
         }
 
@@ -257,10 +287,59 @@ async fn run_repl<C: core::ConsentHandler>(
             continue;
         }
 
-        // Process the task
-        run_task(engine, input, code_mode).await;
+        // Process the task and capture output
+        let output = run_task_with_log(engine, input, code_mode).await;
+        session_log.push(format!("[{}] GANESHA: {}", Local::now().format("%H:%M:%S"), output));
         println!(); // Add spacing after task completion
     }
+
+    // Add session end
+    session_log.push(format!("=== Session Ended: {} ===", Local::now().format("%Y-%m-%d %H:%M:%S")));
+}
+
+/// Run a task and return the output for logging
+async fn run_task_with_log<C: core::ConsentHandler>(
+    engine: &mut GaneshaEngine<ProviderChain, C>,
+    task: &str,
+    code_mode: bool,
+) -> String {
+    let task = if code_mode {
+        format!("[CODE MODE] {}", task)
+    } else {
+        task.to_string()
+    };
+
+    // Plan
+    let plan = match engine.plan(&task).await {
+        Ok(p) => p,
+        Err(e) => {
+            let msg = format!("Planning failed: {}", e);
+            print_error(&msg);
+            return msg;
+        }
+    };
+
+    // Execute
+    let mut outputs = vec![];
+    match engine.execute(&plan).await {
+        Ok(results) => {
+            for result in results {
+                print_result(result.success, &result.output, result.duration_ms);
+                outputs.push(result.output.clone());
+                if let Some(ref err) = result.error {
+                    print_error(err);
+                    outputs.push(format!("Error: {}", err));
+                }
+            }
+        }
+        Err(e) => {
+            let msg = format!("{}", e);
+            print_error(&msg);
+            outputs.push(msg);
+        }
+    }
+
+    outputs.join("\n")
 }
 
 async fn run_task<C: core::ConsentHandler>(
