@@ -19,6 +19,10 @@ dialoguer = "0.11"              # Interactive prompts
 console = "0.15"                # Terminal colors/formatting
 indicatif = "0.17"              # Progress bars
 
+# TUI
+ratatui = "0.29"                # Terminal UI framework
+crossterm = "0.28"              # Cross-platform terminal handling
+
 # HTTP client for LLM APIs
 reqwest = { version = "0.11", features = ["json", "rustls-tls", "blocking"], default-features = false }
 
