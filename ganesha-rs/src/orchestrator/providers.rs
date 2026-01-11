@@ -81,6 +81,152 @@ pub struct ProviderEndpoint {
     pub priority: u32,
 }
 
+/// User-configurable tier mapping
+/// Users can have as many tiers as they want: /1:, /2:, /3:, etc.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TierConfig {
+    /// Maps tier number to endpoint name and model
+    /// e.g., 1 -> ("openrouter", "anthropic/claude-sonnet-4")
+    pub tiers: HashMap<u32, TierMapping>,
+    /// Special vision tier for /vision: commands
+    pub vision: Option<TierMapping>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TierMapping {
+    pub endpoint: String,
+    pub model: String,
+    pub description: String,
+}
+
+impl Default for TierConfig {
+    fn default() -> Self {
+        let mut tiers = HashMap::new();
+
+        // Default tier 1: fast/cheap
+        tiers.insert(1, TierMapping {
+            endpoint: "openrouter".into(),
+            model: "anthropic/claude-haiku-3-5".into(),
+            description: "Fast & cheap (Haiku)".into(),
+        });
+
+        // Default tier 2: balanced
+        tiers.insert(2, TierMapping {
+            endpoint: "openrouter".into(),
+            model: "anthropic/claude-sonnet-4".into(),
+            description: "Balanced (Sonnet)".into(),
+        });
+
+        // Default tier 3: premium
+        tiers.insert(3, TierMapping {
+            endpoint: "openrouter".into(),
+            model: "anthropic/claude-opus-4".into(),
+            description: "Premium (Opus)".into(),
+        });
+
+        Self {
+            tiers,
+            vision: Some(TierMapping {
+                endpoint: "openrouter".into(),
+                model: "anthropic/claude-sonnet-4".into(),
+                description: "Vision model".into(),
+            }),
+        }
+    }
+}
+
+impl TierConfig {
+    /// Get tier mapping for a number
+    pub fn get(&self, tier: u32) -> Option<&TierMapping> {
+        self.tiers.get(&tier)
+    }
+
+    /// Set a tier mapping
+    pub fn set(&mut self, tier: u32, endpoint: &str, model: &str, description: &str) {
+        self.tiers.insert(tier, TierMapping {
+            endpoint: endpoint.into(),
+            model: model.into(),
+            description: description.into(),
+        });
+    }
+
+    /// Remove a tier
+    pub fn remove(&mut self, tier: u32) -> Option<TierMapping> {
+        self.tiers.remove(&tier)
+    }
+
+    /// Get all tier numbers sorted
+    pub fn tier_numbers(&self) -> Vec<u32> {
+        let mut nums: Vec<_> = self.tiers.keys().copied().collect();
+        nums.sort();
+        nums
+    }
+
+    /// Generate system prompt explaining available tiers to the model
+    pub fn system_prompt_section(&self) -> String {
+        let mut prompt = String::from(
+            "\n## Mini-Me Sub-Agents\n\
+            You can spawn sub-agent Mini-Me's to handle subtasks. Use these commands:\n\n"
+        );
+
+        for tier in self.tier_numbers() {
+            if let Some(mapping) = self.tiers.get(&tier) {
+                prompt.push_str(&format!(
+                    "- `/{}: <task>` - {} ({})\n",
+                    tier, mapping.description, mapping.model
+                ));
+            }
+        }
+
+        if let Some(vision) = &self.vision {
+            prompt.push_str(&format!(
+                "- `/vision: <task>` - {} ({})\n",
+                vision.description, vision.model
+            ));
+        }
+
+        prompt.push_str(
+            "\nUse lower tiers for simple tasks (search, summarize) and higher tiers for complex reasoning.\n\
+            Mini-Me agents receive focused context and return summaries, not full transcripts.\n"
+        );
+
+        prompt
+    }
+}
+
+/// Parse a slash command from user input
+/// Returns (tier_or_vision, remaining_prompt) or None if not a slash command
+pub fn parse_slash_command(input: &str) -> Option<(SlashCommand, String)> {
+    let input = input.trim();
+
+    if !input.starts_with('/') {
+        return None;
+    }
+
+    // Find the colon
+    let colon_pos = input.find(':')?;
+    let command = &input[1..colon_pos].trim();
+    let prompt = input[colon_pos + 1..].trim().to_string();
+
+    if prompt.is_empty() {
+        return None;
+    }
+
+    if command.eq_ignore_ascii_case("vision") {
+        Some((SlashCommand::Vision, prompt))
+    } else if let Ok(tier) = command.parse::<u32>() {
+        Some((SlashCommand::Tier(tier), prompt))
+    } else {
+        None
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum SlashCommand {
+    Tier(u32),
+    Vision,
+}
+
 /// OAuth2 configuration for each provider
 #[derive(Debug, Clone)]
 pub struct OAuth2Config {
@@ -132,25 +278,48 @@ impl OAuth2Config {
     }
 }
 
+/// Full Ganesha configuration (providers + tiers)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GaneshaConfig {
+    pub endpoints: HashMap<String, ProviderEndpoint>,
+    pub tiers: TierConfig,
+    #[serde(default)]
+    pub setup_complete: bool,
+}
+
+impl Default for GaneshaConfig {
+    fn default() -> Self {
+        Self {
+            endpoints: HashMap::new(),
+            tiers: TierConfig::default(),
+            setup_complete: false,
+        }
+    }
+}
+
 /// The unified provider manager
 pub struct ProviderManager {
-    endpoints: HashMap<String, ProviderEndpoint>,
+    pub endpoints: HashMap<String, ProviderEndpoint>,
+    pub tiers: TierConfig,
     models_cache: Arc<RwLock<HashMap<ProviderType, Vec<ModelInfo>>>>,
     cache_expiry: Arc<RwLock<HashMap<ProviderType, Instant>>>,
     config_path: PathBuf,
+    setup_complete: bool,
     client: reqwest::Client,
 }
 
 impl ProviderManager {
     pub fn new() -> Self {
         let config_path = Self::get_config_path();
-        let endpoints = Self::load_or_default(&config_path);
+        let (endpoints, tiers, setup_complete) = Self::load_config(&config_path);
 
         Self {
             endpoints,
+            tiers,
             models_cache: Arc::new(RwLock::new(HashMap::new())),
             cache_expiry: Arc::new(RwLock::new(HashMap::new())),
             config_path,
+            setup_complete,
             client: reqwest::Client::builder()
                 .timeout(Duration::from_secs(30))
                 .build()
@@ -160,18 +329,40 @@ impl ProviderManager {
 
     fn get_config_path() -> PathBuf {
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-        home.join(".ganesha").join("providers.json")
+        home.join(".ganesha").join("config.json")
     }
 
-    fn load_or_default(path: &PathBuf) -> HashMap<String, ProviderEndpoint> {
+    fn load_config(path: &PathBuf) -> (HashMap<String, ProviderEndpoint>, TierConfig, bool) {
         if path.exists() {
             if let Ok(content) = fs::read_to_string(path) {
-                if let Ok(endpoints) = serde_json::from_str(&content) {
-                    return endpoints;
+                if let Ok(config) = serde_json::from_str::<GaneshaConfig>(&content) {
+                    return (config.endpoints, config.tiers, config.setup_complete);
                 }
             }
         }
-        Self::default_endpoints()
+        // Return defaults but mark setup as incomplete
+        (Self::default_endpoints(), TierConfig::default(), false)
+    }
+
+    /// Get tier configuration for system prompt
+    pub fn get_tier_system_prompt(&self) -> String {
+        self.tiers.system_prompt_section()
+    }
+
+    /// Execute a slash command, returns (endpoint_name, model, prompt)
+    pub fn resolve_slash_command(&self, input: &str) -> Option<(String, String, String)> {
+        let (cmd, prompt) = parse_slash_command(input)?;
+
+        match cmd {
+            SlashCommand::Tier(n) => {
+                let mapping = self.tiers.get(n)?;
+                Some((mapping.endpoint.clone(), mapping.model.clone(), prompt))
+            }
+            SlashCommand::Vision => {
+                let mapping = self.tiers.vision.as_ref()?;
+                Some((mapping.endpoint.clone(), mapping.model.clone(), prompt))
+            }
+        }
     }
 
     fn default_endpoints() -> HashMap<String, ProviderEndpoint> {
@@ -279,88 +470,555 @@ impl ProviderManager {
 
     /// Check if first-run setup is needed
     pub fn needs_setup(&self) -> bool {
-        !self.config_path.exists()
+        !self.setup_complete
     }
 
-    /// Interactive first-run setup
+    /// Interactive first-run setup with Local AI vs Cloud Providers paths
     pub async fn first_run_setup(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use std::io::{self, Write};
+
         println!("\n\x1b[1;36m╭─────────────────────────────────────────╮\x1b[0m");
-        println!("\x1b[1;36m│       GANESHA PROVIDER SETUP            │\x1b[0m");
+        println!("\x1b[1;36m│           WELCOME TO GANESHA            │\x1b[0m");
+        println!("\x1b[1;36m│      The Remover of Obstacles           │\x1b[0m");
         println!("\x1b[1;36m╰─────────────────────────────────────────╯\x1b[0m\n");
 
-        println!("Let's configure your AI providers.\n");
+        println!("How would you like to use Ganesha?\n");
+        println!("  \x1b[1m[1]\x1b[0m \x1b[32mLocal AI\x1b[0m - Run models on your own hardware");
+        println!("      LM Studio, Ollama, or any OpenAI-compatible server");
+        println!("      Free, private, no API keys needed\n");
+        println!("  \x1b[1m[2]\x1b[0m \x1b[34mCloud Providers\x1b[0m - Use cloud AI services");
+        println!("      OpenRouter, OpenAI, Anthropic, Google");
+        println!("      Easy OAuth2 sign-in or API keys\n");
+        println!("  \x1b[1m[3]\x1b[0m \x1b[33mBoth\x1b[0m - Local for fast tasks, cloud for heavy lifting\n");
 
-        // Detect available providers
-        println!("\x1b[1mDetecting available providers...\x1b[0m\n");
+        print!("Choose [1/2/3]: ");
+        io::stdout().flush()?;
 
-        let mut detected = Vec::new();
+        let mut choice = String::new();
+        io::stdin().read_line(&mut choice)?;
 
-        // Check LM Studio endpoints
-        for name in ["beast", "bedroom", "local"] {
-            if self.check_endpoint(name).await {
-                detected.push(name.to_string());
-                println!("  \x1b[32m✓\x1b[0m {} is online", name);
+        match choice.trim() {
+            "1" => self.setup_local_ai().await?,
+            "2" => self.setup_cloud_providers().await?,
+            "3" | "" => {
+                self.setup_local_ai().await?;
+                self.setup_cloud_providers().await?;
+            }
+            _ => {
+                println!("\x1b[33mInvalid choice, defaulting to Both\x1b[0m");
+                self.setup_local_ai().await?;
+                self.setup_cloud_providers().await?;
             }
         }
 
-        // Check Ollama
-        if self.check_endpoint("ollama").await {
-            detected.push("ollama".to_string());
-            println!("  \x1b[32m✓\x1b[0m Ollama is online");
+        // Configure tiers
+        self.setup_tiers().await?;
+
+        // Mark setup as complete and save
+        self.setup_complete = true;
+        self.save()?;
+
+        println!("\n\x1b[32m╭─────────────────────────────────────────╮\x1b[0m");
+        println!("\x1b[32m│         Setup Complete!                 │\x1b[0m");
+        println!("\x1b[32m╰─────────────────────────────────────────╯\x1b[0m\n");
+
+        println!("You can now use Ganesha with these commands:");
+        for tier in self.tiers.tier_numbers() {
+            if let Some(m) = self.tiers.get(tier) {
+                println!("  /{}:  {} - {}", tier, m.description, m.model);
+            }
+        }
+        if let Some(v) = &self.tiers.vision {
+            println!("  /vision:  {} - {}", v.description, v.model);
+        }
+        println!("\n  \x1b[2mReconfigure anytime: ganesha --configure\x1b[0m");
+
+        Ok(())
+    }
+
+    /// Setup path for Local AI
+    async fn setup_local_ai(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use std::io::{self, Write};
+
+        println!("\n\x1b[1;32m── Local AI Setup ──\x1b[0m\n");
+        println!("Scanning for local AI servers...\n");
+
+        let mut found_any = false;
+
+        // Check common endpoints
+        let local_checks = [
+            ("localhost:1234", "LM Studio (localhost)"),
+            ("localhost:11434", "Ollama"),
+        ];
+
+        for (addr, name) in &local_checks {
+            let url = format!("http://{}", addr);
+            let is_ollama = addr.contains("11434");
+            let test_url = if is_ollama {
+                format!("{}/api/tags", url)
+            } else {
+                format!("{}/v1/models", url)
+            };
+
+            if let Ok(resp) = self.client.get(&test_url).timeout(Duration::from_secs(2)).send().await {
+                if resp.status().is_success() {
+                    found_any = true;
+                    println!("  \x1b[32m✓\x1b[0m {} found at {}", name, addr);
+
+                    let endpoint_name = if is_ollama { "ollama" } else { "local" };
+                    self.endpoints.insert(endpoint_name.into(), ProviderEndpoint {
+                        provider_type: if is_ollama { ProviderType::Ollama } else { ProviderType::LmStudio },
+                        name: name.to_string(),
+                        base_url: url,
+                        auth: AuthMethod::None,
+                        default_model: "default".into(),
+                        enabled: true,
+                        priority: 1,
+                    });
+                }
+            }
         }
 
-        // Check API keys
-        let has_openrouter = std::env::var("OPENROUTER_API_KEY").is_ok();
-        let has_openai = std::env::var("OPENAI_API_KEY").is_ok();
-        let has_anthropic = std::env::var("ANTHROPIC_API_KEY").is_ok();
-        let has_google = std::env::var("GOOGLE_API_KEY").is_ok();
+        if !found_any {
+            println!("  \x1b[33m⚠ No local servers detected\x1b[0m\n");
+            println!("Would you like to add a custom OpenAI-compatible endpoint?");
+            println!("(e.g., LM Studio running on another machine)\n");
 
-        if has_openrouter {
-            detected.push("openrouter".to_string());
-            println!("  \x1b[32m✓\x1b[0m OpenRouter API key found");
-        }
-        if has_openai {
-            detected.push("openai".to_string());
-            println!("  \x1b[32m✓\x1b[0m OpenAI API key found");
-        }
-        if has_anthropic {
-            detected.push("anthropic".to_string());
-            println!("  \x1b[32m✓\x1b[0m Anthropic API key found");
-        }
-        if has_google {
-            detected.push("google".to_string());
-            println!("  \x1b[32m✓\x1b[0m Google API key found");
+            print!("Add custom endpoint? [y/N]: ");
+            io::stdout().flush()?;
+
+            let mut answer = String::new();
+            io::stdin().read_line(&mut answer)?;
+
+            if answer.trim().to_lowercase() == "y" {
+                self.add_custom_endpoint().await?;
+            }
         }
 
-        if detected.is_empty() {
-            println!("\n\x1b[33m⚠ No providers detected!\x1b[0m");
-            println!("\nTo use Ganesha, you need at least one provider:");
-            println!("  • Set OPENROUTER_API_KEY for easy access to many models");
-            println!("  • Run Ollama locally: ollama serve");
-            println!("  • Run LM Studio on localhost:1234");
-            println!("  • Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or GOOGLE_API_KEY");
+        Ok(())
+    }
+
+    /// Add a custom OpenAI-compatible endpoint
+    async fn add_custom_endpoint(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use std::io::{self, Write};
+
+        println!("\n\x1b[1mAdd Custom Endpoint\x1b[0m\n");
+
+        print!("Name (e.g., 'gpu-server'): ");
+        io::stdout().flush()?;
+        let mut name = String::new();
+        io::stdin().read_line(&mut name)?;
+        let name = name.trim();
+
+        print!("URL (e.g., 'http://192.168.1.100:1234'): ");
+        io::stdout().flush()?;
+        let mut url = String::new();
+        io::stdin().read_line(&mut url)?;
+        let url = url.trim();
+
+        print!("API Key (leave empty if none): ");
+        io::stdout().flush()?;
+        let mut api_key = String::new();
+        io::stdin().read_line(&mut api_key)?;
+        let api_key = api_key.trim();
+
+        let auth = if api_key.is_empty() {
+            AuthMethod::None
+        } else {
+            AuthMethod::ApiKey(api_key.to_string())
+        };
+
+        // Test the endpoint
+        print!("Testing connection... ");
+        io::stdout().flush()?;
+
+        let test_url = format!("{}/v1/models", url);
+        let mut req = self.client.get(&test_url).timeout(Duration::from_secs(5));
+        if let AuthMethod::ApiKey(key) = &auth {
+            req = req.bearer_auth(key);
+        }
+
+        match req.send().await {
+            Ok(resp) if resp.status().is_success() => {
+                println!("\x1b[32m✓ Connected!\x1b[0m");
+
+                self.endpoints.insert(name.to_string(), ProviderEndpoint {
+                    provider_type: ProviderType::LmStudio,
+                    name: format!("Custom: {}", name),
+                    base_url: url.to_string(),
+                    auth,
+                    default_model: "default".into(),
+                    enabled: true,
+                    priority: 1,
+                });
+            }
+            _ => {
+                println!("\x1b[31m✗ Connection failed\x1b[0m");
+                println!("  The endpoint will be saved but may not work until the server is running.");
+
+                self.endpoints.insert(name.to_string(), ProviderEndpoint {
+                    provider_type: ProviderType::LmStudio,
+                    name: format!("Custom: {}", name),
+                    base_url: url.to_string(),
+                    auth,
+                    default_model: "default".into(),
+                    enabled: true,
+                    priority: 1,
+                });
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Setup path for Cloud Providers
+    async fn setup_cloud_providers(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use std::io::{self, Write};
+
+        println!("\n\x1b[1;34m── Cloud Provider Setup ──\x1b[0m\n");
+        println!("Available providers:\n");
+        println!("  \x1b[1m[1]\x1b[0m OpenRouter - Access many models with one API key (recommended)");
+        println!("  \x1b[1m[2]\x1b[0m Google     - Sign in with Google (OAuth2)");
+        println!("  \x1b[1m[3]\x1b[0m Anthropic  - Claude models (API key)");
+        println!("  \x1b[1m[4]\x1b[0m OpenAI     - GPT models (API key)");
+        println!("  \x1b[1m[S]\x1b[0m Skip cloud setup\n");
+
+        print!("Select providers (e.g., '1,2' or 'all'): ");
+        io::stdout().flush()?;
+
+        let mut choice = String::new();
+        io::stdin().read_line(&mut choice)?;
+        let choice = choice.trim().to_lowercase();
+
+        if choice == "s" || choice == "skip" {
             return Ok(());
         }
 
-        // Ask for priority preference
-        println!("\n\x1b[1mProvider Priority\x1b[0m");
-        println!("Ganesha uses providers in priority order (lowest number = first choice).\n");
+        let choices: Vec<&str> = if choice == "all" {
+            vec!["1", "2", "3", "4"]
+        } else {
+            choice.split(',').map(|s| s.trim()).collect()
+        };
 
-        println!("Current priority:");
-        let mut available: Vec<_> = self.endpoints.iter()
-            .filter(|(name, _)| detected.contains(name))
-            .collect();
-        available.sort_by_key(|(_, e)| e.priority);
-
-        for (i, (name, endpoint)) in available.iter().enumerate() {
-            println!("  {}. {} ({:?})", i + 1, name, endpoint.provider_type);
+        for c in choices {
+            match c {
+                "1" => self.setup_openrouter().await?,
+                "2" => self.setup_google_oauth().await?,
+                "3" => self.setup_anthropic().await?,
+                "4" => self.setup_openai().await?,
+                _ => {}
+            }
         }
 
-        println!("\n\x1b[2mTo change priority later, run: ganesha providers --configure\x1b[0m");
+        Ok(())
+    }
 
-        // Save the configuration
-        self.save()?;
-        println!("\n\x1b[32m✓ Configuration saved to {:?}\x1b[0m", self.config_path);
+    /// Setup OpenRouter
+    async fn setup_openrouter(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use std::io::{self, Write};
+
+        println!("\n\x1b[1mOpenRouter Setup\x1b[0m");
+        println!("Get your API key at: https://openrouter.ai/keys\n");
+
+        // Check env var first
+        if let Ok(key) = std::env::var("OPENROUTER_API_KEY") {
+            println!("  \x1b[32m✓\x1b[0m Found OPENROUTER_API_KEY in environment");
+            self.endpoints.insert("openrouter".into(), ProviderEndpoint {
+                provider_type: ProviderType::OpenRouter,
+                name: "OpenRouter".into(),
+                base_url: "https://openrouter.ai/api".into(),
+                auth: AuthMethod::ApiKey(key),
+                default_model: "anthropic/claude-sonnet-4".into(),
+                enabled: true,
+                priority: 2,
+            });
+            return Ok(());
+        }
+
+        print!("Enter OpenRouter API key: ");
+        io::stdout().flush()?;
+
+        let mut key = String::new();
+        io::stdin().read_line(&mut key)?;
+        let key = key.trim();
+
+        if key.is_empty() {
+            println!("  \x1b[33mSkipped\x1b[0m");
+            return Ok(());
+        }
+
+        // Test the key
+        print!("  Verifying... ");
+        io::stdout().flush()?;
+
+        let resp = self.client
+            .get("https://openrouter.ai/api/v1/models")
+            .bearer_auth(key)
+            .send()
+            .await;
+
+        match resp {
+            Ok(r) if r.status().is_success() => {
+                println!("\x1b[32m✓\x1b[0m");
+                self.endpoints.insert("openrouter".into(), ProviderEndpoint {
+                    provider_type: ProviderType::OpenRouter,
+                    name: "OpenRouter".into(),
+                    base_url: "https://openrouter.ai/api".into(),
+                    auth: AuthMethod::ApiKey(key.to_string()),
+                    default_model: "anthropic/claude-sonnet-4".into(),
+                    enabled: true,
+                    priority: 2,
+                });
+            }
+            _ => {
+                println!("\x1b[31m✗ Invalid key\x1b[0m");
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Setup Google with OAuth2
+    async fn setup_google_oauth(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        println!("\n\x1b[1mGoogle AI Setup\x1b[0m");
+
+        // Check for existing API key
+        if let Ok(key) = std::env::var("GOOGLE_API_KEY") {
+            println!("  \x1b[32m✓\x1b[0m Found GOOGLE_API_KEY in environment");
+            self.endpoints.insert("google".into(), ProviderEndpoint {
+                provider_type: ProviderType::Google,
+                name: "Google AI".into(),
+                base_url: "https://generativelanguage.googleapis.com".into(),
+                auth: AuthMethod::ApiKey(key),
+                default_model: "gemini-2.0-flash".into(),
+                enabled: true,
+                priority: 5,
+            });
+            return Ok(());
+        }
+
+        println!("Starting OAuth2 sign-in with Google...");
+        self.oauth2_login(ProviderType::Google).await?;
+
+        Ok(())
+    }
+
+    /// Setup Anthropic with API key
+    async fn setup_anthropic(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use std::io::{self, Write};
+
+        println!("\n\x1b[1mAnthropic Setup\x1b[0m");
+        println!("Get your API key at: https://console.anthropic.com/\n");
+
+        if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
+            println!("  \x1b[32m✓\x1b[0m Found ANTHROPIC_API_KEY in environment");
+            self.endpoints.insert("anthropic".into(), ProviderEndpoint {
+                provider_type: ProviderType::Anthropic,
+                name: "Anthropic".into(),
+                base_url: "https://api.anthropic.com".into(),
+                auth: AuthMethod::ApiKey(key),
+                default_model: "claude-sonnet-4-20250514".into(),
+                enabled: true,
+                priority: 10,
+            });
+            return Ok(());
+        }
+
+        print!("Enter Anthropic API key: ");
+        io::stdout().flush()?;
+
+        let mut key = String::new();
+        io::stdin().read_line(&mut key)?;
+        let key = key.trim();
+
+        if !key.is_empty() {
+            self.endpoints.insert("anthropic".into(), ProviderEndpoint {
+                provider_type: ProviderType::Anthropic,
+                name: "Anthropic".into(),
+                base_url: "https://api.anthropic.com".into(),
+                auth: AuthMethod::ApiKey(key.to_string()),
+                default_model: "claude-sonnet-4-20250514".into(),
+                enabled: true,
+                priority: 10,
+            });
+            println!("  \x1b[32m✓\x1b[0m Added Anthropic");
+        } else {
+            println!("  \x1b[33mSkipped\x1b[0m");
+        }
+
+        Ok(())
+    }
+
+    /// Setup OpenAI with API key
+    async fn setup_openai(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use std::io::{self, Write};
+
+        println!("\n\x1b[1mOpenAI Setup\x1b[0m");
+        println!("Get your API key at: https://platform.openai.com/api-keys\n");
+
+        if let Ok(key) = std::env::var("OPENAI_API_KEY") {
+            println!("  \x1b[32m✓\x1b[0m Found OPENAI_API_KEY in environment");
+            self.endpoints.insert("openai".into(), ProviderEndpoint {
+                provider_type: ProviderType::OpenAI,
+                name: "OpenAI".into(),
+                base_url: "https://api.openai.com".into(),
+                auth: AuthMethod::ApiKey(key),
+                default_model: "gpt-4o".into(),
+                enabled: true,
+                priority: 10,
+            });
+            return Ok(());
+        }
+
+        print!("Enter OpenAI API key: ");
+        io::stdout().flush()?;
+
+        let mut key = String::new();
+        io::stdin().read_line(&mut key)?;
+        let key = key.trim();
+
+        if !key.is_empty() {
+            self.endpoints.insert("openai".into(), ProviderEndpoint {
+                provider_type: ProviderType::OpenAI,
+                name: "OpenAI".into(),
+                base_url: "https://api.openai.com".into(),
+                auth: AuthMethod::ApiKey(key.to_string()),
+                default_model: "gpt-4o".into(),
+                enabled: true,
+                priority: 10,
+            });
+            println!("  \x1b[32m✓\x1b[0m Added OpenAI");
+        } else {
+            println!("  \x1b[33mSkipped\x1b[0m");
+        }
+
+        Ok(())
+    }
+
+    /// Setup model tiers
+    async fn setup_tiers(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use std::io::{self, Write};
+
+        println!("\n\x1b[1;33m── Model Tiers ──\x1b[0m\n");
+        println!("Ganesha uses numbered tiers for different tasks:");
+        println!("  /1: prompt  - Fast tier (quick tasks)");
+        println!("  /2: prompt  - Balanced tier (default)");
+        println!("  /3: prompt  - Premium tier (complex reasoning)");
+        println!("  /vision: prompt - Vision tasks\n");
+
+        // Auto-configure based on available endpoints
+        let has_openrouter = self.endpoints.contains_key("openrouter");
+        let has_local = self.endpoints.contains_key("local") || self.endpoints.contains_key("ollama");
+        let has_anthropic = self.endpoints.contains_key("anthropic");
+
+        if has_openrouter {
+            println!("Configuring tiers using OpenRouter...");
+
+            self.tiers.set(1, "openrouter", "anthropic/claude-haiku-3-5", "Fast (Haiku)");
+            self.tiers.set(2, "openrouter", "anthropic/claude-sonnet-4", "Balanced (Sonnet)");
+            self.tiers.set(3, "openrouter", "anthropic/claude-opus-4", "Premium (Opus)");
+            self.tiers.vision = Some(TierMapping {
+                endpoint: "openrouter".into(),
+                model: "anthropic/claude-sonnet-4".into(),
+                description: "Vision (Sonnet)".into(),
+            });
+        } else if has_anthropic {
+            println!("Configuring tiers using Anthropic...");
+
+            self.tiers.set(1, "anthropic", "claude-haiku-3-5-20241022", "Fast (Haiku)");
+            self.tiers.set(2, "anthropic", "claude-sonnet-4-20250514", "Balanced (Sonnet)");
+            self.tiers.set(3, "anthropic", "claude-opus-4-20250514", "Premium (Opus)");
+            self.tiers.vision = Some(TierMapping {
+                endpoint: "anthropic".into(),
+                model: "claude-sonnet-4-20250514".into(),
+                description: "Vision (Sonnet)".into(),
+            });
+        } else if has_local {
+            let local_name = if self.endpoints.contains_key("local") { "local" } else { "ollama" };
+            println!("Configuring tiers using local models...");
+
+            self.tiers.set(1, local_name, "default", "Local model");
+            self.tiers.set(2, local_name, "default", "Local model");
+            self.tiers.tiers.remove(&3); // Remove premium tier if only local
+            self.tiers.vision = None;
+        }
+
+        print!("\nCustomize tiers? [y/N]: ");
+        io::stdout().flush()?;
+
+        let mut answer = String::new();
+        io::stdin().read_line(&mut answer)?;
+
+        if answer.trim().to_lowercase() == "y" {
+            self.configure_tiers_interactive().await?;
+        } else {
+            println!("\n  Using default tier configuration.");
+        }
+
+        Ok(())
+    }
+
+    /// Interactive tier configuration
+    async fn configure_tiers_interactive(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use std::io::{self, Write};
+
+        println!("\n\x1b[1mTier Configuration\x1b[0m");
+        println!("Commands:");
+        println!("  set <tier> <endpoint> <model>  - Configure a tier");
+        println!("  remove <tier>                   - Remove a tier");
+        println!("  vision <endpoint> <model>       - Set vision model");
+        println!("  list                            - Show current tiers");
+        println!("  done                            - Finish configuration\n");
+
+        loop {
+            print!("\x1b[36mtiers>\x1b[0m ");
+            io::stdout().flush()?;
+
+            let mut input = String::new();
+            io::stdin().read_line(&mut input)?;
+            let parts: Vec<&str> = input.trim().split_whitespace().collect();
+
+            if parts.is_empty() {
+                continue;
+            }
+
+            match parts[0] {
+                "set" if parts.len() >= 4 => {
+                    if let Ok(tier) = parts[1].parse::<u32>() {
+                        self.tiers.set(tier, parts[2], parts[3], &format!("Tier {}", tier));
+                        println!("  Set tier {} to {}/{}", tier, parts[2], parts[3]);
+                    }
+                }
+                "remove" if parts.len() >= 2 => {
+                    if let Ok(tier) = parts[1].parse::<u32>() {
+                        self.tiers.remove(tier);
+                        println!("  Removed tier {}", tier);
+                    }
+                }
+                "vision" if parts.len() >= 3 => {
+                    self.tiers.vision = Some(TierMapping {
+                        endpoint: parts[1].into(),
+                        model: parts[2].into(),
+                        description: "Vision".into(),
+                    });
+                    println!("  Set vision to {}/{}", parts[1], parts[2]);
+                }
+                "list" => {
+                    println!("\n  Current tiers:");
+                    for tier in self.tiers.tier_numbers() {
+                        if let Some(m) = self.tiers.get(tier) {
+                            println!("    /{}: {} -> {}", tier, m.endpoint, m.model);
+                        }
+                    }
+                    if let Some(v) = &self.tiers.vision {
+                        println!("    /vision: {} -> {}", v.endpoint, v.model);
+                    }
+                    println!();
+                }
+                "done" | "exit" | "q" => break,
+                _ => println!("  Unknown command"),
+            }
+        }
 
         Ok(())
     }
@@ -510,7 +1168,14 @@ impl ProviderManager {
         if let Some(parent) = self.config_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let content = serde_json::to_string_pretty(&self.endpoints)?;
+
+        let config = GaneshaConfig {
+            endpoints: self.endpoints.clone(),
+            tiers: self.tiers.clone(),
+            setup_complete: self.setup_complete,
+        };
+
+        let content = serde_json::to_string_pretty(&config)?;
         fs::write(&self.config_path, content)?;
         Ok(())
     }

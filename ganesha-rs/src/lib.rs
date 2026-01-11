@@ -134,4 +134,5 @@ pub use orchestrator::vision::{VisionAnalyzer, ScreenAnalysis, VisionConfig};
 pub use orchestrator::providers::{
     ProviderManager, ProviderEndpoint, ProviderType, AuthMethod,
     ModelInfo, ModelTier as ProviderModelTier, OAuth2Config,
+    TierConfig, TierMapping, SlashCommand, GaneshaConfig, parse_slash_command,
 };
