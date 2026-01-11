@@ -126,8 +126,8 @@ impl SafetyFilter {
             // Destructive synonyms (anti-obfuscation)
             "purge", "obliterate", "annihilate", "terminate", "kill",
             "nuke", "zap", "trash", "shred", "exterminate", "eliminate",
-            // Abbreviations
-            "del", "fmt", "rm", "pwd", "cls",
+            // Abbreviations (only as standalone commands, checked separately with word boundaries)
+            // Note: "del", "rm", "fmt" removed - they match inside "model", "transform", "form"
             // Data loss
             "overwrite", "replace", "discard", "abandon",
             "close without saving", "don't save", "discard changes",

@@ -12,12 +12,14 @@ mod cli;
 mod core;
 mod logging;
 mod providers;
+mod orchestrator;
 
 use clap::{Parser, Subcommand};
 use cli::{print_banner, print_error, print_info, print_result, print_success, AutoConsent, CliConsent};
 use core::access_control::{load_policy, AccessLevel};
 use core::GaneshaEngine;
 use providers::ProviderChain;
+use orchestrator::providers::ProviderManager;
 
 #[derive(Parser)]
 #[command(name = "ganesha")]
@@ -74,6 +76,10 @@ struct Args {
     #[arg(short, long)]
     quiet: bool,
 
+    /// Configure providers and tiers
+    #[arg(long)]
+    configure: bool,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -123,6 +129,32 @@ async fn main() {
         }
     }
 
+    // Check for first-run setup or explicit --configure
+    let mut provider_manager = ProviderManager::new();
+
+    if args.configure {
+        // Explicit configuration request
+        if let Err(e) = provider_manager.first_run_setup().await {
+            print_error(&format!("Setup failed: {}", e));
+            std::process::exit(1);
+        }
+        return;
+    }
+
+    if provider_manager.needs_setup() {
+        // First run - do setup
+        println!("\x1b[33mFirst run detected - starting setup...\x1b[0m\n");
+        if let Err(e) = provider_manager.first_run_setup().await {
+            print_error(&format!("Setup failed: {}", e));
+            std::process::exit(1);
+        }
+
+        // If user just ran setup with no task, exit
+        if args.task.is_empty() && !args.interactive {
+            return;
+        }
+    }
+
     // Print banner unless quiet
     if !args.quiet {
         print_banner();
@@ -139,13 +171,13 @@ async fn main() {
     // Load policy
     let policy = load_policy();
 
-    // Create provider chain
+    // Create provider chain (TODO: migrate to ProviderManager)
     let chain = ProviderChain::default_chain();
     let available = chain.get_available();
 
     if available.is_empty() {
         print_error("No LLM providers available");
-        print_info("Start LM Studio or Ollama, or set ANTHROPIC_API_KEY / OPENAI_API_KEY");
+        print_info("Run: ganesha --configure");
         std::process::exit(1);
     }
 

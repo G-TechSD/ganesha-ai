@@ -925,6 +925,21 @@ ACTION TYPES:
                 let key = key_raw.replace(" ", "");
                 let key_lower = key.to_lowercase();
 
+                // CRITICAL: Ensure target window has focus before sending keys
+                // This prevents keys going to desktop search instead of the app
+                if let Ok(output) = Command::new("xdotool")
+                    .args(["search", "--name", "Blender"])
+                    .output()
+                {
+                    let window_ids = String::from_utf8_lossy(&output.stdout);
+                    if let Some(wid) = window_ids.lines().next() {
+                        let _ = Command::new("xdotool")
+                            .args(["windowactivate", "--sync", wid])
+                            .output();
+                        thread::sleep(Duration::from_millis(100));
+                    }
+                }
+
                 // Special handling for Blender - use keydown/type/keyup for modifier combos
                 if key_lower == "shift+a" {
                     // Blender needs this sequence for Add menu
