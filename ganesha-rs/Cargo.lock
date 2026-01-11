@@ -891,6 +891,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "dirs"
+version = "5.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "44c45a9d03d6676652bcb5e724c7e988de1acad23a711b5217ab9cbecbec2225"
+dependencies = [
+ "dirs-sys 0.4.1",
+]
+
+[[package]]
 name = "dirs-sys"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1285,12 +1294,16 @@ dependencies = [
  "cpal",
  "dialoguer",
  "directories",
+ "dirs 5.0.1",
  "enigo",
  "eventlog",
+ "flate2",
  "futures",
+ "glob",
  "hound",
  "indicatif",
  "lazy_static",
+ "md5",
  "nix 0.27.1",
  "oslog",
  "playwright",
@@ -2095,6 +2108,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "md5"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "490cc448043f947bae3cbee9c203358d62dbee0db12107a74be5c30ccfd09771"
+
+[[package]]
 name = "memchr"
 version = "2.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2576,7 +2595,7 @@ checksum = "e45631bc049f37d0cef950da0d60ee35b211ab71180c61aee86880483cf59e28"
 dependencies = [
  "base64 0.13.1",
  "chrono",
- "dirs",
+ "dirs 3.0.2",
  "futures",
  "itertools 0.10.5",
  "log",
@@ -4054,6 +4073,7 @@ checksum = "e2e054861b4bd027cd373e18e8d8d8e6548085000e41290d95ce0c373a654b4a"
 dependencies = [
  "getrandom 0.3.4",
  "js-sys",
+ "serde_core",
  "wasm-bindgen",
 ]
 

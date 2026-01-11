@@ -39,14 +39,21 @@ regex = "1.10"
 lazy_static = "1.4"
 
 # UUID for session IDs
-uuid = { version = "1.6", features = ["v4"] }
+uuid = { version = "1.6", features = ["v4", "serde"] }
 
 # Time/dates
 chrono = { version = "0.4", features = ["serde"] }
 
 # Config files
 directories = "5.0"             # Cross-platform config dirs
+dirs = "5.0"                    # Simple home_dir helper
 toml = "0.8"
+
+# File utilities
+glob = "0.3"                    # Glob pattern matching
+flate2 = "1.0"                  # Compression for rollback snapshots
+md5 = "0.7"                     # Hashing for file change detection
+base64_lib = { package = "base64", version = "0.21" }  # Base64 encoding (always available)
 
 # HTTP server for API
 axum = "0.7"

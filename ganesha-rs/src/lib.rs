@@ -113,3 +113,21 @@ pub use cursor::{
     smooth_move, smooth_click,
 };
 pub mod app_knowledge;
+
+// Orchestrator - Mini-Me sub-agent architecture for long-horizon tasks
+pub mod orchestrator;
+
+pub use orchestrator::{
+    Orchestrator, MiniMeTask, MiniMeResult, ForkedContext, SessionContext,
+    ModelTier, ProviderConfig, PlanStep, StepStatus,
+};
+pub use orchestrator::wiggum::{WiggumLoop, WiggumConfig, WiggumOutcome, Verifier, LlmVerifier};
+pub use orchestrator::tools::{ToolRegistry, ToolDef, ToolExecResult, execute_tool};
+pub use orchestrator::memory::{
+    GlobalMemory, SessionRecord, Goal, GoalStatus, LearnedPattern, PatternCategory, KnowledgeEntry,
+};
+pub use orchestrator::engine::GaneshaEngine as Ganesha2Engine;
+pub use orchestrator::mcp::{McpManager, McpServer, ServerStatus, ServerCategory};
+pub use orchestrator::rollback::{RollbackManager, RollbackResult, RollbackRecord, FileSnapshot};
+pub use orchestrator::scheduler::{Scheduler, ScheduledTask, Schedule, TaskAction};
+pub use orchestrator::vision::{VisionAnalyzer, ScreenAnalysis, VisionConfig};
