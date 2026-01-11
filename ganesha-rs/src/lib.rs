@@ -131,3 +131,7 @@ pub use orchestrator::mcp::{McpManager, McpServer, ServerStatus, ServerCategory}
 pub use orchestrator::rollback::{RollbackManager, RollbackResult, RollbackRecord, FileSnapshot};
 pub use orchestrator::scheduler::{Scheduler, ScheduledTask, Schedule, TaskAction};
 pub use orchestrator::vision::{VisionAnalyzer, ScreenAnalysis, VisionConfig};
+pub use orchestrator::providers::{
+    ProviderManager, ProviderEndpoint, ProviderType, AuthMethod,
+    ModelInfo, ModelTier as ProviderModelTier, OAuth2Config,
+};
