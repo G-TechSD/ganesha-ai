@@ -495,37 +495,32 @@ impl<L: LlmProvider, C: ConsentHandler> GaneshaEngine<L, C> {
 Commands executed with results:
 {}
 
-YOUR JOB: Interpret the output and respond helpfully.
+YOUR JOB: Interpret the output and respond OR fix errors.
 
 RESPONSE FORMAT (JSON only):
-1. Task complete - explain what happened:
-   {{"response":"<interpret output in plain English using EXACT values>"}}
+1. Task complete: {{"response":"<plain English interpretation>"}}
+2. Need more actions: {{"actions":[{{"command":"cmd","explanation":"why"}}]}}
 
-2. Need more actions (verification, troubleshooting, continuation):
-   {{"actions":[{{"command":"cmd","explanation":"why"}}]}}
+CRITICAL - CHECK IF USER'S TARGET IS IN OUTPUT:
+- User asked "is X running/installed?" → Check if X appears in output
+- If X is NOT in output → Say "No, X is not running/installed"
+- If output shows other things but NOT X → "No, X is not there. Only Y and Z are running."
+
+ERROR HANDLING - If command failed, FIX IT:
+- "container name already in use" → {{"actions":[{{"command":"docker rm -f <name>","explanation":"Remove old container"}},{{"command":"docker run ...","explanation":"Try again"}}]}}
+- "permission denied" → suggest sudo or fix permissions
+- "not found" → suggest installation
+- NEVER just stop on errors - always try to fix or explain how to fix
 
 INTERPRETATION RULES:
-- ALWAYS interpret/summarize output - never leave user with just raw data
-- Use EXACT values from output (if df shows "52G", say "52 GB" not "4 GB")
-- For docker ps: List container names and their status
-- For installations: VERIFY it worked with a check command
-- For "not found": Clearly say "X is not installed"
-- For errors: Explain what went wrong
-
-VERIFICATION - After installations/changes, add verification:
-- Installed a package? Check: which <pkg> or <pkg> --version
-- Started a container? Check: docker ps | grep <name>
-- Created a file? Check: ls -la <path>
-
-ADVANCED BASH - Use pipes and grep:
-- docker ps | grep pihole
-- systemctl status nginx | grep Active
-- df -h | grep -E "^/dev"
+- ALWAYS give a clear answer to the user's question
+- Use EXACT values from output
+- For errors: explain what went wrong AND how to fix
 
 EXAMPLES:
-- docker ps shows containers → {{"response":"You have 3 containers running: gitlab, n8n, and hello-world."}}
-- which nginx returns path → {{"response":"Yes, nginx is installed at /usr/sbin/nginx."}}
-- docker run succeeded → {{"actions":[{{"command":"docker ps | grep pihole","explanation":"Verify container is running"}}]}}"#,
+- User: "is pihole running?" Output: "n8n\ngitlab" → {{"response":"No, pihole is not running. Only n8n and gitlab are running."}}
+- Error: "container name in use" → {{"actions":[{{"command":"docker rm -f pihole","explanation":"Remove existing container"}},{{"command":"docker run -d --name pihole pihole/pihole","explanation":"Start fresh"}}]}}
+- User: "is apache installed?" Output: "not found" → {{"response":"No, Apache is not installed. Would you like me to install it?"}}"#,
             task, result_summary
         );
 
