@@ -495,23 +495,18 @@ impl<L: LlmProvider, C: ConsentHandler> GaneshaEngine<L, C> {
 Commands were executed with these results:
 {}
 
-Based on the results, respond with ONE of:
+RESPOND WITH VALID JSON ONLY:
+{{"response":"<your answer using EXACT values from the output above>"}}
 
-1. If the task is COMPLETE and user needs an answer, output:
-{{"response":"<concise answer to user's actual question based on command output>"}}
+CRITICAL RULES:
+- Use the EXACT numbers/values from the command output - DO NOT make up or estimate values
+- For disk space: Look at "Avail" column - if it says "52G", say "52 GB" not "4 GB"
+- For memory: Use exact values from the output
+- Quote values directly from the output when possible
+- Be concise (1-2 sentences)
+- If more commands needed: {{"actions":[{{"command":"cmd","explanation":"why"}}]}}
 
-2. If MORE ACTIONS are needed to complete the task, output:
-{{"actions":[{{"command":"next cmd","explanation":"why"}}]}}
-
-3. If there was an ERROR that needs handling, output:
-{{"response":"<explain what went wrong and what to do>"}}
-
-RULES:
-- Analyze the command output to answer the user's ACTUAL question
-- Be concise (1-3 sentences for responses)
-- For system info queries, extract the relevant data from output
-- If the user asked "how much disk space", don't just run df - tell them the answer
-- Output ONLY valid JSON, no markdown"#,
+EXAMPLE - If df shows "Avail 52G", respond: {{"response":"You have 52 GB available."}}"#,
             task, result_summary
         );
 
