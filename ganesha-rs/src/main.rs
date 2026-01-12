@@ -1061,7 +1061,7 @@ fn create_spinner(msg: &str) -> indicatif::ProgressBar {
     spinner
 }
 
-/// Run a task and return the output for logging
+/// Run a task autonomously - execute commands, analyze results, continue until done
 async fn run_task_with_log<C: core::ConsentHandler>(
     engine: &mut GaneshaEngine<ProviderChain, C>,
     task: &str,
@@ -1075,16 +1075,17 @@ async fn run_task_with_log<C: core::ConsentHandler>(
         task.to_string()
     };
 
-    // Pick a random thinking message
+    let mut all_outputs: Vec<String> = vec![];
+    let mut actions_taken: Vec<String> = vec![];
+    let max_iterations = 10;  // Allow more iterations for complex tasks
+
+    // Initial planning
     let thinking_msg = THINKING_MESSAGES
         .choose(&mut rand::thread_rng())
         .unwrap_or(&"🐘 Thinking...");
-
-    // Show spinner while planning
     let spinner = create_spinner(thinking_msg);
 
-    // Plan
-    let plan = match engine.plan(&task).await {
+    let mut current_plan = match engine.plan(&task).await {
         Ok(p) => {
             spinner.finish_and_clear();
             p
@@ -1097,127 +1098,117 @@ async fn run_task_with_log<C: core::ConsentHandler>(
         }
     };
 
-    // Check if there are commands to run
-    let has_commands = plan.actions.iter().any(|a| !a.command.is_empty());
-
-    // Execute with different spinner
-    let exec_msg = EXECUTING_MESSAGES
-        .choose(&mut rand::thread_rng())
-        .unwrap_or(&"⚡ Executing...");
-
-    let spinner = create_spinner(exec_msg);
-
-    let mut outputs = vec![];
-    let results = match engine.execute(&plan).await {
-        Ok(results) => {
-            spinner.finish_and_clear();
-            results
-        }
-        Err(e) => {
-            spinner.finish_and_clear();
-            // User cancelled is not an error to report
-            if matches!(e, core::GaneshaError::UserCancelled) {
-                return "User cancelled".to_string();
+    // Check for response-only (no commands)
+    if current_plan.actions.iter().all(|a| a.command.is_empty()) {
+        for action in &current_plan.actions {
+            if !action.explanation.is_empty() {
+                println!("\n{}", style(&action.explanation).cyan());
+                all_outputs.push(action.explanation.clone());
             }
-            let msg = format!("{}", e);
-            print_error(&msg);
-            return msg;
         }
-    };
-
-    // Show execution summaries
-    for result in &results {
-        if result.command.is_empty() && !result.explanation.is_empty() {
-            // Response action - show the response
-            println!("\n{}", style(&result.explanation).cyan());
-            outputs.push(result.explanation.clone());
-        } else if !result.command.is_empty() {
-            // Command execution - show friendly summary
-            print_action_summary(&result.command, result.success, &result.output, result.duration_ms);
-            outputs.push(result.output.clone());
-        }
-
-        if let Some(ref err) = result.error {
-            print_error(err);
-            outputs.push(format!("Error: {}", err));
-        }
+        return all_outputs.join("\n");
     }
 
-    // If commands were run, analyze results and continue until task is complete
-    if has_commands {
-        let max_iterations = 5;
-        let mut current_results = results;
-        let mut all_actions: Vec<String> = vec![];
-
-        // Track what we did
-        for r in &current_results {
-            if !r.command.is_empty() {
-                all_actions.push(r.command.clone());
-            }
+    // AGENTIC LOOP: Execute → Analyze → Continue until done
+    for iteration in 0..max_iterations {
+        let has_actions = current_plan.actions.iter().any(|a| !a.command.is_empty());
+        if !has_actions {
+            break;
         }
 
-        for iteration in 0..max_iterations {
-            // Show analyzing spinner
-            let spinner_msg = if iteration == 0 {
-                "🔍 Analyzing..."
+        // Execute each command in the plan
+        let results = match engine.execute(&current_plan).await {
+            Ok(r) => r,
+            Err(e) => {
+                if matches!(e, core::GaneshaError::UserCancelled) {
+                    return "User cancelled".to_string();
+                }
+                print_error(&format!("{}", e));
+                break;
+            }
+        };
+
+        // Display results with clear format
+        for result in &results {
+            if result.command.is_empty() {
+                continue;
+            }
+
+            // Show what we're running
+            println!("{} {}", style("Running:").dim(), style(&result.command).white());
+
+            // Show output (truncated if very long)
+            let output = result.output.trim();
+            if !output.is_empty() {
+                let lines: Vec<&str> = output.lines().collect();
+                if lines.len() > 20 {
+                    for line in lines.iter().take(15) {
+                        println!("  {}", style(line).dim());
+                    }
+                    println!("  {} ({} more lines)", style("...").dim(), lines.len() - 15);
+                } else {
+                    for line in lines {
+                        println!("  {}", style(line).dim());
+                    }
+                }
+            }
+
+            // Show result status
+            let status = if result.success {
+                style("Command finished (SUCCESS)").green()
             } else {
-                "🔍 Checking results..."
+                style("Command finished (FAILED)").red()
             };
-            let analyze_spinner = create_spinner(spinner_msg);
+            println!("{}", status);
 
-            match engine.analyze_results(&task, &current_results).await {
-                Ok((response, next_plan)) => {
-                    analyze_spinner.finish_and_clear();
+            if let Some(ref err) = result.error {
+                println!("  {}: {}", style("Error").red(), err);
+            }
 
-                    // If there are more actions needed, execute them
-                    if let Some(plan) = next_plan {
-                        if iteration < max_iterations - 1 {
-                            // Execute follow-up actions
-                            match engine.execute(&plan).await {
-                                Ok(follow_results) => {
-                                    for result in &follow_results {
-                                        if !result.command.is_empty() {
-                                            print_action_summary(&result.command, result.success, &result.output, result.duration_ms);
-                                            outputs.push(result.output.clone());
-                                            all_actions.push(result.command.clone());
-                                        }
-                                        if let Some(ref err) = result.error {
-                                            print_error(err);
-                                        }
-                                    }
-                                    current_results = follow_results;
-                                    continue; // Loop back to analyze new results
-                                }
-                                Err(e) => {
-                                    if !matches!(e, core::GaneshaError::UserCancelled) {
-                                        print_error(&format!("{}", e));
-                                    }
-                                    break;
-                                }
-                            }
-                        }
+            println!();  // Blank line between commands
+            actions_taken.push(result.command.clone());
+            all_outputs.push(result.output.clone());
+        }
+
+        // Analyze results and decide next steps
+        let spinner = create_spinner("🔍 Analyzing...");
+        match engine.analyze_results(&task, &results).await {
+            Ok((response, next_plan)) => {
+                spinner.finish_and_clear();
+
+                // If LLM returns more actions, continue the loop
+                if let Some(plan) = next_plan {
+                    if plan.actions.iter().any(|a| !a.command.is_empty()) {
+                        current_plan = plan;
+                        continue;  // Go back and execute new commands
                     }
-
-                    // Show the final analysis response
-                    if !response.is_empty() {
-                        println!("\n{}", style(&response).cyan());
-                        outputs.push(response);
-                    }
-                    break; // Task complete
                 }
-                Err(e) => {
-                    analyze_spinner.finish_and_clear();
-                    // Show error in debug mode, otherwise silently continue
-                    if std::env::var("GANESHA_DEBUG").is_ok() {
-                        print_warning(&format!("Analysis: {}", e));
-                    }
-                    break;
+
+                // No more actions - show final response and exit
+                if !response.is_empty() {
+                    println!("\n{}", style(&response).cyan());
+                    all_outputs.push(response);
+                } else if !actions_taken.is_empty() {
+                    // No response from LLM, generate a simple summary
+                    println!("\n{}", style(format!("Completed {} action(s).", actions_taken.len())).green());
                 }
+                break;
+            }
+            Err(e) => {
+                spinner.finish_and_clear();
+                if std::env::var("GANESHA_DEBUG").is_ok() {
+                    print_warning(&format!("Analysis error: {}", e));
+                }
+                // Even on error, try to give a summary
+                if !actions_taken.is_empty() {
+                    println!("\n{}", style(format!("Executed {} command(s).", actions_taken.len())).dim());
+                }
+                break;
             }
         }
     }
 
-    outputs.join("\n")
+    all_outputs.join("\n")
 }
 
 async fn run_task<C: core::ConsentHandler>(
