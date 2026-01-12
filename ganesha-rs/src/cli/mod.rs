@@ -76,6 +76,65 @@ fn risk_style(risk: &RiskLevel) -> Style {
     }
 }
 
+/// Truncate heredoc commands to show a summary instead of full content
+fn truncate_command_for_display(cmd: &str) -> String {
+    // Check for heredoc pattern
+    if let Some(heredoc_start) = cmd.find("<<") {
+        // Find the delimiter marker (like GANESHA_EOF or EOF)
+        let after_heredoc = &cmd[heredoc_start + 2..];
+
+        // Find where the content starts (after first newline)
+        if let Some(newline_pos) = cmd.find('\n') {
+            let header = cmd[..newline_pos].trim();
+            let content = &cmd[newline_pos + 1..];
+
+            // Extract delimiter from header to find end
+            let delimiter = after_heredoc
+                .split_whitespace()
+                .next()
+                .unwrap_or("EOF")
+                .trim_matches('\'')
+                .trim_matches('"');
+
+            // Find where the heredoc ends
+            let content_only = if let Some(end_pos) = content.rfind(delimiter) {
+                &content[..end_pos]
+            } else {
+                content
+            };
+
+            // Calculate stats
+            let line_count = content_only.lines().count();
+            let byte_size = content_only.len();
+            let size_str = if byte_size > 1024 {
+                format!("{:.1} KB", byte_size as f64 / 1024.0)
+            } else {
+                format!("{} bytes", byte_size)
+            };
+
+            // Extract target file if present
+            if let Some(file) = extract_redirect_target(header) {
+                return format!(
+                    "Write {} lines ({}) to {}",
+                    line_count, size_str, file
+                );
+            } else {
+                return format!(
+                    "{}\n  [{} lines, {}]",
+                    header, line_count, size_str
+                );
+            }
+        }
+    }
+
+    // For very long non-heredoc commands, truncate
+    if cmd.len() > 200 {
+        format!("{}...", &cmd[..200])
+    } else {
+        cmd.to_string()
+    }
+}
+
 pub fn print_plan(plan: &ExecutionPlan) {
     println!();
     println!(
@@ -113,7 +172,8 @@ pub fn print_plan(plan: &ExecutionPlan) {
             style(format!("[{}/{}]", i + 1, plan.total_actions())).dim(),
             risk_styled
         );
-        println!("Command: {}", style(&action.command).white().bold());
+        let display_cmd = truncate_command_for_display(&action.command);
+        println!("Command: {}", style(&display_cmd).white().bold());
         println!("Explanation: {}", style(&action.explanation).dim());
         println!();
     }

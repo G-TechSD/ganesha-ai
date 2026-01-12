@@ -922,8 +922,8 @@ setInterval(() => {{
         // Check if user specified a directory
         let directory = Self::extract_directory_path(task);
 
-        // Determine output file path
-        let file_path = Self::extract_file_path(task).unwrap_or_else(|| {
+        // Determine output filename (without directory)
+        let filename = Self::extract_file_path(task).unwrap_or_else(|| {
             // Generate a sensible default filename from item_type
             // item_type might be "gargoyle facts" or "real facts" - extract the noun
             let clean_type = item_type
@@ -943,15 +943,21 @@ setInterval(() => {{
                 "txt"
             };
 
-            let filename = format!("{}_{}.{}", clean_type, count, extension);
-
-            // If directory was specified, put file in that directory
-            if let Some(ref dir) = directory {
-                format!("{}/{}", dir.trim_end_matches('/'), filename)
-            } else {
-                filename
-            }
+            format!("{}_{}.{}", clean_type, count, extension)
         });
+
+        // Combine directory and filename if directory was specified
+        // and filename doesn't already include it
+        let file_path = if let Some(ref dir) = directory {
+            // Check if filename already has a path
+            if filename.starts_with('/') || filename.starts_with(dir.as_str()) {
+                filename  // Already has full path
+            } else {
+                format!("{}/{}", dir.trim_end_matches('/'), filename)
+            }
+        } else {
+            filename
+        };
 
         print_info(&format!(
             "Generating {} {} in chunks (chunked generation mode)...",
