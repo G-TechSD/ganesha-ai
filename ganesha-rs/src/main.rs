@@ -21,7 +21,7 @@ mod tui;
 mod workflow;
 
 use clap::{Parser, Subcommand};
-use cli::{print_banner, print_error, print_info, print_action_summary, print_success, AutoConsent, CliConsent};
+use cli::{print_banner, print_error, print_info, print_warning, print_action_summary, print_success, AutoConsent, CliConsent};
 use console::style;
 use core::access_control::{load_policy, AccessLevel};
 use core::GaneshaEngine;
@@ -1097,6 +1097,9 @@ async fn run_task_with_log<C: core::ConsentHandler>(
         }
     };
 
+    // Check if there are commands to run
+    let has_commands = plan.actions.iter().any(|a| !a.command.is_empty());
+
     // Execute with different spinner
     let exec_msg = EXECUTING_MESSAGES
         .choose(&mut rand::thread_rng())
@@ -1105,32 +1108,75 @@ async fn run_task_with_log<C: core::ConsentHandler>(
     let spinner = create_spinner(exec_msg);
 
     let mut outputs = vec![];
-    match engine.execute(&plan).await {
+    let results = match engine.execute(&plan).await {
         Ok(results) => {
             spinner.finish_and_clear();
-            for result in results {
-                // Check if this is a conversational Response action (no command)
-                if result.command.is_empty() && !result.explanation.is_empty() {
-                    // This is a Response action - show the actual response nicely
-                    println!("\n{}", style(&result.explanation).cyan());
-                    outputs.push(result.explanation.clone());
-                } else {
-                    // This is a command execution - show friendly summary
-                    print_action_summary(&result.command, result.success, &result.output, result.duration_ms);
-                    outputs.push(result.output.clone());
-                }
-
-                if let Some(ref err) = result.error {
-                    print_error(err);
-                    outputs.push(format!("Error: {}", err));
-                }
-            }
+            results
         }
         Err(e) => {
             spinner.finish_and_clear();
+            // User cancelled is not an error to report
+            if matches!(e, core::GaneshaError::UserCancelled) {
+                return "User cancelled".to_string();
+            }
             let msg = format!("{}", e);
             print_error(&msg);
-            outputs.push(msg);
+            return msg;
+        }
+    };
+
+    // Show execution summaries
+    for result in &results {
+        if result.command.is_empty() && !result.explanation.is_empty() {
+            // Response action - show the response
+            println!("\n{}", style(&result.explanation).cyan());
+            outputs.push(result.explanation.clone());
+        } else if !result.command.is_empty() {
+            // Command execution - show friendly summary
+            print_action_summary(&result.command, result.success, &result.output, result.duration_ms);
+            outputs.push(result.output.clone());
+        }
+
+        if let Some(ref err) = result.error {
+            print_error(err);
+            outputs.push(format!("Error: {}", err));
+        }
+    }
+
+    // If commands were run, analyze results and provide natural language response
+    if has_commands {
+        // Show analyzing spinner
+        let analyze_spinner = create_spinner("🔍 Analyzing results...");
+
+        match engine.analyze_results(&task, &results).await {
+            Ok((response, next_plan)) => {
+                analyze_spinner.finish_and_clear();
+
+                // Show the analysis response (natural language answer)
+                if !response.is_empty() {
+                    println!("\n{}", style(&response).cyan());
+                    outputs.push(response);
+                }
+
+                // If more actions needed, execute them (up to 3 follow-ups)
+                if let Some(plan) = next_plan {
+                    print_info("Continuing with follow-up actions...");
+                    if let Ok(follow_results) = engine.execute(&plan).await {
+                        for result in &follow_results {
+                            if !result.command.is_empty() {
+                                print_action_summary(&result.command, result.success, &result.output, result.duration_ms);
+                                outputs.push(result.output.clone());
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                analyze_spinner.finish_and_clear();
+                if std::env::var("GANESHA_DEBUG").is_ok() {
+                    print_warning(&format!("Analysis: {}", e));
+                }
+            }
         }
     }
 
@@ -1148,35 +1194,109 @@ async fn run_task<C: core::ConsentHandler>(
         task.to_string()
     };
 
-    // Plan
-    let plan = match engine.plan(&task).await {
-        Ok(p) => p,
-        Err(e) => {
-            print_error(&format!("Planning failed: {}", e));
-            return;
-        }
-    };
+    // Agentic loop - plan, execute, analyze, repeat if needed
+    let max_iterations = 5;  // Safety limit
+    let mut current_task = task.clone();
 
-    // Execute
-    match engine.execute(&plan).await {
-        Ok(results) => {
-            for result in results {
-                // Check if this is a conversational Response action (no command)
-                if result.command.is_empty() && !result.explanation.is_empty() {
-                    // This is a Response action - show the actual response nicely
-                    println!("\n{}", console::style(&result.explanation).cyan());
-                } else {
-                    // This is a command execution - show friendly summary
-                    print_action_summary(&result.command, result.success, &result.output, result.duration_ms);
-                }
+    for iteration in 0..max_iterations {
+        // Plan
+        let plan = match engine.plan(&current_task).await {
+            Ok(p) => p,
+            Err(e) => {
+                print_error(&format!("Planning failed: {}", e));
+                return;
+            }
+        };
 
-                if let Some(ref err) = result.error {
-                    print_error(err);
+        // Check if this is a response-only plan (no commands)
+        let has_commands = plan.actions.iter().any(|a| !a.command.is_empty());
+
+        // Execute
+        let results = match engine.execute(&plan).await {
+            Ok(r) => r,
+            Err(e) => {
+                // User cancelled is not an error to report
+                if !matches!(e, core::GaneshaError::UserCancelled) {
+                    print_error(&format!("{}", e));
                 }
+                return;
+            }
+        };
+
+        // Show execution summaries for commands
+        for result in &results {
+            if result.command.is_empty() && !result.explanation.is_empty() {
+                // Response action - show the response
+                println!("\n{}", console::style(&result.explanation).cyan());
+            } else if !result.command.is_empty() {
+                // Command execution - show friendly summary
+                print_action_summary(&result.command, result.success, &result.output, result.duration_ms);
+            }
+
+            if let Some(ref err) = result.error {
+                print_error(err);
             }
         }
-        Err(e) => {
-            print_error(&format!("{}", e));
+
+        // If no commands were run, we're done (pure response)
+        if !has_commands {
+            return;
+        }
+
+        // Analyze results and determine next steps
+        if std::env::var("GANESHA_DEBUG").is_ok() {
+            eprintln!("[DEBUG] Starting result analysis...");
+        }
+        match engine.analyze_results(&task, &results).await {
+            Ok((response, next_plan)) => {
+                if std::env::var("GANESHA_DEBUG").is_ok() {
+                    eprintln!("[DEBUG] Analysis response: '{}' (has_plan: {})",
+                        if response.len() > 100 { &response[..100] } else { &response },
+                        next_plan.is_some());
+                }
+                // Show the analysis response
+                if !response.is_empty() {
+                    println!("\n{}", console::style(&response).cyan());
+                }
+
+                // If there are more actions needed, continue the loop
+                if let Some(plan) = next_plan {
+                    if iteration < max_iterations - 1 {
+                        print_info("Continuing with additional actions...");
+                        // Execute the follow-up plan directly
+                        match engine.execute(&plan).await {
+                            Ok(follow_results) => {
+                                for result in &follow_results {
+                                    if !result.command.is_empty() {
+                                        print_action_summary(&result.command, result.success, &result.output, result.duration_ms);
+                                    }
+                                    if let Some(ref err) = result.error {
+                                        print_error(err);
+                                    }
+                                }
+                                // Update task context for next iteration if needed
+                                current_task = format!("{} [continuing from previous results]", task);
+                            }
+                            Err(e) => {
+                                if !matches!(e, core::GaneshaError::UserCancelled) {
+                                    print_error(&format!("{}", e));
+                                }
+                                return;
+                            }
+                        }
+                    }
+                } else {
+                    // No more actions needed, we're done
+                    return;
+                }
+            }
+            Err(e) => {
+                // Analysis failed, but execution succeeded - just continue
+                if std::env::var("GANESHA_DEBUG").is_ok() {
+                    print_warning(&format!("Analysis error: {}", e));
+                }
+                return;
+            }
         }
     }
 }
