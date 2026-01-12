@@ -35,10 +35,48 @@ ganesha "set up nginx as a reverse proxy for port 3000"
 - **Cross-Platform** - Linux, macOS, Windows
 - **MCP Compatible** - Use as a tool in Claude Code or any MCP client
 - **HTTP API** - Integrate with web apps like Claudia Admin
+- **Flux Capacitor** - Time-boxed autonomous task execution
 
 ---
 
-## Installation
+## Downloads
+
+Pre-built binaries for the Rust version (v3.0.0):
+
+| Platform | Architecture | Download |
+|----------|-------------|----------|
+| **Linux** | x86_64 | [ganesha-linux-x86_64.tar.gz](https://github.com/G-TechSD/ganesha-ai/releases/latest/download/ganesha-linux-x86_64.tar.gz) |
+| **Linux** | ARM64 | [ganesha-linux-arm64.tar.gz](https://github.com/G-TechSD/ganesha-ai/releases/latest/download/ganesha-linux-arm64.tar.gz) |
+| **macOS** | Intel | [ganesha-macos-x86_64.tar.gz](https://github.com/G-TechSD/ganesha-ai/releases/latest/download/ganesha-macos-x86_64.tar.gz) |
+| **macOS** | Apple Silicon | [ganesha-macos-arm64.tar.gz](https://github.com/G-TechSD/ganesha-ai/releases/latest/download/ganesha-macos-arm64.tar.gz) |
+| **Windows** | x86_64 | [ganesha-windows-x86_64.zip](https://github.com/G-TechSD/ganesha-ai/releases/latest/download/ganesha-windows-x86_64.zip) |
+
+### Quick Install (Linux/macOS)
+
+```bash
+# Download and install latest release
+curl -fsSL https://raw.githubusercontent.com/G-TechSD/ganesha-ai/main/install.sh | bash
+```
+
+### Manual Install
+
+```bash
+# Download for your platform
+wget https://github.com/G-TechSD/ganesha-ai/releases/latest/download/ganesha-linux-x86_64.tar.gz
+
+# Extract
+tar -xzf ganesha-linux-x86_64.tar.gz
+
+# Move to PATH
+sudo mv ganesha /usr/local/bin/
+
+# Verify
+ganesha --version
+```
+
+---
+
+## Installation (From Source)
 
 ```bash
 # Clone
@@ -79,6 +117,33 @@ ganesha --code "create a React login form"
 # Rollback last session
 ganesha --rollback
 ```
+
+### Flux Capacitor (Autonomous Mode)
+
+Run tasks autonomously for a specified duration:
+
+```bash
+# Run for 1 hour
+ganesha --flux "1h" "optimize all database queries in this project"
+
+# Run until a specific time
+ganesha --until "6:00" "generate unit tests for all functions"
+
+# Run forever (until Ctrl+C)
+ganesha --flux auto "continuously monitor and fix linter errors"
+
+# Generate 1000 items with creative temperature
+ganesha -A --flux "30m" --temp 1.0 "Generate 1000 cat facts"
+
+# Resume a previous session
+ganesha --flux "1h" --resume flux_20260112 "Continue where we left off"
+```
+
+**Features:**
+- **FluxCanvas** - Persistent workspace that accumulates items/files across iterations
+- **Progress tracking** - Auto-detects targets ("1000 facts" -> shows 0/1000)
+- **Session resume** - Continue from where you left off
+- **Export** - Auto-exports to HTML and raw text at completion
 
 ### MCP Server
 
