@@ -12,6 +12,7 @@ mod agent;
 mod agent_wiggum;
 mod cli;
 mod core;
+mod flux;
 mod logging;
 mod menu;
 mod providers;
@@ -102,6 +103,26 @@ struct Args {
     /// Wiggum agent mode with verification loop
     #[arg(long)]
     wiggum: bool,
+
+    /// Flux Capacitor: Run for specified duration (e.g., "1h", "30m", "2 hours", "auto")
+    #[arg(long, value_name = "DURATION")]
+    flux: Option<String>,
+
+    /// Flux Capacitor: Run until specified time (e.g., "11:11", "23:30", "11:11 PM")
+    #[arg(long, value_name = "TIME")]
+    until: Option<String>,
+
+    /// LLM temperature (0.0-2.0, higher = more creative, default 0.7 for flux)
+    #[arg(long, value_name = "TEMP", default_value = "0.7")]
+    temp: f32,
+
+    /// Random seed for reproducible outputs
+    #[arg(long, value_name = "SEED")]
+    seed: Option<i64>,
+
+    /// Resume a previous Flux Capacitor session (session ID or canvas path)
+    #[arg(long, value_name = "SESSION")]
+    resume: Option<String>,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -281,6 +302,65 @@ async fn main() {
                     }
                     Err(_) => break,
                 }
+            }
+        }
+        return;
+    }
+
+    // Flux Capacitor mode - time-boxed autonomous execution
+    if args.flux.is_some() || args.until.is_some() {
+        let (provider_url, model) = chain.get_first_available_url()
+            .unwrap_or_else(|| ("http://192.168.245.155:1234".to_string(), "default".to_string()));
+
+        // Calculate duration
+        let duration = if let Some(ref flux_str) = args.flux {
+            match flux::parse_duration(flux_str) {
+                Some(d) => d,
+                None => {
+                    print_error(&format!("Invalid duration: '{}'. Try '1h', '30m', '2 hours', or 'auto'", flux_str));
+                    std::process::exit(1);
+                }
+            }
+        } else if let Some(ref until_str) = args.until {
+            match flux::parse_target_time(until_str) {
+                Some(target) => flux::duration_until(target),
+                None => {
+                    print_error(&format!("Invalid time: '{}'. Try '11:11', '23:30', or '11:11 PM'", until_str));
+                    std::process::exit(1);
+                }
+            }
+        } else {
+            unreachable!()
+        };
+
+        if task.is_empty() {
+            print_error("Flux Capacitor requires a task. Example: ganesha --flux 1h \"optimize this code\"");
+            std::process::exit(1);
+        }
+
+        let config = flux::FluxConfig {
+            duration,
+            task: task.clone(),
+            auto_extend: args.flux.as_ref().map(|f| f == "auto").unwrap_or(false),
+            provider_url,
+            model,
+            auto_approve: args.auto,
+            verbose: !args.quiet,
+            temperature: args.temp,
+            seed: args.seed,
+            resume: args.resume.clone(),
+        };
+
+        match flux::run_flux_capacitor(config).await {
+            Ok(status) => {
+                if status.iterations > 0 {
+                    println!("{} Flux Capacitor completed {} iterations",
+                        style("⚡").cyan(), status.iterations);
+                }
+            }
+            Err(e) => {
+                print_error(&format!("Flux Capacitor error: {}", e));
+                std::process::exit(1);
             }
         }
         return;

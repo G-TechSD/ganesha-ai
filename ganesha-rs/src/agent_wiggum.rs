@@ -33,6 +33,8 @@ pub struct AgentConfig {
     pub sandbox_dir: Option<PathBuf>,
     pub verify_actions: bool,
     pub verbose: bool,
+    pub temperature: f32,
+    pub seed: Option<i64>,
 }
 
 impl Default for AgentConfig {
@@ -44,6 +46,8 @@ impl Default for AgentConfig {
             max_retries: 3,
             auto_approve: false,
             sandbox_mode: false,
+            temperature: 0.2,
+            seed: None,
             sandbox_dir: None,
             verify_actions: true,
             verbose: false,
@@ -651,12 +655,17 @@ Output tool calls in JSON format. When done, summarize what was accomplished."#,
             })
         }).collect();
 
-        let request = json!({
+        let mut request = json!({
             "model": self.config.model,
             "messages": api_messages,
-            "temperature": 0.2,
+            "temperature": self.config.temperature,
             "max_tokens": 65536  // Large output for big file generations
         });
+
+        // Add seed if specified (for reproducibility)
+        if let Some(seed) = self.config.seed {
+            request["seed"] = json!(seed);
+        }
 
         let response = client
             .post(&endpoint)
