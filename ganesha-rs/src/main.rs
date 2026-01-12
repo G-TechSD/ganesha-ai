@@ -1143,38 +1143,75 @@ async fn run_task_with_log<C: core::ConsentHandler>(
         }
     }
 
-    // If commands were run, analyze results and provide natural language response
+    // If commands were run, analyze results and continue until task is complete
     if has_commands {
-        // Show analyzing spinner
-        let analyze_spinner = create_spinner("🔍 Analyzing results...");
+        let max_iterations = 5;
+        let mut current_results = results;
+        let mut all_actions: Vec<String> = vec![];
 
-        match engine.analyze_results(&task, &results).await {
-            Ok((response, next_plan)) => {
-                analyze_spinner.finish_and_clear();
+        // Track what we did
+        for r in &current_results {
+            if !r.command.is_empty() {
+                all_actions.push(r.command.clone());
+            }
+        }
 
-                // Show the analysis response (natural language answer)
-                if !response.is_empty() {
-                    println!("\n{}", style(&response).cyan());
-                    outputs.push(response);
-                }
+        for iteration in 0..max_iterations {
+            // Show analyzing spinner
+            let spinner_msg = if iteration == 0 {
+                "🔍 Analyzing..."
+            } else {
+                "🔍 Checking results..."
+            };
+            let analyze_spinner = create_spinner(spinner_msg);
 
-                // If more actions needed, execute them (up to 3 follow-ups)
-                if let Some(plan) = next_plan {
-                    print_info("Continuing with follow-up actions...");
-                    if let Ok(follow_results) = engine.execute(&plan).await {
-                        for result in &follow_results {
-                            if !result.command.is_empty() {
-                                print_action_summary(&result.command, result.success, &result.output, result.duration_ms);
-                                outputs.push(result.output.clone());
+            match engine.analyze_results(&task, &current_results).await {
+                Ok((response, next_plan)) => {
+                    analyze_spinner.finish_and_clear();
+
+                    // If there are more actions needed, execute them
+                    if let Some(plan) = next_plan {
+                        if iteration < max_iterations - 1 {
+                            // Execute follow-up actions
+                            match engine.execute(&plan).await {
+                                Ok(follow_results) => {
+                                    for result in &follow_results {
+                                        if !result.command.is_empty() {
+                                            print_action_summary(&result.command, result.success, &result.output, result.duration_ms);
+                                            outputs.push(result.output.clone());
+                                            all_actions.push(result.command.clone());
+                                        }
+                                        if let Some(ref err) = result.error {
+                                            print_error(err);
+                                        }
+                                    }
+                                    current_results = follow_results;
+                                    continue; // Loop back to analyze new results
+                                }
+                                Err(e) => {
+                                    if !matches!(e, core::GaneshaError::UserCancelled) {
+                                        print_error(&format!("{}", e));
+                                    }
+                                    break;
+                                }
                             }
                         }
                     }
+
+                    // Show the final analysis response
+                    if !response.is_empty() {
+                        println!("\n{}", style(&response).cyan());
+                        outputs.push(response);
+                    }
+                    break; // Task complete
                 }
-            }
-            Err(e) => {
-                analyze_spinner.finish_and_clear();
-                if std::env::var("GANESHA_DEBUG").is_ok() {
-                    print_warning(&format!("Analysis: {}", e));
+                Err(e) => {
+                    analyze_spinner.finish_and_clear();
+                    // Show error in debug mode, otherwise silently continue
+                    if std::env::var("GANESHA_DEBUG").is_ok() {
+                        print_warning(&format!("Analysis: {}", e));
+                    }
+                    break;
                 }
             }
         }

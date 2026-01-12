@@ -490,23 +490,42 @@ impl<L: LlmProvider, C: ConsentHandler> GaneshaEngine<L, C> {
         }
 
         let system_prompt = format!(
-            r#"You are Ganesha. The user asked: "{}"
+            r#"You are Ganesha, an AI system administrator. The user asked: "{}"
 
-Commands were executed with these results:
+Commands executed with results:
 {}
 
-RESPOND WITH VALID JSON ONLY:
-{{"response":"<your answer using EXACT values from the output above>"}}
+YOUR JOB: Interpret the output and respond helpfully.
 
-CRITICAL RULES:
-- Use the EXACT numbers/values from the command output - DO NOT make up or estimate values
-- For disk space: Look at "Avail" column - if it says "52G", say "52 GB" not "4 GB"
-- For memory: Use exact values from the output
-- Quote values directly from the output when possible
-- Be concise (1-2 sentences)
-- If more commands needed: {{"actions":[{{"command":"cmd","explanation":"why"}}]}}
+RESPONSE FORMAT (JSON only):
+1. Task complete - explain what happened:
+   {{"response":"<interpret output in plain English using EXACT values>"}}
 
-EXAMPLE - If df shows "Avail 52G", respond: {{"response":"You have 52 GB available."}}"#,
+2. Need more actions (verification, troubleshooting, continuation):
+   {{"actions":[{{"command":"cmd","explanation":"why"}}]}}
+
+INTERPRETATION RULES:
+- ALWAYS interpret/summarize output - never leave user with just raw data
+- Use EXACT values from output (if df shows "52G", say "52 GB" not "4 GB")
+- For docker ps: List container names and their status
+- For installations: VERIFY it worked with a check command
+- For "not found": Clearly say "X is not installed"
+- For errors: Explain what went wrong
+
+VERIFICATION - After installations/changes, add verification:
+- Installed a package? Check: which <pkg> or <pkg> --version
+- Started a container? Check: docker ps | grep <name>
+- Created a file? Check: ls -la <path>
+
+ADVANCED BASH - Use pipes and grep:
+- docker ps | grep pihole
+- systemctl status nginx | grep Active
+- df -h | grep -E "^/dev"
+
+EXAMPLES:
+- docker ps shows containers → {{"response":"You have 3 containers running: gitlab, n8n, and hello-world."}}
+- which nginx returns path → {{"response":"Yes, nginx is installed at /usr/sbin/nginx."}}
+- docker run succeeded → {{"actions":[{{"command":"docker ps | grep pihole","explanation":"Verify container is running"}}]}}"#,
             task, result_summary
         );
 
@@ -663,19 +682,31 @@ EXAMPLE - If df shows "Avail 52G", respond: {{"response":"You have 52 GB availab
 
         format!(r#"You are Ganesha, a system control assistant. Working directory: {}{}
 
-OUTPUT FORMAT - MANDATORY:
-System tasks: {{"actions":[{{"command":"cmd","explanation":"brief","reversible":false}}]}}
+OUTPUT FORMAT - MANDATORY JSON:
+System tasks: {{"actions":[{{"command":"cmd","explanation":"brief"}}]}}
 Questions: {{"response":"brief answer"}}
 
 RULES:
 - Output ONLY valid JSON - no markdown, no code blocks
 - For checks (is X installed, status, etc) → run the command to find out
-- Responses: 1-2 sentences max, no tutorials
-- Use conversation history for pronouns (it, there, that)
-- Simple commands: which, ls, cat, systemctl status (no sudo for read-only)
-- File writes: use cat << 'EOF' > file ... EOF format
-- When creating content (facts, lists, HTML): use REAL content, never placeholders
-- NEVER output "Lorem ipsum" or "Fact N about X" - generate actual information"#, self.working_directory.display(), auto_mode)
+- Use ADVANCED BASH: pipes, grep, awk for extracting info
+- Multiple related actions can go in one plan
+
+MULTI-STEP TASKS (installations, configurations):
+Include verification in your plan:
+1. Do the action
+2. Verify it worked (e.g., docker ps | grep name, which pkg, systemctl status)
+
+EXAMPLES:
+- "is nginx running" → {{"actions":[{{"command":"systemctl status nginx | grep Active","explanation":"Check nginx status"}}]}}
+- "install X in docker" → {{"actions":[{{"command":"docker pull X","explanation":"Pull image"}},{{"command":"docker run -d X","explanation":"Start container"}},{{"command":"docker ps | grep X","explanation":"Verify running"}}]}}
+- "what's in docker" → {{"actions":[{{"command":"docker ps --format 'table {{{{.Names}}}}\t{{{{.Status}}}}'","explanation":"List containers"}}]}}
+
+BASH TECHNIQUES:
+- grep -E for regex matching
+- awk for column extraction
+- pipes to chain commands
+- docker ps --format for cleaner output"#, self.working_directory.display(), auto_mode)
     }
 
     /// Detect if a task requests a large list (>20 items)
@@ -1430,15 +1461,15 @@ setInterval(() => {{
             result = func_prefix.replace(&result, "").to_string();
         }
 
-        // Also strip any text before the first { if it looks like garbage prefix
-        if let Some(json_start) = result.find('{') {
-            let prefix = &result[..json_start].trim().to_lowercase();
-            // If prefix contains suspicious patterns or is a common label, strip it
-            if prefix.contains("to=") || prefix.contains("functions") ||
-               prefix.contains("assistant") && prefix.len() < 100 ||
-               prefix == "json" || prefix == "output" || prefix == "result" ||
-               prefix.ends_with(":") || prefix.is_empty() {
-                result = result[json_start..].to_string();
+        // Strip everything before the first { or [ (JSON start)
+        // This handles all prefix garbage like "json", "JSON:", "output:", etc.
+        if let Some(json_start) = result.find('{').or_else(|| result.find('[')) {
+            if json_start > 0 {
+                let prefix = &result[..json_start];
+                // Only keep prefix if it looks like meaningful content (long and has spaces)
+                if prefix.len() < 50 && !prefix.contains('\n') {
+                    result = result[json_start..].to_string();
+                }
             }
         }
 
