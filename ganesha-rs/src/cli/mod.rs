@@ -36,7 +36,6 @@ pub const BANNER_TEXT: &str = r#"
 "#;
 
 pub fn print_banner() {
-    println!("{}", style(BANNER_ART).magenta());
     println!("{}", style(BANNER_TEXT).cyan().bold());
     println!(
         "{}",
@@ -239,7 +238,27 @@ pub fn describe_action(command: &str, success: bool) -> String {
 
 /// Extract the target file from a redirect command
 fn extract_redirect_target(cmd: &str) -> Option<String> {
-    // Handle both > and >> redirects
+    // For heredocs like: cat << 'GANESHA_EOF' > filename.html
+    // We want to extract "filename.html"
+
+    // First, check for heredoc pattern with redirect
+    if let Ok(re) = regex::Regex::new(r"<<\s*'?\w+'?\s*>\s*(\S+)") {
+        if let Some(caps) = re.captures(cmd) {
+            if let Some(m) = caps.get(1) {
+                let target = m.as_str().trim_matches('"').trim_matches('\'');
+                if !target.is_empty() {
+                    return Some(target.to_string());
+                }
+            }
+        }
+    }
+
+    // Fallback: Handle simple redirects (not heredocs)
+    // But avoid splitting on <<
+    if cmd.contains("<<") {
+        return None; // Handled above
+    }
+
     let parts: Vec<&str> = if cmd.contains(">>") {
         cmd.split(">>").collect()
     } else {
@@ -248,7 +267,8 @@ fn extract_redirect_target(cmd: &str) -> Option<String> {
 
     if parts.len() >= 2 {
         let target = parts.last()?.trim();
-        // Remove any trailing quotes
+        // Take first word only (in case of trailing content)
+        let target = target.split_whitespace().next()?;
         let target = target.trim_matches('"').trim_matches('\'');
         if !target.is_empty() {
             return Some(target.to_string());

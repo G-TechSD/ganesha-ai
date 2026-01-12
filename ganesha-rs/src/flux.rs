@@ -14,6 +14,7 @@
 
 use chrono::{Duration, Local, NaiveTime, Timelike};
 use console::style;
+use rusqlite::{Connection, params};
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Read, Write};
@@ -219,22 +220,15 @@ impl FluxStatus {
 /// - A code workspace for iterating on single files
 /// - Key-value storage for tracking state
 /// - Iteration history for context
-#[derive(Clone)]
+///
+/// Uses SQLite for efficient storage - O(1) inserts, no rewriting!
 pub struct FluxCanvas {
     /// Session ID for this flux run
     pub session_id: String,
-    /// Path to the canvas file on disk
-    pub canvas_path: PathBuf,
-    /// Accumulated list items (for "build 1000 things" tasks)
-    pub items: Vec<String>,
-    /// File tree for codebase generation (path -> content)
-    pub files: HashMap<String, String>,
-    /// Current code/content being iterated
-    pub code: String,
-    /// Key-value state storage
-    pub state: HashMap<String, String>,
-    /// History of what was done each iteration
-    pub history: Vec<String>,
+    /// Path to the SQLite database
+    pub db_path: PathBuf,
+    /// Database connection
+    db: Connection,
     /// Target count (if building a list)
     pub target_count: Option<usize>,
     /// Target file count (if building a codebase)
@@ -243,11 +237,27 @@ pub struct FluxCanvas {
     pub output_dir: Option<PathBuf>,
 }
 
+// Manual Clone since Connection doesn't implement Clone
+impl Clone for FluxCanvas {
+    fn clone(&self) -> Self {
+        // Re-open the database connection
+        let db = Connection::open(&self.db_path).expect("Failed to reopen database");
+        Self {
+            session_id: self.session_id.clone(),
+            db_path: self.db_path.clone(),
+            db,
+            target_count: self.target_count,
+            target_files: self.target_files,
+            output_dir: self.output_dir.clone(),
+        }
+    }
+}
+
 impl FluxCanvas {
     /// Create a new canvas for this flux session
     pub fn new(task: &str) -> Self {
         let session_id = format!("flux_{}", chrono::Local::now().format("%Y%m%d_%H%M%S"));
-        let canvas_path = std::env::temp_dir().join(format!("{}.canvas", session_id));
+        let db_path = std::env::temp_dir().join(format!("{}.db", session_id));
 
         // Try to detect target count from task (e.g., "1000 cat facts")
         let target_count = Self::detect_target_count(task);
@@ -256,22 +266,62 @@ impl FluxCanvas {
         let target_files = Self::detect_target_files(task);
         let output_dir = Self::detect_output_dir(task);
 
-        let canvas = Self {
+        // Create database
+        let db = Connection::open(&db_path).expect("Failed to create canvas database");
+
+        // Initialize tables
+        db.execute_batch(
+            "CREATE TABLE IF NOT EXISTS items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                content TEXT NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS files (
+                path TEXT PRIMARY KEY,
+                content TEXT NOT NULL,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS state (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                summary TEXT NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_items_created ON items(created_at);
+            "
+        ).expect("Failed to initialize canvas tables");
+
+        // Store metadata
+        db.execute(
+            "INSERT OR REPLACE INTO metadata (key, value) VALUES ('session_id', ?1)",
+            params![&session_id],
+        ).ok();
+        db.execute(
+            "INSERT OR REPLACE INTO metadata (key, value) VALUES ('task', ?1)",
+            params![task],
+        ).ok();
+        if let Some(tc) = target_count {
+            db.execute(
+                "INSERT OR REPLACE INTO metadata (key, value) VALUES ('target_count', ?1)",
+                params![tc.to_string()],
+            ).ok();
+        }
+
+        Self {
             session_id,
-            canvas_path,
-            items: Vec::new(),
-            files: HashMap::new(),
-            code: String::new(),
-            state: HashMap::new(),
-            history: Vec::new(),
+            db_path,
+            db,
             target_count,
             target_files,
             output_dir,
-        };
-
-        // Save initial state
-        canvas.save();
-        canvas
+        }
     }
 
     /// Detect if task mentions a target file count
@@ -288,7 +338,6 @@ impl FluxCanvas {
 
     /// Detect output directory from task
     fn detect_output_dir(task: &str) -> Option<PathBuf> {
-        // Look for patterns like "in /path/to/dir" or "to /path/to/dir"
         let re = regex::Regex::new(r"(?:in|to|at)\s+([/~][\w/.-]+)").ok()?;
         if let Some(caps) = re.captures(task) {
             if let Some(path_match) = caps.get(1) {
@@ -301,14 +350,12 @@ impl FluxCanvas {
                 return Some(path);
             }
         }
-        // Default to temp dir with session name
         None
     }
 
     /// Detect if the task mentions a target count (e.g., "1000 facts", "100 test cases")
     fn detect_target_count(task: &str) -> Option<usize> {
         let task_lower = task.to_lowercase();
-        // Look for patterns like "1000 facts", "100 items", etc.
         let re = regex::Regex::new(r"(\d+)\s*(facts?|items?|things?|cases?|examples?|entries?|rows?|lines?|elements?)").ok()?;
         if let Some(caps) = re.captures(&task_lower) {
             if let Some(num_match) = caps.get(1) {
@@ -318,89 +365,192 @@ impl FluxCanvas {
         None
     }
 
-    /// Add items to the accumulator
+    /// Add items to the accumulator - O(n) for n new items, NOT O(total)
     pub fn add_items(&mut self, new_items: Vec<String>) {
-        self.items.extend(new_items);
-        self.save();
+        let tx = self.db.transaction().expect("Failed to start transaction");
+        {
+            let mut stmt = tx.prepare_cached(
+                "INSERT INTO items (content) VALUES (?1)"
+            ).expect("Failed to prepare insert");
+
+            for item in &new_items {
+                stmt.execute(params![item]).ok();
+            }
+        }
+        tx.commit().expect("Failed to commit items");
     }
 
-    /// Add a single item
+    /// Add a single item - O(1)
     pub fn add_item(&mut self, item: String) {
-        self.items.push(item);
-        self.save();
+        self.db.execute(
+            "INSERT INTO items (content) VALUES (?1)",
+            params![item],
+        ).ok();
     }
 
-    /// Add or update a file in the codebase
+    /// Get item count - O(1) with index
+    pub fn item_count(&self) -> usize {
+        self.db.query_row(
+            "SELECT COUNT(*) FROM items",
+            [],
+            |row| row.get::<_, i64>(0),
+        ).unwrap_or(0) as usize
+    }
+
+    /// Get all items (for export) - only call when needed
+    pub fn get_all_items(&self) -> Vec<String> {
+        let mut stmt = self.db.prepare("SELECT content FROM items ORDER BY id").unwrap();
+        let items: Vec<String> = stmt.query_map([], |row| row.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        items
+    }
+
+    /// Get last N items for context - O(1)
+    pub fn get_last_items(&self, n: usize) -> Vec<String> {
+        let mut stmt = self.db.prepare(
+            "SELECT content FROM items ORDER BY id DESC LIMIT ?1"
+        ).unwrap();
+        let items: Vec<String> = stmt.query_map(params![n as i64], |row| row.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        items.into_iter().rev().collect()
+    }
+
+    /// Add or update a file in the codebase - O(1)
     pub fn set_file(&mut self, path: &str, content: String) {
-        self.files.insert(path.to_string(), content);
-        self.save();
+        self.db.execute(
+            "INSERT OR REPLACE INTO files (path, content, updated_at) VALUES (?1, ?2, CURRENT_TIMESTAMP)",
+            params![path, content],
+        ).ok();
     }
 
     /// Add multiple files at once
     pub fn add_files(&mut self, new_files: HashMap<String, String>) {
-        self.files.extend(new_files);
-        self.save();
+        let tx = self.db.transaction().expect("Failed to start transaction");
+        {
+            let mut stmt = tx.prepare_cached(
+                "INSERT OR REPLACE INTO files (path, content, updated_at) VALUES (?1, ?2, CURRENT_TIMESTAMP)"
+            ).expect("Failed to prepare insert");
+
+            for (path, content) in &new_files {
+                stmt.execute(params![path, content]).ok();
+            }
+        }
+        tx.commit().expect("Failed to commit files");
     }
 
     /// Get a file's content
-    pub fn get_file(&self, path: &str) -> Option<&String> {
-        self.files.get(path)
+    pub fn get_file(&self, path: &str) -> Option<String> {
+        self.db.query_row(
+            "SELECT content FROM files WHERE path = ?1",
+            params![path],
+            |row| row.get(0),
+        ).ok()
     }
 
-    /// List all files in the canvas
-    pub fn list_files(&self) -> Vec<&String> {
-        self.files.keys().collect()
+    /// Get all files (for export)
+    pub fn get_all_files(&self) -> HashMap<String, String> {
+        let mut stmt = self.db.prepare("SELECT path, content FROM files").unwrap();
+        let files: HashMap<String, String> = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .unwrap()
+        .filter_map(|r| r.ok())
+        .collect();
+        files
     }
 
-    /// Get file count
+    /// Get file count - O(1)
     pub fn file_count(&self) -> usize {
-        self.files.len()
+        self.db.query_row(
+            "SELECT COUNT(*) FROM files",
+            [],
+            |row| row.get::<_, i64>(0),
+        ).unwrap_or(0) as usize
     }
 
     /// Check if file target is reached
     pub fn files_target_reached(&self) -> bool {
         if let Some(target) = self.target_files {
-            self.files.len() >= target
+            self.file_count() >= target
         } else {
             false
         }
     }
 
-    /// Update the code workspace
-    pub fn set_code(&mut self, code: String) {
-        self.code = code;
-        self.save();
-    }
-
-    /// Set a state value
+    /// Set a state value - O(1)
     pub fn set_state(&mut self, key: &str, value: &str) {
-        self.state.insert(key.to_string(), value.to_string());
-        self.save();
+        self.db.execute(
+            "INSERT OR REPLACE INTO state (key, value) VALUES (?1, ?2)",
+            params![key, value],
+        ).ok();
     }
 
-    /// Get a state value
-    pub fn get_state(&self, key: &str) -> Option<&String> {
-        self.state.get(key)
+    /// Get a state value - O(1)
+    pub fn get_state(&self, key: &str) -> Option<String> {
+        self.db.query_row(
+            "SELECT value FROM state WHERE key = ?1",
+            params![key],
+            |row| row.get(0),
+        ).ok()
     }
 
-    /// Record what was done this iteration
+    /// Record what was done this iteration - O(1)
     pub fn record_iteration(&mut self, summary: &str) {
-        self.history.push(format!("[{}] {}",
-            chrono::Local::now().format("%H:%M:%S"),
-            summary
-        ));
-        self.save();
+        self.db.execute(
+            "INSERT INTO history (summary) VALUES (?1)",
+            params![summary],
+        ).ok();
+    }
+
+    /// Get recent history - O(1)
+    pub fn get_recent_history(&self, n: usize) -> Vec<String> {
+        let mut stmt = self.db.prepare(
+            "SELECT created_at || ' ' || summary FROM history ORDER BY id DESC LIMIT ?1"
+        ).unwrap();
+        let history: Vec<String> = stmt.query_map(params![n as i64], |row| row.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        history.into_iter().rev().collect()
+    }
+
+    /// Get file list with sizes (limited) - for context display
+    pub fn get_file_list(&self, limit: usize) -> Vec<(String, usize)> {
+        let mut stmt = self.db.prepare(
+            "SELECT path, LENGTH(content) FROM files ORDER BY path LIMIT ?1"
+        ).unwrap();
+        stmt.query_map(params![limit as i64], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as usize))
+        })
+        .unwrap()
+        .filter_map(|r| r.ok())
+        .collect()
+    }
+
+    /// Get all state key-value pairs
+    pub fn get_all_state(&self) -> HashMap<String, String> {
+        let mut stmt = self.db.prepare("SELECT key, value FROM state").unwrap();
+        stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .unwrap()
+        .filter_map(|r| r.ok())
+        .collect()
     }
 
     /// Get progress toward target (if applicable)
     pub fn progress(&self) -> Option<(usize, usize)> {
-        self.target_count.map(|target| (self.items.len(), target))
+        self.target_count.map(|target| (self.item_count(), target))
     }
 
     /// Check if target is reached
     pub fn target_reached(&self) -> bool {
         if let Some(target) = self.target_count {
-            self.items.len() >= target
+            self.item_count() >= target
         } else {
             false
         }
@@ -413,6 +563,7 @@ impl FluxCanvas {
         context.push_str("=== FLUX CANVAS (Persistent Workspace) ===\n\n");
 
         // Items progress
+        let item_count = self.item_count();
         if let Some((current, target)) = self.progress() {
             context.push_str(&format!("📊 ITEMS PROGRESS: {}/{} ({:.1}%)\n",
                 current, target, (current as f64 / target as f64) * 100.0));
@@ -420,59 +571,55 @@ impl FluxCanvas {
         }
 
         // Files progress
+        let file_count = self.file_count();
         if let Some(target) = self.target_files {
-            let current = self.files.len();
-            let pct = (current as f64 / target as f64) * 100.0;
+            let pct = (file_count as f64 / target as f64) * 100.0;
             context.push_str(&format!("📁 FILES PROGRESS: {}/{} ({:.1}%)\n",
-                current, target, pct));
-            context.push_str(&format!("🎯 REMAINING: {} files needed\n\n", target - current));
+                file_count, target, pct));
+            context.push_str(&format!("🎯 REMAINING: {} files needed\n\n", target - file_count));
         }
 
         // Current items count
-        if !self.items.is_empty() {
-            context.push_str(&format!("📝 ACCUMULATED ITEMS: {} total\n", self.items.len()));
+        if item_count > 0 {
+            context.push_str(&format!("📝 ACCUMULATED ITEMS: {} total\n", item_count));
             // Show last 5 items as reference
             context.push_str("   Last 5 items:\n");
-            for item in self.items.iter().rev().take(5).rev() {
-                let truncated = if item.len() > 60 {
-                    format!("{}...", &item[..60])
-                } else {
-                    item.clone()
-                };
+            for item in self.get_last_items(5) {
+                let truncated = truncate_str(&item, 60);
                 context.push_str(&format!("   - {}\n", truncated));
             }
             context.push_str("\n");
         }
 
         // Current files
-        if !self.files.is_empty() {
-            context.push_str(&format!("📁 FILES IN CODEBASE: {} total\n", self.files.len()));
-            // Show file list
-            let mut files: Vec<_> = self.files.keys().collect();
-            files.sort();
-            for file in files.iter().take(20) {
-                let size = self.files.get(*file).map(|c| c.len()).unwrap_or(0);
-                context.push_str(&format!("   {} ({} bytes)\n", file, size));
+        if file_count > 0 {
+            context.push_str(&format!("📁 FILES IN CODEBASE: {} total\n", file_count));
+            // Show file list (limited)
+            let files = self.get_file_list(20);
+            for (path, size) in &files {
+                context.push_str(&format!("   {} ({} bytes)\n", path, size));
             }
-            if files.len() > 20 {
-                context.push_str(&format!("   ... and {} more files\n", files.len() - 20));
+            if file_count > 20 {
+                context.push_str(&format!("   ... and {} more files\n", file_count - 20));
             }
             context.push_str("\n");
         }
 
         // Recent history
-        if !self.history.is_empty() {
+        let history = self.get_recent_history(3);
+        if !history.is_empty() {
             context.push_str("📜 RECENT ACTIONS:\n");
-            for entry in self.history.iter().rev().take(3).rev() {
+            for entry in &history {
                 context.push_str(&format!("   {}\n", entry));
             }
             context.push_str("\n");
         }
 
         // State
-        if !self.state.is_empty() {
+        let state = self.get_all_state();
+        if !state.is_empty() {
             context.push_str("🔧 STATE:\n");
-            for (k, v) in &self.state {
+            for (k, v) in &state {
                 context.push_str(&format!("   {}: {}\n", k, v));
             }
             context.push_str("\n");
@@ -485,53 +632,51 @@ impl FluxCanvas {
         context
     }
 
-    /// Save canvas to disk
+    /// Save canvas to disk - no-op for SQLite (data is auto-persisted)
     pub fn save(&self) {
-        let data = serde_json::json!({
-            "session_id": self.session_id,
-            "items": self.items,
-            "files": self.files,
-            "code": self.code,
-            "state": self.state,
-            "history": self.history,
-            "target_count": self.target_count,
-            "target_files": self.target_files,
-            "output_dir": self.output_dir.as_ref().map(|p| p.to_string_lossy().to_string()),
-        });
-        let _ = fs::write(&self.canvas_path, data.to_string());
+        // SQLite persists automatically - nothing to do
     }
 
-    /// Load canvas from disk (for resume)
+    /// Load canvas from disk (for resume) - opens existing SQLite database
     pub fn load(path: &PathBuf) -> Option<Self> {
-        let content = fs::read_to_string(path).ok()?;
-        let data: serde_json::Value = serde_json::from_str(&content).ok()?;
+        if !path.exists() {
+            return None;
+        }
+
+        let db = Connection::open(path).ok()?;
+
+        // Read metadata
+        let session_id: String = db.query_row(
+            "SELECT value FROM metadata WHERE key = 'session_id'",
+            [],
+            |row| row.get(0),
+        ).ok()?;
+
+        let target_count: Option<usize> = db.query_row(
+            "SELECT value FROM metadata WHERE key = 'target_count'",
+            [],
+            |row| row.get::<_, String>(0),
+        ).ok().and_then(|s| s.parse().ok());
+
+        let target_files: Option<usize> = db.query_row(
+            "SELECT value FROM metadata WHERE key = 'target_files'",
+            [],
+            |row| row.get::<_, String>(0),
+        ).ok().and_then(|s| s.parse().ok());
+
+        let output_dir: Option<PathBuf> = db.query_row(
+            "SELECT value FROM metadata WHERE key = 'output_dir'",
+            [],
+            |row| row.get::<_, String>(0),
+        ).ok().map(PathBuf::from);
 
         Some(Self {
-            session_id: data["session_id"].as_str()?.to_string(),
-            canvas_path: path.clone(),
-            items: data["items"].as_array()?
-                .iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect(),
-            files: data["files"].as_object()
-                .map(|obj| {
-                    obj.iter()
-                        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
-                        .collect()
-                })
-                .unwrap_or_default(),
-            code: data["code"].as_str().unwrap_or("").to_string(),
-            state: data["state"].as_object()?
-                .iter()
-                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
-                .collect(),
-            history: data["history"].as_array()?
-                .iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect(),
-            target_count: data["target_count"].as_u64().map(|n| n as usize),
-            target_files: data["target_files"].as_u64().map(|n| n as usize),
-            output_dir: data["output_dir"].as_str().map(PathBuf::from),
+            session_id,
+            db_path: path.clone(),
+            db,
+            target_count,
+            target_files,
+            output_dir,
         })
     }
 
@@ -540,8 +685,9 @@ impl FluxCanvas {
         // Create base directory
         fs::create_dir_all(base_dir)?;
 
+        let files = self.get_all_files();
         let mut exported = 0;
-        for (path, content) in &self.files {
+        for (path, content) in &files {
             let full_path = base_dir.join(path);
 
             // Create parent directories
@@ -559,7 +705,11 @@ impl FluxCanvas {
 
     /// Get total size of all files
     pub fn total_size(&self) -> usize {
-        self.files.values().map(|c| c.len()).sum()
+        self.db.query_row(
+            "SELECT COALESCE(SUM(LENGTH(content)), 0) FROM files",
+            [],
+            |row| row.get::<_, i64>(0),
+        ).unwrap_or(0) as usize
     }
 
     /// Find and load a canvas by session ID or path
@@ -570,8 +720,8 @@ impl FluxCanvas {
             return Self::load(&path);
         }
 
-        // Try adding .canvas extension
-        let with_ext = PathBuf::from(format!("{}.canvas", session_or_path));
+        // Try adding .db extension
+        let with_ext = PathBuf::from(format!("{}.db", session_or_path));
         if with_ext.exists() {
             return Self::load(&with_ext);
         }
@@ -581,14 +731,14 @@ impl FluxCanvas {
         if let Ok(entries) = fs::read_dir(&temp_dir) {
             for entry in entries.flatten() {
                 let name = entry.file_name().to_string_lossy().to_string();
-                if name.contains(session_or_path) && name.ends_with(".canvas") {
+                if name.contains(session_or_path) && name.ends_with(".db") && name.starts_with("flux_") {
                     return Self::load(&entry.path());
                 }
             }
         }
 
         // Try with flux_ prefix
-        let flux_path = temp_dir.join(format!("flux_{}.canvas", session_or_path));
+        let flux_path = temp_dir.join(format!("flux_{}.db", session_or_path));
         if flux_path.exists() {
             return Self::load(&flux_path);
         }
@@ -604,9 +754,11 @@ impl FluxCanvas {
         if let Ok(entries) = fs::read_dir(&temp_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().map(|e| e == "canvas").unwrap_or(false) {
+                let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                if name.starts_with("flux_") && name.ends_with(".db") {
                     if let Some(canvas) = Self::load(&path) {
-                        sessions.push((canvas.session_id, path, canvas.items.len()));
+                        let count = canvas.item_count();
+                        sessions.push((canvas.session_id, path, count));
                     }
                 }
             }
@@ -618,16 +770,19 @@ impl FluxCanvas {
 
     /// Export items to a file
     pub fn export_items(&self, path: &str) -> std::io::Result<()> {
-        fs::write(path, self.items.join("\n"))
+        let items = self.get_all_items();
+        fs::write(path, items.join("\n"))
     }
 
     /// Generate HTML output for list-based tasks
     pub fn export_html(&self, title: &str, path: &str) -> std::io::Result<()> {
-        let items_html: String = self.items.iter()
+        let items = self.get_all_items();
+        let items_html: String = items.iter()
             .map(|item| format!("<li>{}</li>", item))
             .collect::<Vec<_>>()
             .join("\n");
 
+        let item_count = items.len();
         let html = format!(r#"<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -651,7 +806,7 @@ impl FluxCanvas {
         </ul>
     </div>
 </body>
-</html>"#, title, title, self.items.len(), items_html);
+</html>"#, title, title, item_count, items_html);
 
         fs::write(path, html)
     }
@@ -726,11 +881,12 @@ pub fn print_iteration_status_with_canvas(
     };
 
     // Build progress string if we have a target
+    let item_count = canvas.item_count();
     let progress_str = if let Some((current, target)) = canvas.progress() {
         let pct = (current as f64 / target as f64) * 100.0;
         format!(" | 📊 {}/{} ({:.1}%)", current, target, pct)
-    } else if !canvas.items.is_empty() {
-        format!(" | 📝 {} items", canvas.items.len())
+    } else if item_count > 0 {
+        format!(" | 📝 {} items", item_count)
     } else {
         String::new()
     };
@@ -753,11 +909,17 @@ pub fn print_iteration_status_with_canvas(
 }
 
 /// Truncate a string to max length
-fn truncate_str(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
+fn truncate_str(s: &str, max_chars: usize) -> String {
+    let char_count: usize = s.chars().count();
+    if char_count <= max_chars {
         s.to_string()
     } else {
-        format!("{}...", &s[..max_len - 3])
+        // Find the byte index for the (max_chars - 3)th character
+        let truncate_at = s.char_indices()
+            .nth(max_chars - 3)
+            .map(|(idx, _)| idx)
+            .unwrap_or(s.len());
+        format!("{}...", &s[..truncate_at])
     }
 }
 
@@ -850,8 +1012,8 @@ pub async fn run_flux_capacitor(config: FluxConfig) -> Result<FluxStatus, String
                 println!("{} Resuming session: {} ({} items, {} files)",
                     style("♻️").green(),
                     style(&c.session_id).cyan(),
-                    c.items.len(),
-                    c.files.len()
+                    c.item_count(),
+                    c.file_count()
                 );
                 c
             }
@@ -956,7 +1118,7 @@ pub async fn run_flux_capacitor(config: FluxConfig) -> Result<FluxStatus, String
 
                 if !new_items.is_empty() {
                     canvas.add_items(new_items.clone());
-                    canvas.record_iteration(&format!("Added {} items (total: {})", new_items.len(), canvas.items.len()));
+                    canvas.record_iteration(&format!("Added {} items (total: {})", new_items.len(), canvas.item_count()));
                 }
 
                 // Parse response for new files (FILE: path followed by code block)
@@ -964,7 +1126,7 @@ pub async fn run_flux_capacitor(config: FluxConfig) -> Result<FluxStatus, String
                 if !new_files.is_empty() {
                     let file_count = new_files.len();
                     canvas.add_files(new_files);
-                    canvas.record_iteration(&format!("Added {} files (total: {})", file_count, canvas.files.len()));
+                    canvas.record_iteration(&format!("Added {} files (total: {})", file_count, canvas.file_count()));
                 }
 
                 // Print status with canvas progress
@@ -993,7 +1155,8 @@ pub async fn run_flux_capacitor(config: FluxConfig) -> Result<FluxStatus, String
     println!();
 
     // Export items if we accumulated any
-    if !canvas.items.is_empty() {
+    let final_item_count = canvas.item_count();
+    if final_item_count > 0 {
         // Determine output filename from task or use default
         let output_file = if config.task.to_lowercase().contains("cat") {
             "/tmp/catfacts.html"
@@ -1013,7 +1176,7 @@ pub async fn run_flux_capacitor(config: FluxConfig) -> Result<FluxStatus, String
         } else {
             println!("{} Exported {} items to {}",
                 style("📄").green(),
-                canvas.items.len(),
+                final_item_count,
                 style(output_file).cyan()
             );
         }
@@ -1024,7 +1187,8 @@ pub async fn run_flux_capacitor(config: FluxConfig) -> Result<FluxStatus, String
     }
 
     // Export codebase if we accumulated files
-    if !canvas.files.is_empty() {
+    let final_file_count = canvas.file_count();
+    if final_file_count > 0 {
         let output_dir = canvas.output_dir.clone()
             .unwrap_or_else(|| std::env::temp_dir().join(format!("flux_codebase_{}", canvas.session_id)));
 
@@ -1139,23 +1303,25 @@ fn print_flux_summary_with_canvas(status: &FluxStatus, canvas: &FluxCanvas) {
     println!("{}  Success rate:  {}%", style("║").cyan(), style(format!("{:.1}", success_rate)).white());
 
     // Canvas stats
-    if !canvas.items.is_empty() || !canvas.files.is_empty() {
+    let item_count = canvas.item_count();
+    let file_count = canvas.file_count();
+    if item_count > 0 || file_count > 0 {
         println!("{}", style("╠══════════════════════════════════════════════════════════════╣").cyan());
 
-        if !canvas.items.is_empty() {
-            println!("{}  📝 Items collected: {}", style("║").cyan(), style(canvas.items.len()).green().bold());
+        if item_count > 0 {
+            println!("{}  📝 Items collected: {}", style("║").cyan(), style(item_count).green().bold());
             if let Some((current, target)) = canvas.progress() {
                 let pct = (current as f64 / target as f64) * 100.0;
                 println!("{}  📊 Progress: {}/{} ({:.1}%)", style("║").cyan(), current, target, pct);
             }
         }
 
-        if !canvas.files.is_empty() {
-            println!("{}  📁 Files generated: {}", style("║").cyan(), style(canvas.files.len()).green().bold());
+        if file_count > 0 {
+            println!("{}  📁 Files generated: {}", style("║").cyan(), style(file_count).green().bold());
             println!("{}  💾 Total size: {} bytes", style("║").cyan(), canvas.total_size());
             if let Some(target) = canvas.target_files {
-                let pct = (canvas.files.len() as f64 / target as f64) * 100.0;
-                println!("{}  📊 Progress: {}/{} ({:.1}%)", style("║").cyan(), canvas.files.len(), target, pct);
+                let pct = (file_count as f64 / target as f64) * 100.0;
+                println!("{}  📊 Progress: {}/{} ({:.1}%)", style("║").cyan(), file_count, target, pct);
             }
         }
     }
