@@ -40,6 +40,10 @@ anyhow = "1.0"
 futures = "0.3"
 async-trait = "0.1"
 
+# Signal handling for Ctrl+C
+ctrlc = "3.4"
+libc = "0.2"
+
 # Regex for access control
 regex = "1.10"
 lazy_static = "1.4"
