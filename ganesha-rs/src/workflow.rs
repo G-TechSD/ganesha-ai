@@ -746,27 +746,33 @@ When task complete → transition to CHAT"#,
             return Some(GaneshaMode::Planning);
         }
 
-        // Sysadmin triggers
-        if lower.contains("install") || lower.contains("configure") || lower.contains("setup")
-            || lower.contains("set up") || lower.contains("service") || lower.contains("package")
-            || lower.starts_with("apt ") || lower.starts_with("sudo ")
-            || lower.starts_with("systemctl") || lower.starts_with("docker ")
-            || lower.contains("permission") || lower.contains("firewall") || lower.contains("network")
-            || lower.contains("update system") || lower.contains("upgrade")
-        {
-            return Some(GaneshaMode::SysAdmin);
+        // Chat mode - questions should NOT trigger other modes
+        // Check this BEFORE sysadmin to prevent "is X installed" triggering SysAdmin
+        let is_question = lower.starts_with("is ") || lower.starts_with("does ")
+            || lower.starts_with("has ") || lower.starts_with("are ")
+            || lower.starts_with("can ") || lower.starts_with("will ")
+            || lower.starts_with("what ") || lower.starts_with("who ")
+            || lower.starts_with("when ") || lower.starts_with("where ")
+            || lower.starts_with("why ") || lower.starts_with("how ")
+            || lower.starts_with("explain ") || lower.starts_with("tell me")
+            || lower.ends_with("?");
+
+        if is_question {
+            // Questions stay in current mode or go to Chat - don't trigger action modes
+            return None;
         }
 
-        // Chat mode - questions, info requests (stay in current or switch to chat)
-        if lower.starts_with("what ") || lower.starts_with("who ") || lower.starts_with("when ")
-            || lower.starts_with("where ") || lower.starts_with("why ") || lower.starts_with("how ")
-            || lower.starts_with("explain ") || lower.starts_with("tell me")
-            || lower.ends_with("?")
+        // Sysadmin triggers - use word boundaries to avoid matching "installed" etc.
+        if lower.contains("install ") || lower.starts_with("install")
+            || lower.contains("configure ") || lower.starts_with("configure")
+            || lower.contains("setup ") || lower.starts_with("setup")
+            || lower.contains("set up") || lower.contains(" service")
+            || lower.starts_with("apt ") || lower.starts_with("sudo ")
+            || lower.starts_with("systemctl") || lower.starts_with("docker ")
+            || lower.contains("permission") || lower.contains("firewall")
+            || lower.contains("update system") || lower.contains("upgrade ")
         {
-            // Only suggest Chat if not already in a workflow
-            if self.current_mode != GaneshaMode::Chat {
-                return None; // Stay in current mode for questions during workflow
-            }
+            return Some(GaneshaMode::SysAdmin);
         }
 
         // No clear mode detected

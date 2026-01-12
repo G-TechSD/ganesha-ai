@@ -229,6 +229,10 @@ lazy_static! {
         Regex::new(r"^(uname|hostname|uptime|whoami|id|groups)(\s+|$)").unwrap(),
         Regex::new(r"^(df|du|free|lscpu|lsblk)(\s+|$)").unwrap(),
         Regex::new(r"^ps\s+").unwrap(),
+        Regex::new(r"^which\s+").unwrap(),  // Check if command exists
+        Regex::new(r"^command\s+-v\s+").unwrap(),  // Check if command exists (POSIX)
+        Regex::new(r"^type\s+").unwrap(),  // Check command type
+        Regex::new(r"^whereis\s+").unwrap(),  // Locate binary/source/man
 
         // Network info
         Regex::new(r"^ip\s+(addr|link|route)").unwrap(),
@@ -243,6 +247,8 @@ lazy_static! {
 
         // Package info
         Regex::new(r"^apt\s+(list|show|search)").unwrap(),
+        Regex::new(r"^dpkg\s+(-l|-L|-s|--list|--listfiles|--status)").unwrap(),  // Package queries
+        Regex::new(r"^rpm\s+(-q|-qa|-ql|-qi)").unwrap(),  // RPM package queries
         Regex::new(r"^pip3?\s+(list|show|freeze)").unwrap(),
         Regex::new(r"^npm\s+(list|ls|view)").unwrap(),
 
@@ -550,6 +556,34 @@ impl AccessController {
     /// Check if command is self-invocation
     pub fn is_self_invocation(&self, command: &str) -> bool {
         SELF_INVOKE_PATTERNS.iter().any(|p| p.is_match(command))
+    }
+
+    /// Check if command is critically dangerous (blocked even in auto mode)
+    /// This only blocks catastrophic/destructive commands
+    pub fn is_critical_danger(&self, command: &str) -> bool {
+        let command = command.trim();
+
+        // Self-invocation is always blocked
+        if SELF_INVOKE_PATTERNS.iter().any(|p| p.is_match(command)) {
+            return true;
+        }
+
+        // Config/log tampering is always blocked
+        if TAMPER_PATTERNS.iter().any(|p| p.is_match(command)) {
+            return true;
+        }
+
+        // Catastrophic commands are always blocked
+        if CATASTROPHIC_PATTERNS.iter().any(|p| p.is_match(command)) {
+            return true;
+        }
+
+        false
+    }
+
+    /// Assess risk level without checking if allowed
+    pub fn assess_risk_only(&self, command: &str) -> RiskLevel {
+        self.assess_risk(command)
     }
 
     // ═══════════════════════════════════════════════════════════════════════
