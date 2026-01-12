@@ -535,25 +535,27 @@ RULES:
 - Responses: 1-2 sentences max, no tutorials
 - Use conversation history for pronouns (it, there, that)
 - Simple commands: which, ls, cat, systemctl status (no sudo for read-only)
-- File writes: use cat << 'EOF' > file ... EOF format"#, self.working_directory.display(), auto_mode)
+- File writes: use cat << 'EOF' > file ... EOF format
+- When creating content (facts, lists, HTML): use REAL content, never placeholders
+- NEVER output "Lorem ipsum" or "Fact N about X" - generate actual information"#, self.working_directory.display(), auto_mode)
     }
 
-    /// Detect if a task requests a large list (>200 items)
+    /// Detect if a task requests a large list (>20 items)
     /// Returns Some((count, item_description)) if detected
     fn detect_large_list_request(task: &str) -> Option<(u32, String)> {
         // Pattern: number followed by optional adjectives, then item words
-        // E.g., "1000 cat facts", "500 funny jokes", "300 random facts"
+        // E.g., "100 gargoyle facts", "50 funny jokes", "25 random facts"
         let re = regex::Regex::new(
-            r"(?i)(\d{3,})\s+(?:\w+\s+)?(facts?|items?|things?|entries?|elements?|records?|rows?|lines?|examples?|quotes?|jokes?|tips?|ideas?|suggestions?|names?|words?|sentences?)"
+            r"(?i)(\d{2,})\s+(?:\w+\s+)?(facts?|items?|things?|entries?|elements?|records?|rows?|lines?|examples?|quotes?|jokes?|tips?|ideas?|suggestions?|names?|words?|sentences?)"
         ).ok()?;
 
         if let Some(caps) = re.captures(task) {
             let count: u32 = caps.get(1)?.as_str().parse().ok()?;
             let item_type = caps.get(2)?.as_str().to_lowercase();
 
-            // Only trigger chunking for large lists (>200)
-            if count > 200 {
-                // Extract the full context (e.g., "cat facts" not just "facts")
+            // Trigger chunking for lists with 20+ items (LLMs struggle with large lists)
+            if count >= 20 {
+                // Extract the full context (e.g., "gargoyle facts" not just "facts")
                 let full_match = caps.get(0)?.as_str();
                 let item_desc = full_match
                     .strip_prefix(&format!("{} ", count))
@@ -573,9 +575,20 @@ RULES:
 CRITICAL INSTRUCTIONS:
 - Output ONLY items numbered {start} to {end}, one per line
 - Format: "N. [content]" where N is the number
-- Each item must be UNIQUE - no duplicates from previous chunks
-- No introductions, no commentary, no categories - JUST the numbered items
+- Each item MUST contain REAL, FACTUAL, INTERESTING content
+- NO placeholders like "Lorem ipsum" or "Fact N about X"
+- NO shortcuts like "continue pattern" or "same as above"
+- Each item must be UNIQUE and SPECIFIC - real information
+- No introductions, no commentary - JUST the numbered items
 - Start with "{start}." and end with "{end}."
+
+Example of GOOD output:
+1. Gargoyles were first used in ancient Egypt to drain water from flat roofs.
+2. The word "gargoyle" comes from the French "gargouille" meaning throat.
+
+Example of BAD output (DO NOT DO THIS):
+1. Fact 1 about gargoyles.
+2. Lorem ipsum dolor sit amet.
 
 BEGIN OUTPUT:"#,
             start = start,
@@ -906,16 +919,37 @@ setInterval(() => {{
     ) -> Result<ExecutionPlan, GaneshaError> {
         use crate::cli::print_info;
 
+        // Check if user specified a directory
+        let directory = Self::extract_directory_path(task);
+
         // Determine output file path
         let file_path = Self::extract_file_path(task).unwrap_or_else(|| {
-            // Generate a sensible default filename
-            let clean_type = item_type.trim_end_matches('s'); // "facts" -> "fact"
-            if task.to_lowercase().contains("html") || task.to_lowercase().contains("page") || task.to_lowercase().contains("website") {
-                format!("{}_{}s.html", clean_type, count)
+            // Generate a sensible default filename from item_type
+            // item_type might be "gargoyle facts" or "real facts" - extract the noun
+            let clean_type = item_type
+                .split_whitespace()
+                .last()  // Get last word (e.g., "facts" from "gargoyle facts")
+                .unwrap_or(item_type)
+                .trim_end_matches('s')  // "facts" -> "fact"
+                .replace(' ', "_");  // Safety: replace any remaining spaces
+
+            let extension = if task.to_lowercase().contains("html")
+                || task.to_lowercase().contains("page")
+                || task.to_lowercase().contains("website") {
+                "html"
             } else if task.to_lowercase().contains("json") {
-                format!("{}_{}s.json", clean_type, count)
+                "json"
             } else {
-                format!("{}_{}s.txt", clean_type, count)
+                "txt"
+            };
+
+            let filename = format!("{}_{}.{}", clean_type, count, extension);
+
+            // If directory was specified, put file in that directory
+            if let Some(ref dir) = directory {
+                format!("{}/{}", dir.trim_end_matches('/'), filename)
+            } else {
+                filename
             }
         });
 
@@ -941,6 +975,21 @@ setInterval(() => {{
 
         // Build the execution plan
         let mut plan = ExecutionPlan::new(task);
+
+        // Add mkdir command if directory was specified
+        if let Some(ref dir) = directory {
+            let quoted_dir = Self::quote_path_if_needed(dir);
+            plan.actions.push(Action {
+                id: Uuid::new_v4().to_string()[..8].to_string(),
+                action_type: ActionType::Shell,
+                command: format!("mkdir -p {}", quoted_dir),
+                explanation: format!("Create directory: {}", dir),
+                risk_level: RiskLevel::Low,
+                reversible: true,
+                reverse_command: Some(format!("rmdir {}", quoted_dir)),
+            });
+        }
+
         plan.actions.push(Action {
             id: Uuid::new_v4().to_string()[..8].to_string(),
             action_type: ActionType::FileWrite,
@@ -974,6 +1023,25 @@ setInterval(() => {{
             // Unquoted paths (no spaces)
             r"(?:to|into|in|as|called|named)\s+([a-zA-Z0-9_\-./]+\.[a-z]+)",
             r"([a-zA-Z0-9_\-]+\.(?:html|json|txt|md|csv))(?:\s|$)",
+        ];
+
+        for pattern in patterns {
+            if let Ok(re) = regex::Regex::new(pattern) {
+                if let Some(caps) = re.captures(task) {
+                    if let Some(m) = caps.get(1) {
+                        return Some(m.as_str().to_string());
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Extract directory path from task description (for "make folder X" patterns)
+    fn extract_directory_path(task: &str) -> Option<String> {
+        let patterns = [
+            r"(?i)(?:make|create)\s+(?:a\s+)?(?:folder|directory|dir)\s+([/a-zA-Z0-9_\-\.]+)",
+            r"(?i)(?:in|into)\s+(?:folder|directory|dir)\s+([/a-zA-Z0-9_\-\.]+)",
         ];
 
         for pattern in patterns {
@@ -1079,8 +1147,16 @@ setInterval(() => {{
                         reverse_command: None,
                     }]);
                 }
+                Err(e) if has_actions_key => {
+                    // Has actions key but failed to parse - log the error for debugging
+                    if std::env::var("GANESHA_DEBUG").is_ok() {
+                        eprintln!("[DEBUG] PlanResponse parse error: {}", e);
+                        eprintln!("[DEBUG] Sanitized JSON: {}", &sanitized[..std::cmp::min(500, sanitized.len())]);
+                    }
+                    // Try other parsers
+                }
                 _ => {
-                    // JSON parse error OR different format - try other parsers
+                    // Different format - try other parsers
                 }
             }
 
@@ -1134,11 +1210,26 @@ setInterval(() => {{
             }
 
             // Try nested structures like {"Questions":{"":"answer"}} or {"Response":{"":"answer"}}
-            if let Ok(outer) = serde_json::from_str::<std::collections::HashMap<String, serde_json::Value>>(&sanitized) {
-                for (_key, value) in outer.iter() {
-                    // Check if value is an object with empty key
-                    if let Some(obj) = value.as_object() {
-                        if let Some(answer) = obj.get("").and_then(|v| v.as_str()) {
+            // BUT only if there's no "actions" key (which should have been handled above)
+            if !has_actions_key {
+                if let Ok(outer) = serde_json::from_str::<std::collections::HashMap<String, serde_json::Value>>(&sanitized) {
+                    for (_key, value) in outer.iter() {
+                        // Check if value is an object with empty key
+                        if let Some(obj) = value.as_object() {
+                            if let Some(answer) = obj.get("").and_then(|v| v.as_str()) {
+                                return Ok(vec![Action {
+                                    id: Uuid::new_v4().to_string()[..8].to_string(),
+                                    action_type: ActionType::Response,
+                                    command: String::new(),
+                                    explanation: answer.to_string(),
+                                    risk_level: RiskLevel::Low,
+                                    reversible: false,
+                                    reverse_command: None,
+                                }]);
+                            }
+                        }
+                        // Also check if value is directly a string response
+                        if let Some(answer) = value.as_str() {
                             return Ok(vec![Action {
                                 id: Uuid::new_v4().to_string()[..8].to_string(),
                                 action_type: ActionType::Response,
@@ -1149,18 +1240,6 @@ setInterval(() => {{
                                 reverse_command: None,
                             }]);
                         }
-                    }
-                    // Also check if value is directly a string response
-                    if let Some(answer) = value.as_str() {
-                        return Ok(vec![Action {
-                            id: Uuid::new_v4().to_string()[..8].to_string(),
-                            action_type: ActionType::Response,
-                            command: String::new(),
-                            explanation: answer.to_string(),
-                            risk_level: RiskLevel::Low,
-                            reversible: false,
-                            reverse_command: None,
-                        }]);
                     }
                 }
             }
