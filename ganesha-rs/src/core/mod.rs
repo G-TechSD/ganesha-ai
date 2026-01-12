@@ -453,6 +453,149 @@ impl<L: LlmProvider, C: ConsentHandler> GaneshaEngine<L, C> {
         Ok(results)
     }
 
+    /// Analyze execution results and generate a response
+    /// Returns (summary, optional_next_actions)
+    pub async fn analyze_results(
+        &mut self,
+        task: &str,
+        results: &[ExecutionResult],
+    ) -> Result<(String, Option<ExecutionPlan>), GaneshaError> {
+        use crate::providers::ChatMessage;
+
+        // Build context from results
+        let mut result_summary = String::new();
+        for result in results {
+            if result.command.is_empty() {
+                // Response action - already handled
+                continue;
+            }
+            result_summary.push_str(&format!(
+                "Command: {}\nStatus: {}\nOutput:\n{}\n\n",
+                result.command,
+                if result.success { "SUCCESS" } else { "FAILED" },
+                if result.output.len() > 2000 {
+                    format!("{}...(truncated)", &result.output[..2000])
+                } else {
+                    result.output.clone()
+                }
+            ));
+            if let Some(ref err) = result.error {
+                result_summary.push_str(&format!("Error: {}\n", err));
+            }
+        }
+
+        // If no commands were run (response-only), skip analysis
+        if result_summary.is_empty() {
+            return Ok((String::new(), None));
+        }
+
+        let system_prompt = format!(
+            r#"You are Ganesha. The user asked: "{}"
+
+Commands were executed with these results:
+{}
+
+Based on the results, respond with ONE of:
+
+1. If the task is COMPLETE and user needs an answer, output:
+{{"response":"<concise answer to user's actual question based on command output>"}}
+
+2. If MORE ACTIONS are needed to complete the task, output:
+{{"actions":[{{"command":"next cmd","explanation":"why"}}]}}
+
+3. If there was an ERROR that needs handling, output:
+{{"response":"<explain what went wrong and what to do>"}}
+
+RULES:
+- Analyze the command output to answer the user's ACTUAL question
+- Be concise (1-3 sentences for responses)
+- For system info queries, extract the relevant data from output
+- If the user asked "how much disk space", don't just run df - tell them the answer
+- Output ONLY valid JSON, no markdown"#,
+            task, result_summary
+        );
+
+        // Build messages for LLM
+        let user_msg = format!("Analyze the results and respond to: {}", task);
+        let messages = vec![
+            ChatMessage::system(&system_prompt),
+            ChatMessage::user(&user_msg),
+        ];
+
+        let response = self.llm.generate_with_history(&messages).await
+            .map_err(|e| GaneshaError::LlmError(e.to_string()))?;
+
+        // Clean up LLM control tokens
+        let cleaned = Self::strip_control_tokens(&response);
+        let sanitized = Self::sanitize_json_string(&cleaned);
+
+        // Try to parse as response
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&sanitized) {
+            // Check for response (task complete) - try multiple keys
+            let response_text = parsed.get("response").and_then(|v| v.as_str())
+                .or_else(|| parsed.get("").and_then(|v| v.as_str()))  // Handle {"":"text"}
+                .or_else(|| parsed.get("answer").and_then(|v| v.as_str()))
+                .or_else(|| parsed.get("result").and_then(|v| v.as_str()));
+
+            if let Some(response_text) = response_text {
+                if !response_text.is_empty() {
+                    self.conversation_history.push(ChatMessage::assistant(response_text));
+                    return Ok((response_text.to_string(), None));
+                }
+            }
+
+            // Check for more actions needed
+            if let Some(actions) = parsed.get("actions").and_then(|v| v.as_array()) {
+                if !actions.is_empty() {
+                    let mut plan = ExecutionPlan::new(task);
+                    for action_val in actions {
+                        if let (Some(cmd), Some(expl)) = (
+                            action_val.get("command").and_then(|v| v.as_str()),
+                            action_val.get("explanation").and_then(|v| v.as_str()),
+                        ) {
+                            plan.actions.push(Action {
+                                id: uuid::Uuid::new_v4().to_string()[..8].to_string(),
+                                action_type: ActionType::Shell,
+                                command: cmd.to_string(),
+                                explanation: expl.to_string(),
+                                risk_level: self.access.assess_risk_only(cmd),
+                                reversible: false,
+                                reverse_command: None,
+                            });
+                        }
+                    }
+                    if !plan.actions.is_empty() {
+                        return Ok((String::new(), Some(plan)));
+                    }
+                }
+            }
+
+            // If parsed but no known keys, try to extract any string value
+            if let Some(obj) = parsed.as_object() {
+                for (_, value) in obj {
+                    if let Some(text) = value.as_str() {
+                        if !text.is_empty() && text.len() > 10 {
+                            self.conversation_history.push(ChatMessage::assistant(text));
+                            return Ok((text.to_string(), None));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fallback - if cleaned looks like plain text (not JSON), use it directly
+        let cleaned_trimmed = cleaned.trim();
+        if !cleaned_trimmed.is_empty()
+            && !cleaned_trimmed.starts_with('{')
+            && !cleaned_trimmed.starts_with('[')
+        {
+            return Ok((cleaned_trimmed.to_string(), None));
+        }
+
+        // Last resort - return empty (execution output was already shown)
+        Ok((String::new(), None))
+    }
+
     async fn execute_command(&self, command: &str) -> Result<String, GaneshaError> {
         use tokio::process::Command;
 
