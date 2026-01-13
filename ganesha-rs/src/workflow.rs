@@ -755,14 +755,24 @@ When task complete → transition to CHAT"#,
         }
 
         // Planning/Development triggers - complex tasks that need planning first
-        if lower.contains("build") || lower.contains("create") || lower.contains("implement")
+        // Note: "analyze", "explore", "understand", "tell me about" are NOT planning - they're exploration
+        let is_exploration = lower.contains("analyze") || lower.contains("explore")
+            || lower.contains("understand") || lower.contains("tell me about")
+            || lower.contains("show me") || lower.contains("deep dive")
+            || lower.contains("look at") || lower.contains("examine");
+
+        if !is_exploration && (lower.contains("build") || lower.contains("create") || lower.contains("implement")
             || lower.contains("develop") || lower.contains("write code") || lower.contains("add feature")
             || lower.contains("new feature") || lower.contains("make a") || lower.contains("design")
-            || lower.contains("architect") || lower.contains("plan") || lower.contains("help me with")
-            || lower.contains("i need") || lower.contains("i want") || lower.contains("can you make")
-            || lower.contains("refactor") || lower.contains("rewrite")
+            || lower.contains("architect") || lower.contains("plan")
+            || lower.contains("refactor") || lower.contains("rewrite"))
         {
             return Some(GaneshaMode::Planning);
+        }
+
+        // Exploration tasks should go to SysAdmin mode (which handles file exploration)
+        if is_exploration {
+            return Some(GaneshaMode::SysAdmin);
         }
 
         // Chat mode - questions should NOT trigger other modes
