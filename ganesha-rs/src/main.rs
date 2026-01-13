@@ -1885,7 +1885,7 @@ async fn run_task_with_log<C: core::ConsentHandler>(
     if current_plan.actions.iter().all(|a| a.command.is_empty()) {
         for action in &current_plan.actions {
             if !action.explanation.is_empty() && !matches!(action.action_type, core::ActionType::Question) {
-                println!("\n{}", style(&action.explanation).cyan());
+                pretty::print_ganesha_response(&action.explanation);
                 all_outputs.push(action.explanation.clone());
             }
         }
