@@ -11,6 +11,7 @@
 mod agent;
 mod agent_wiggum;
 mod cli;
+mod comprehensive_test;
 mod core;
 mod flux;
 mod logging;
@@ -96,9 +97,13 @@ struct Args {
     #[arg(long)]
     configure: bool,
 
-    /// Run test harness with 200 edge cases
+    /// Run test harness (40 tests per session, default 1 session)
     #[arg(long)]
     test: bool,
+
+    /// Number of test sessions to run (default 1, max 40)
+    #[arg(long, value_name = "SESSIONS", default_value = "1")]
+    test_sessions: usize,
 
     /// Wiggum agent mode with verification loop
     #[arg(long)]
@@ -225,17 +230,18 @@ async fn main() {
 
     print_info(&format!("Provider: {}", available.first().unwrap()));
 
-    // Test mode - run 200 edge case tests
+    // Test mode - run comprehensive tests
     if args.test {
-        let (provider_url, model) = chain.get_first_available_url()
-            .unwrap_or_else(|| ("http://192.168.245.155:1234".to_string(), "default".to_string()));
+        let num_sessions = args.test_sessions.min(40);  // Cap at 40 sessions
 
         println!("\n{}", style("═".repeat(60)).dim());
-        println!("{}", style("Starting Test Harness...").cyan().bold());
+        println!("{}", style("GANESHA COMPREHENSIVE TEST HARNESS").cyan().bold());
+        println!("{}", style(format!("40 tests × {} sessions = {} total test runs",
+            num_sessions, 40 * num_sessions)).dim());
         println!("{}", style("═".repeat(60)).dim());
 
-        let mut harness = agent_wiggum::TestHarness::new(&provider_url, &model);
-        let _results = harness.run_all_tests().await;
+        // Run full tests with actual LLM interaction
+        let _results = comprehensive_test::run_full_tests(num_sessions).await;
         return;
     }
 
@@ -884,10 +890,25 @@ with real GitLab repositories and documentation.
                 // Process the task and capture output
                 let output = run_task_with_log(engine, input, code_mode).await;
                 session_log.push(format!("[{}] GANESHA: {}", Local::now().format("%H:%M:%S"), output));
+
+                // Auto-return to Chat mode if we auto-switched for this task
+                if workflow.auto_triggered_mode {
+                    workflow.complete_auto_task();
+                    println!("{} Returned to Chat mode", style("💬").dim());
+                }
+
                 println!(); // Add spacing after task completion
             }
             Err(ReadlineError::Interrupted) => {
-                // Check for double Ctrl+C
+                // First Ctrl+C: if in a non-Chat mode, return to Chat
+                if workflow.current_mode != GaneshaMode::Chat {
+                    workflow.force_transition(GaneshaMode::Chat);
+                    println!("\n{} Returned to Chat mode", style("💬").cyan());
+                    last_interrupt = None;
+                    continue;
+                }
+
+                // In Chat mode: check for double Ctrl+C to exit
                 if let Some(last) = last_interrupt {
                     if last.elapsed().as_secs() < 2 {
                         println!("\n{}", style("Namaste 🙏").yellow());
@@ -1061,6 +1082,52 @@ fn create_spinner(msg: &str) -> indicatif::ProgressBar {
     spinner
 }
 
+/// Display multiple choice question and get user's answer
+fn ask_multiple_choice(question: &core::MultipleChoiceQuestion) -> Option<String> {
+    use dialoguer::{theme::ColorfulTheme, Select, Input};
+
+    println!();
+    println!("{} {}", style("❓").cyan(), style(&question.question).bold());
+
+    if let Some(ref ctx) = question.context {
+        println!("{}", style(ctx).dim());
+    }
+    println!();
+
+    // Build choices with "Other" option
+    let mut choices: Vec<String> = question.options.iter()
+        .enumerate()
+        .map(|(i, opt)| format!("{}. {}", i + 1, opt))
+        .collect();
+    choices.push(format!("{}. Other (type your own answer)", choices.len() + 1));
+
+    // Show selection menu
+    let selection = Select::with_theme(&ColorfulTheme::default())
+        .items(&choices)
+        .default(0)
+        .interact_opt();
+
+    match selection {
+        Ok(Some(idx)) if idx < question.options.len() => {
+            // User selected a predefined option
+            Some(question.options[idx].clone())
+        }
+        Ok(Some(_)) => {
+            // User selected "Other" - prompt for custom input
+            println!();
+            let custom: Result<String, _> = Input::with_theme(&ColorfulTheme::default())
+                .with_prompt("Your answer")
+                .interact_text();
+
+            match custom {
+                Ok(text) if !text.trim().is_empty() => Some(text.trim().to_string()),
+                _ => None,
+            }
+        }
+        _ => None, // User cancelled
+    }
+}
+
 /// Run a task autonomously - execute commands, analyze results, continue until done
 async fn run_task_with_log<C: core::ConsentHandler>(
     engine: &mut GaneshaEngine<ProviderChain, C>,
@@ -1085,7 +1152,9 @@ async fn run_task_with_log<C: core::ConsentHandler>(
         .unwrap_or(&"🐘 Thinking...");
     let spinner = create_spinner(thinking_msg);
 
-    let mut current_plan = match engine.plan(&task).await {
+    let mut current_task = task.clone();
+
+    let mut current_plan = match engine.plan(&current_task).await {
         Ok(p) => {
             spinner.finish_and_clear();
             p
@@ -1098,10 +1167,40 @@ async fn run_task_with_log<C: core::ConsentHandler>(
         }
     };
 
+    // Check for question - LLM wants to ask user something
+    if let Some(action) = current_plan.actions.first() {
+        if matches!(action.action_type, core::ActionType::Question) {
+            if let Some(ref q) = action.question {
+                // Display question and get user's answer
+                if let Some(answer) = ask_multiple_choice(q) {
+                    // Re-plan with user's answer
+                    current_task = format!("{} [User selected: {}]", current_task, answer);
+                    println!("{} Got it! Let me proceed with: {}", style("✓").green(), style(&answer).cyan());
+
+                    let spinner = create_spinner("🐘 Thinking...");
+                    current_plan = match engine.plan(&current_task).await {
+                        Ok(p) => {
+                            spinner.finish_and_clear();
+                            p
+                        }
+                        Err(e) => {
+                            spinner.finish_and_clear();
+                            let msg = format!("Planning failed: {}", e);
+                            print_error(&msg);
+                            return msg;
+                        }
+                    };
+                } else {
+                    return "User cancelled".to_string();
+                }
+            }
+        }
+    }
+
     // Check for response-only (no commands)
     if current_plan.actions.iter().all(|a| a.command.is_empty()) {
         for action in &current_plan.actions {
-            if !action.explanation.is_empty() {
+            if !action.explanation.is_empty() && !matches!(action.action_type, core::ActionType::Question) {
                 println!("\n{}", style(&action.explanation).cyan());
                 all_outputs.push(action.explanation.clone());
             }
@@ -1172,7 +1271,7 @@ async fn run_task_with_log<C: core::ConsentHandler>(
 
         // Analyze results and decide next steps
         let spinner = create_spinner("🔍 Analyzing...");
-        match engine.analyze_results(&task, &results).await {
+        match engine.analyze_results(&current_task, &results).await {
             Ok((response, next_plan)) => {
                 spinner.finish_and_clear();
 
@@ -1275,7 +1374,7 @@ async fn run_task<C: core::ConsentHandler>(
         if std::env::var("GANESHA_DEBUG").is_ok() {
             eprintln!("[DEBUG] Starting result analysis...");
         }
-        match engine.analyze_results(&task, &results).await {
+        match engine.analyze_results(&current_task, &results).await {
             Ok((response, next_plan)) => {
                 if std::env::var("GANESHA_DEBUG").is_ok() {
                     eprintln!("[DEBUG] Analysis response: '{}' (has_plan: {})",

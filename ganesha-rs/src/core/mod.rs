@@ -45,7 +45,16 @@ pub enum ActionType {
     ServiceControl,
     PackageInstall,
     Response,  // Conversational response, no command execution
+    Question,  // LLM wants to ask user a question with options
     Custom(String),
+}
+
+/// A question with multiple choice options
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultipleChoiceQuestion {
+    pub question: String,
+    pub options: Vec<String>,
+    pub context: Option<String>,  // Additional context for the question
 }
 
 /// A planned action
@@ -58,6 +67,9 @@ pub struct Action {
     pub risk_level: RiskLevel,
     pub reversible: bool,
     pub reverse_command: Option<String>,
+    /// For Question action type - the question to ask
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub question: Option<MultipleChoiceQuestion>,
 }
 
 /// Execution plan
@@ -570,6 +582,7 @@ EXAMPLES:
                                 risk_level: self.access.assess_risk_only(cmd),
                                 reversible: false,
                                 reverse_command: None,
+                                question: None,
                             });
                         }
                     }
@@ -680,12 +693,20 @@ EXAMPLES:
 OUTPUT FORMAT - MANDATORY JSON:
 System tasks: {{"actions":[{{"command":"cmd","explanation":"brief"}}]}}
 Questions: {{"response":"brief answer"}}
+Need clarification: {{"question":"What do you want?","options":["Option A","Option B","Option C"]}}
 
 RULES:
 - Output ONLY valid JSON - no markdown, no code blocks
 - For checks (is X installed, status, etc) → run the command to find out
 - Use ADVANCED BASH: pipes, grep, awk for extracting info
 - Multiple related actions can go in one plan
+- If you need clarification, ASK with options (2-5 choices) - user can always type a custom answer
+
+WHEN TO ASK QUESTIONS:
+- Multiple valid approaches exist (e.g., "install docker" → which distro?)
+- Ambiguous requirements (e.g., "set up a server" → what kind?)
+- Destructive operations that need confirmation
+- Configuration choices with trade-offs
 
 MULTI-STEP TASKS (installations, configurations):
 Include verification in your plan:
@@ -696,6 +717,7 @@ EXAMPLES:
 - "is nginx running" → {{"actions":[{{"command":"systemctl status nginx | grep Active","explanation":"Check nginx status"}}]}}
 - "install X in docker" → {{"actions":[{{"command":"docker pull X","explanation":"Pull image"}},{{"command":"docker run -d X","explanation":"Start container"}},{{"command":"docker ps | grep X","explanation":"Verify running"}}]}}
 - "what's in docker" → {{"actions":[{{"command":"docker ps --format 'table {{{{.Names}}}}\t{{{{.Status}}}}'","explanation":"List containers"}}]}}
+- "install python" → {{"question":"Which Python version?","options":["Python 3.11 (latest stable)","Python 3.10","Python 3.12 (newest)","System default"]}}
 
 BASH TECHNIQUES:
 - grep -E for regex matching
@@ -1157,6 +1179,7 @@ setInterval(() => {{
                 risk_level: RiskLevel::Low,
                 reversible: true,
                 reverse_command: Some(format!("rmdir {}", quoted_dir)),
+                question: None,
             });
         }
 
@@ -1171,6 +1194,7 @@ setInterval(() => {{
             risk_level: RiskLevel::Low,
             reversible: true,
             reverse_command: Some(format!("rm {}", quoted_path)),
+            question: None,
         });
 
         // Update session
@@ -1250,7 +1274,34 @@ setInterval(() => {{
             let sanitized = Self::sanitize_json_string(&json_str);
 
 
-            // First try to parse as a conversational response
+            // First try to parse as a question with options
+            #[derive(Deserialize)]
+            struct QuestionResponse {
+                question: String,
+                options: Vec<String>,
+            }
+
+            if let Ok(q) = serde_json::from_str::<QuestionResponse>(&sanitized) {
+                if !q.question.is_empty() && !q.options.is_empty() {
+                    // Return a Question action
+                    return Ok(vec![Action {
+                        id: Uuid::new_v4().to_string()[..8].to_string(),
+                        action_type: ActionType::Question,
+                        command: String::new(),
+                        explanation: q.question.clone(),
+                        risk_level: RiskLevel::Low,
+                        reversible: false,
+                        reverse_command: None,
+                        question: Some(MultipleChoiceQuestion {
+                            question: q.question,
+                            options: q.options,
+                            context: None,
+                        }),
+                    }]);
+                }
+            }
+
+            // Try to parse as a conversational response
             #[derive(Deserialize)]
             struct ConversationResponse {
                 response: String,
@@ -1266,6 +1317,7 @@ setInterval(() => {{
                     risk_level: RiskLevel::Low,
                     reversible: false,
                     reverse_command: None,
+                    question: None,
                 }]);
             }
 
@@ -1302,6 +1354,7 @@ setInterval(() => {{
                             risk_level: RiskLevel::Low, // Will be set by access check
                             reversible: a.reversible,
                             reverse_command: a.reverse_command,
+                            question: None,
                         })
                         .collect());
                 }
@@ -1315,6 +1368,7 @@ setInterval(() => {{
                         risk_level: RiskLevel::Low,
                         reversible: false,
                         reverse_command: None,
+                                question: None,
                     }]);
                 }
                 Err(e) if has_actions_key => {
@@ -1360,6 +1414,7 @@ setInterval(() => {{
                         risk_level: RiskLevel::Low,
                         reversible: false,
                         reverse_command: None,
+                                question: None,
                     }]);
                 }
             }
@@ -1375,6 +1430,7 @@ setInterval(() => {{
                         risk_level: RiskLevel::Low,
                         reversible: false,
                         reverse_command: None,
+                                question: None,
                     }]);
                 }
             }
@@ -1395,6 +1451,7 @@ setInterval(() => {{
                                     risk_level: RiskLevel::Low,
                                     reversible: false,
                                     reverse_command: None,
+                                question: None,
                                 }]);
                             }
                         }
@@ -1408,6 +1465,7 @@ setInterval(() => {{
                                 risk_level: RiskLevel::Low,
                                 reversible: false,
                                 reverse_command: None,
+                                question: None,
                             }]);
                         }
                     }
@@ -1424,6 +1482,7 @@ setInterval(() => {{
                 risk_level: RiskLevel::Low,
                 reversible: false,
                 reverse_command: None,
+                                question: None,
             }]);
         } else {
             // No JSON found - treat the entire response as a conversational answer
@@ -1440,6 +1499,7 @@ setInterval(() => {{
                     risk_level: RiskLevel::Low,
                     reversible: false,
                     reverse_command: None,
+                                question: None,
                 }])
             }
         }
