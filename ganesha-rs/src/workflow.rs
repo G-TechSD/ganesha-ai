@@ -287,6 +287,11 @@ pub struct WorkflowEngine {
     pub fix_iterations: usize,
     pub max_fix_iterations: usize,
     pub vision_config: VisionConfig,
+    /// Track if current mode was auto-triggered (vs manually selected)
+    /// If true, we should return to Chat after task completion
+    pub auto_triggered_mode: bool,
+    /// The mode to return to after auto-triggered task completes
+    pub return_mode: GaneshaMode,
 }
 
 impl WorkflowEngine {
@@ -302,10 +307,12 @@ impl WorkflowEngine {
             fix_iterations: 0,
             max_fix_iterations: 5,
             vision_config: VisionConfig::default(),
+            auto_triggered_mode: false,
+            return_mode: GaneshaMode::Chat,
         }
     }
 
-    /// Transition to a new mode
+    /// Transition to a new mode (manual transition - clears auto_triggered flag)
     pub fn transition(&mut self, new_mode: GaneshaMode) -> Result<(), String> {
         let valid = self.current_mode.valid_transitions();
         if !valid.contains(&new_mode) {
@@ -326,6 +333,8 @@ impl WorkflowEngine {
 
         self.mode_history.push((new_mode, chrono::Utc::now()));
         self.current_mode = new_mode;
+        // Manual transition - clear auto_triggered flag
+        self.auto_triggered_mode = false;
 
         // Reset fix iterations when entering Testing mode
         if new_mode == GaneshaMode::Testing {
@@ -346,10 +355,20 @@ impl WorkflowEngine {
         Ok(())
     }
 
-    /// Force transition (bypass validation)
+    /// Force transition (bypass validation, clears auto_triggered flag)
     pub fn force_transition(&mut self, new_mode: GaneshaMode) {
         self.mode_history.push((new_mode, chrono::Utc::now()));
         self.current_mode = new_mode;
+        // Force transition - clear auto_triggered flag
+        self.auto_triggered_mode = false;
+    }
+
+    /// Return to previous mode after auto-triggered task completes
+    pub fn complete_auto_task(&mut self) {
+        if self.auto_triggered_mode {
+            let return_to = self.return_mode;
+            self.force_transition(return_to);
+        }
     }
 
     /// Get system prompt for current mode
@@ -780,10 +799,15 @@ When task complete → transition to CHAT"#,
     }
 
     /// Auto-transition to detected mode (allows jumping from Chat to any mode)
+    /// Sets auto_triggered_mode so we return to Chat after task completion
     pub fn auto_transition(&mut self, new_mode: GaneshaMode) -> bool {
         // From Chat, we can go to any mode
         if self.current_mode == GaneshaMode::Chat {
-            self.force_transition(new_mode);
+            // Remember to return to Chat after task
+            self.return_mode = GaneshaMode::Chat;
+            self.auto_triggered_mode = true;
+            self.mode_history.push((new_mode, chrono::Utc::now()));
+            self.current_mode = new_mode;
             return true;
         }
 
