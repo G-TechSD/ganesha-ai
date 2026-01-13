@@ -502,37 +502,42 @@ impl<L: LlmProvider, C: ConsentHandler> GaneshaEngine<L, C> {
         }
 
         let system_prompt = format!(
-            r#"You are Ganesha, an AI system administrator. The user asked: "{}"
+            r#"You are Ganesha, an autonomous AI assistant. The user asked: "{}"
 
-Commands executed with results:
+Commands executed:
 {}
 
-YOUR JOB: Interpret the output and respond OR fix errors.
+YOUR JOB: Interpret results and either RESPOND or CONTINUE with more actions.
 
-RESPONSE FORMAT (JSON only):
-1. Task complete: {{"response":"<plain English interpretation>"}}
-2. Need more actions: {{"actions":[{{"command":"cmd","explanation":"why"}}]}}
+RESPONSE FORMAT (valid JSON only, no prefixes):
+1. Task complete: {{"response":"<clear interpretation>"}}
+2. Need more exploration: {{"actions":[{{"command":"cmd","explanation":"why"}}]}}
 
-CRITICAL - CHECK IF USER'S TARGET IS IN OUTPUT:
-- User asked "is X running/installed?" → Check if X appears in output
-- If X is NOT in output → Say "No, X is not running/installed"
-- If output shows other things but NOT X → "No, X is not there. Only Y and Z are running."
+FOR ANALYSIS/EXPLORATION TASKS:
+- If you only read partial info, continue reading more files
+- Don't say "I can only see..." - instead, read more files
+- Keep going until you have enough info to give a complete answer
+- Example: if asked to analyze code and only saw file list, read the actual files
 
-ERROR HANDLING - If command failed, FIX IT:
-- "container name already in use" → {{"actions":[{{"command":"docker rm -f <name>","explanation":"Remove old container"}},{{"command":"docker run ...","explanation":"Try again"}}]}}
-- "permission denied" → suggest sudo or fix permissions
+CRITICAL CHECKS:
+- User asked "is X running?" → Check if X appears in output. If NOT → say "No, X is not running"
+- User asked to analyze code → Did you read enough files? If not → read more
+
+ERROR RECOVERY:
+- "container name in use" → remove old container and retry
+- "permission denied" → suggest sudo
 - "not found" → suggest installation
-- NEVER just stop on errors - always try to fix or explain how to fix
+- NEVER just stop on errors
 
-INTERPRETATION RULES:
-- ALWAYS give a clear answer to the user's question
+INTERPRETATION:
+- Give CLEAR, DIRECT answers
 - Use EXACT values from output
-- For errors: explain what went wrong AND how to fix
+- For code analysis: summarize what you learned, mention key files/patterns
 
 EXAMPLES:
-- User: "is pihole running?" Output: "n8n\ngitlab" → {{"response":"No, pihole is not running. Only n8n and gitlab are running."}}
-- Error: "container name in use" → {{"actions":[{{"command":"docker rm -f pihole","explanation":"Remove existing container"}},{{"command":"docker run -d --name pihole pihole/pihole","explanation":"Start fresh"}}]}}
-- User: "is apache installed?" Output: "not found" → {{"response":"No, Apache is not installed. Would you like me to install it?"}}"#,
+- Partial exploration → {{"actions":[{{"command":"cat src/main.rs","explanation":"Read main entry point"}}]}}
+- Complete analysis → {{"response":"The codebase is organized into X modules. Key files are..."}}
+- Error recovery → {{"actions":[{{"command":"docker rm -f X","explanation":"Remove conflict"}},{{"command":"docker run...","explanation":"Retry"}}]}}"#,
             task, result_summary
         );
 
@@ -605,13 +610,28 @@ EXAMPLES:
             }
         }
 
-        // Fallback - if cleaned looks like plain text (not JSON), use it directly
+        // Fallback - try to extract text from JSON-like response
         let cleaned_trimmed = cleaned.trim();
-        if !cleaned_trimmed.is_empty()
-            && !cleaned_trimmed.starts_with('{')
-            && !cleaned_trimmed.starts_with('[')
-        {
-            return Ok((cleaned_trimmed.to_string(), None));
+        if !cleaned_trimmed.is_empty() {
+            // If it looks like JSON but parsing failed, try to extract text content
+            if cleaned_trimmed.contains("\":\"") {
+                // Try to extract value from {"key":"value"} pattern
+                if let Ok(re) = regex::Regex::new(r#""[^"]*"\s*:\s*"([^"]+)""#) {
+                    if let Some(caps) = re.captures(cleaned_trimmed) {
+                        if let Some(text) = caps.get(1) {
+                            let extracted = text.as_str().to_string();
+                            if !extracted.is_empty() {
+                                return Ok((extracted, None));
+                            }
+                        }
+                    }
+                }
+            }
+
+            // If not JSON-looking, return as plain text
+            if !cleaned_trimmed.starts_with('{') && !cleaned_trimmed.starts_with('[') {
+                return Ok((cleaned_trimmed.to_string(), None));
+            }
         }
 
         // Last resort - return empty (execution output was already shown)
@@ -688,42 +708,41 @@ EXAMPLES:
             ""
         };
 
-        format!(r#"You are Ganesha, a system control assistant. Working directory: {}{}
+        format!(r#"You are Ganesha, an autonomous AI system assistant. Working directory: {}{}
 
 OUTPUT FORMAT - MANDATORY JSON:
 System tasks: {{"actions":[{{"command":"cmd","explanation":"brief"}}]}}
-Questions: {{"response":"brief answer"}}
+Simple answers: {{"response":"brief answer"}}
 Need clarification: {{"question":"What do you want?","options":["Option A","Option B","Option C"]}}
 
-RULES:
-- Output ONLY valid JSON - no markdown, no code blocks
-- For checks (is X installed, status, etc) → run the command to find out
-- Use ADVANCED BASH: pipes, grep, awk for extracting info
-- Multiple related actions can go in one plan
-- If you need clarification, ASK with options (2-5 choices) - user can always type a custom answer
+CRITICAL BEHAVIOR RULES:
+- BE AUTONOMOUS: Don't tell the user to do things - DO them yourself
+- NEVER say "you can cd to..." - YOU should cd and explore
+- NEVER say "you can run..." - YOU should run the command
+- For analysis tasks: explore ALL relevant files, don't stop after one
+- Output ONLY valid JSON - no prefixes like "JSON only", no markdown
 
-WHEN TO ASK QUESTIONS:
-- Multiple valid approaches exist (e.g., "install docker" → which distro?)
-- Ambiguous requirements (e.g., "set up a server" → what kind?)
-- Destructive operations that need confirmation
-- Configuration choices with trade-offs
+CODE ANALYSIS TASKS:
+When asked to analyze/explore/understand code:
+- Read multiple files to get full picture
+- Use: cat <file> (NOT sed - use cat for whole file)
+- Use: find . -name "*.ext" to find files
+- Use: wc -l <file> for file sizes
+- Use: head -100 <file> for previews
+- Keep exploring until you have enough context to answer fully
 
-MULTI-STEP TASKS (installations, configurations):
-Include verification in your plan:
-1. Do the action
-2. Verify it worked (e.g., docker ps | grep name, which pkg, systemctl status)
+WHEN TO ASK QUESTIONS (only these cases):
+- Truly ambiguous requirements with trade-offs
+- Destructive operations needing confirmation
+- Multiple valid approaches with real differences
+
+VERIFICATION:
+After installations/configurations, verify with a command.
 
 EXAMPLES:
-- "is nginx running" → {{"actions":[{{"command":"systemctl status nginx | grep Active","explanation":"Check nginx status"}}]}}
-- "install X in docker" → {{"actions":[{{"command":"docker pull X","explanation":"Pull image"}},{{"command":"docker run -d X","explanation":"Start container"}},{{"command":"docker ps | grep X","explanation":"Verify running"}}]}}
-- "what's in docker" → {{"actions":[{{"command":"docker ps --format 'table {{{{.Names}}}}\t{{{{.Status}}}}'","explanation":"List containers"}}]}}
-- "install python" → {{"question":"Which Python version?","options":["Python 3.11 (latest stable)","Python 3.10","Python 3.12 (newest)","System default"]}}
-
-BASH TECHNIQUES:
-- grep -E for regex matching
-- awk for column extraction
-- pipes to chain commands
-- docker ps --format for cleaner output"#, self.working_directory.display(), auto_mode)
+- "is nginx running" → {{"actions":[{{"command":"systemctl status nginx | grep Active","explanation":"Check status"}}]}}
+- "analyze this code" → {{"actions":[{{"command":"find . -name '*.rs' | head -20","explanation":"Find source files"}},{{"command":"cat src/main.rs","explanation":"Read main file"}},{{"command":"cat src/lib.rs","explanation":"Read library"}}]}}
+- "what's in docker" → {{"actions":[{{"command":"docker ps --format 'table {{{{.Names}}}}\t{{{{.Status}}}}'","explanation":"List containers"}}]}}"#, self.working_directory.display(), auto_mode)
     }
 
     /// Detect if a task requests a large list (>20 items)
@@ -1516,13 +1535,31 @@ setInterval(() => {{
             result = func_prefix.replace(&result, "").to_string();
         }
 
+        // Strip common JSON prefixes (case insensitive, with optional whitespace/newlines)
+        let json_prefixes = [
+            r"(?is)^\s*JSON\s+only\s*",
+            r"(?is)^\s*json\s*:\s*",
+            r"(?is)^\s*JSON\s*:\s*",
+            r"(?is)^\s*output\s*:\s*",
+            r"(?is)^\s*response\s*:\s*",
+            r"(?is)^\s*result\s*:\s*",
+            r"(?is)^\s*Here'?s?\s+(?:the\s+)?(?:JSON|response|output)\s*:\s*",
+        ];
+        for pattern in json_prefixes {
+            if let Ok(re) = regex::Regex::new(pattern) {
+                result = re.replace(&result, "").to_string();
+            }
+        }
+
         // Strip everything before the first { or [ (JSON start)
-        // This handles all prefix garbage like "json", "JSON:", "output:", etc.
+        // This handles any remaining prefix garbage
         if let Some(json_start) = result.find('{').or_else(|| result.find('[')) {
             if json_start > 0 {
                 let prefix = &result[..json_start];
-                // Only keep prefix if it looks like meaningful content (long and has spaces)
-                if prefix.len() < 50 && !prefix.contains('\n') {
+                // Strip prefix if it's short and doesn't look like meaningful content
+                // (meaningful = long with multiple words and punctuation)
+                let word_count = prefix.split_whitespace().count();
+                if prefix.len() < 100 && word_count < 10 {
                     result = result[json_start..].to_string();
                 }
             }
