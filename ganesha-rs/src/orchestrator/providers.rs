@@ -829,7 +829,7 @@ impl ProviderManager {
                 name: "Anthropic".into(),
                 base_url: "https://api.anthropic.com".into(),
                 auth: AuthMethod::ApiKey(key),
-                default_model: "claude-sonnet-4-20250514".into(),
+                default_model: "claude-sonnet-4-5-20250514".into(),
                 enabled: true,
                 priority: 10,
             });
@@ -849,7 +849,7 @@ impl ProviderManager {
                 name: "Anthropic".into(),
                 base_url: "https://api.anthropic.com".into(),
                 auth: AuthMethod::ApiKey(key.to_string()),
-                default_model: "claude-sonnet-4-20250514".into(),
+                default_model: "claude-sonnet-4-5-20250514".into(),
                 enabled: true,
                 priority: 10,
             });
@@ -941,11 +941,11 @@ impl ProviderManager {
             println!("Configuring tiers using Anthropic...");
 
             self.tiers.set(1, "anthropic", "claude-haiku-3-5-20241022", "Fast (Haiku)");
-            self.tiers.set(2, "anthropic", "claude-sonnet-4-20250514", "Balanced (Sonnet)");
+            self.tiers.set(2, "anthropic", "claude-sonnet-4-5-20250514", "Balanced (Sonnet)");
             self.tiers.set(3, "anthropic", "claude-opus-4-20250514", "Premium (Opus)");
             self.tiers.vision = Some(TierMapping {
                 endpoint: "anthropic".into(),
-                model: "claude-sonnet-4-20250514".into(),
+                model: "claude-sonnet-4-5-20250514".into(),
                 description: "Vision (Sonnet)".into(),
             });
         } else if has_local {
@@ -1397,7 +1397,7 @@ impl ProviderManager {
                 tier: ModelTier::Premium,
             },
             ModelInfo {
-                id: "claude-sonnet-4-20250514".into(),
+                id: "claude-sonnet-4-5-20250514".into(),
                 name: "Claude Sonnet 4".into(),
                 provider: ProviderType::Anthropic,
                 context_window: 200000,

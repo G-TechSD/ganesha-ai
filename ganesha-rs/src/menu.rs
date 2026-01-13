@@ -491,8 +491,97 @@ pub fn get_priority() -> Vec<String> {
     unsafe { PROVIDER_PRIORITY.clone() }
 }
 
+/// Initialize providers from environment - call at menu startup to sync with actual providers
+pub fn init_providers_from_env() {
+    unsafe {
+        // Only init if empty - don't overwrite user additions during session
+        if !CONFIGURED_PROVIDERS.is_empty() {
+            return;
+        }
+
+        // Check for LM Studio servers
+        let lm_studio_servers = [
+            ("beast", "http://192.168.245.155:1234", "LM Studio BEAST"),
+            ("bedroom", "http://192.168.27.182:1234", "LM Studio BEDROOM"),
+            ("local", "http://localhost:1234", "LM Studio Local"),
+        ];
+
+        for (name, endpoint, display_name) in &lm_studio_servers {
+            // Quick connectivity check
+            let check_url = format!("{}/v1/models", endpoint);
+            let is_online = reqwest::blocking::Client::builder()
+                .timeout(std::time::Duration::from_secs(2))
+                .build()
+                .ok()
+                .and_then(|c| c.get(&check_url).send().ok())
+                .map(|r| r.status().is_success())
+                .unwrap_or(false);
+
+            if is_online {
+                CONFIGURED_PROVIDERS.push(ProviderConnection {
+                    name: name.to_string(),
+                    provider_type: "lmstudio".to_string(),
+                    endpoint: endpoint.to_string(),
+                    api_key: None,
+                    model: "default".to_string(),
+                    enabled: true,
+                });
+                PROVIDER_PRIORITY.push(name.to_string());
+            }
+        }
+
+        // Check for Ollama
+        if reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(2))
+            .build()
+            .ok()
+            .and_then(|c| c.get("http://localhost:11434/api/tags").send().ok())
+            .map(|r| r.status().is_success())
+            .unwrap_or(false)
+        {
+            CONFIGURED_PROVIDERS.push(ProviderConnection {
+                name: "ollama".to_string(),
+                provider_type: "ollama".to_string(),
+                endpoint: "http://localhost:11434".to_string(),
+                api_key: None,
+                model: "default".to_string(),
+                enabled: true,
+            });
+            PROVIDER_PRIORITY.push("ollama".to_string());
+        }
+
+        // Check for cloud providers via env vars
+        if std::env::var("ANTHROPIC_API_KEY").is_ok() {
+            CONFIGURED_PROVIDERS.push(ProviderConnection {
+                name: "anthropic".to_string(),
+                provider_type: "anthropic".to_string(),
+                endpoint: "https://api.anthropic.com".to_string(),
+                api_key: Some("(from env)".to_string()),
+                model: "claude-sonnet-4-5-20250514".to_string(),
+                enabled: true,
+            });
+            PROVIDER_PRIORITY.push("anthropic".to_string());
+        }
+
+        if std::env::var("OPENAI_API_KEY").is_ok() {
+            CONFIGURED_PROVIDERS.push(ProviderConnection {
+                name: "openai".to_string(),
+                provider_type: "openai".to_string(),
+                endpoint: "https://api.openai.com".to_string(),
+                api_key: Some("(from env)".to_string()),
+                model: "gpt-4o".to_string(),
+                enabled: true,
+            });
+            PROVIDER_PRIORITY.push("openai".to_string());
+        }
+    }
+}
+
 /// Providers & Connections menu - manage local and cloud connections
 pub fn show_connections_menu() {
+    // Initialize from actual system state on first open
+    init_providers_from_env();
+
     loop {
         let providers = get_providers();
 
@@ -529,10 +618,34 @@ pub fn show_connections_menu() {
                         let _ = io::stdin().read_line(&mut String::new());
                     }
                     "remove" => {
-                        println!("\n{} Select provider number to remove, or press Enter to cancel.", style("→").cyan());
-                        // TODO: implement remove
-                        println!("{}", style("(Remove functionality coming soon)").dim());
-                        let _ = io::stdin().read_line(&mut String::new());
+                        if providers.is_empty() {
+                            println!("\n{} No providers configured to remove.", style("ℹ").cyan());
+                            let _ = io::stdin().read_line(&mut String::new());
+                        } else {
+                            println!("\n{} Enter provider number to remove (1-{}), or press Enter to cancel:",
+                                style("→").cyan(), providers.len());
+                            let mut input = String::new();
+                            if io::stdin().read_line(&mut input).is_ok() {
+                                let input = input.trim();
+                                if !input.is_empty() {
+                                    if let Ok(num) = input.parse::<usize>() {
+                                        if num >= 1 && num <= providers.len() {
+                                            let removed = providers[num - 1].name.clone();
+                                            unsafe {
+                                                CONFIGURED_PROVIDERS.remove(num - 1);
+                                                // Also remove from priority list if present
+                                                PROVIDER_PRIORITY.retain(|p| p != &removed);
+                                            }
+                                            println!("{} Removed provider: {}", style("✓").green(), removed);
+                                        } else {
+                                            println!("{} Invalid number. Must be 1-{}", style("✗").red(), providers.len());
+                                        }
+                                    } else {
+                                        println!("{} Invalid input. Enter a number.", style("✗").red());
+                                    }
+                                }
+                            }
+                        }
                     }
                     "test" => {
                         println!("\n{} Testing connections...", style("🔍").cyan());
@@ -746,7 +859,7 @@ fn add_cloud_provider() {
     let api_key = text_input(&format!("API Key (or Enter to use ${})", env_var), None);
 
     let default_model = match provider_type.as_str() {
-        "anthropic" => "claude-sonnet-4-20250514",
+        "anthropic" => "claude-sonnet-4-5-20250514",
         "openai" => "gpt-5.2",
         "google" => "gemini-3.0-pro",
         "deepseek" => "deepseek-v3",
@@ -917,6 +1030,9 @@ pub fn show_secondary_server_settings() -> Option<SecondaryServer> {
 
 /// Vision model settings
 pub fn show_vision_settings() -> Option<VisionSettings> {
+    // Ensure providers are initialized from environment
+    init_providers_from_env();
+
     println!();
 
     println!("\n{}", style("═".repeat(60)).dim());
@@ -936,29 +1052,46 @@ pub fn show_vision_settings() -> Option<VisionSettings> {
         });
     }
 
-    // Check for secondary server
-    let secondary = get_secondary_server();
+    // Get configured local providers for vision options
+    let providers = get_providers();
+    let local_providers: Vec<_> = providers.iter()
+        .filter(|p| p.provider_type == "lmstudio" || p.provider_type == "ollama")
+        .collect();
 
     // Build options based on what's available
     let mut options = vec![];
 
+    // Add local servers as vision options
+    for provider in &local_providers {
+        options.push(MenuOption::with_description(
+            &format!("Local: {}", provider.name),
+            &provider.endpoint,
+            &format!("local:{}", provider.name)
+        ));
+    }
+
+    // Also check for legacy secondary server
+    let secondary = get_secondary_server();
     if let Some(ref server) = secondary {
-        if server.has_vision {
+        // Only add if not already in providers list
+        let already_listed = local_providers.iter().any(|p| p.endpoint == server.url);
+        if !already_listed && server.has_vision {
             options.push(MenuOption::with_description(
-                &format!("Secondary Server ({})", server.name),
-                &format!("Local: {}", server.url),
+                &format!("Secondary: {}", server.name),
+                &server.url,
                 "secondary"
             ));
         }
     }
 
-    options.push(MenuOption::with_description("Anthropic Claude", "claude-sonnet-4-20250514 (cloud)", "anthropic"));
+    // Cloud options
+    options.push(MenuOption::with_description("Anthropic Claude", "claude-sonnet-4-5-20250514 (cloud)", "anthropic"));
     options.push(MenuOption::with_description("OpenAI GPT-4o", "Good vision (cloud)", "openai"));
     options.push(MenuOption::with_description("Google Gemini", "Fast vision (cloud)", "google"));
     options.push(MenuOption::with_description("No Vision", "Disable vision capabilities", "none"));
 
-    if secondary.is_none() {
-        println!("{}", style("Tip: Add a secondary local server in Settings to use local vision models.").dim());
+    if local_providers.is_empty() && secondary.is_none() {
+        println!("{}", style("Tip: Add a local server in Providers & Connections to use local vision models.").dim());
         println!();
     }
 
@@ -966,6 +1099,29 @@ pub fn show_vision_settings() -> Option<VisionSettings> {
         MenuResult::Selected(v) => v,
         _ => return None,
     };
+
+    // Handle local server selections (format: "local:name")
+    if choice.starts_with("local:") {
+        let name = choice.strip_prefix("local:").unwrap_or("");
+        if let Some(provider) = local_providers.iter().find(|p| p.name == name) {
+            let server = SecondaryServer {
+                name: provider.name.clone(),
+                url: provider.endpoint.clone(),
+                has_vision: true,
+            };
+            // Also store it as secondary server for future reference
+            unsafe {
+                SECONDARY_SERVER = Some(server.clone());
+            }
+            return Some(VisionSettings {
+                enabled: true,
+                source: VisionSource::SecondaryLocal,
+                secondary_server: Some(server),
+                cloud_provider: None,
+                cloud_model: None,
+            });
+        }
+    }
 
     match choice.as_str() {
         "none" => Some(VisionSettings {
@@ -984,7 +1140,7 @@ pub fn show_vision_settings() -> Option<VisionSettings> {
         }),
         provider => {
             let default_model = match provider {
-                "anthropic" => Some("claude-sonnet-4-20250514"),
+                "anthropic" => Some("claude-sonnet-4-5-20250514"),
                 "openai" => Some("gpt-4o"),
                 "google" => Some("gemini-2.0-flash"),
                 _ => None,

@@ -95,8 +95,32 @@ struct Choice {
 
 impl OpenAiCompatible {
     pub fn lm_studio(url: &str) -> Self {
+        // Derive a name from the URL for better identification
+        let name = if url.contains("192.168.245.155") {
+            "LM Studio BEAST"
+        } else if url.contains("192.168.27.182") {
+            "LM Studio BEDROOM"
+        } else if url.contains("localhost") || url.contains("127.0.0.1") {
+            "LM Studio Local"
+        } else {
+            "LM Studio"
+        };
+
         Self {
-            name: "lmstudio".into(),
+            name: name.into(),
+            base_url: url.trim_end_matches('/').into(),
+            api_key: None,
+            model: "default".into(),
+            client: Client::builder()
+                .timeout(Duration::from_secs(120))
+                .build()
+                .unwrap(),
+        }
+    }
+
+    pub fn lm_studio_named(url: &str, name: &str) -> Self {
+        Self {
+            name: name.into(),
             base_url: url.trim_end_matches('/').into(),
             api_key: None,
             model: "default".into(),
@@ -381,7 +405,7 @@ impl Anthropic {
     pub fn new(api_key: &str) -> Self {
         Self {
             api_key: api_key.into(),
-            model: "claude-sonnet-4-20250514".into(),
+            model: "claude-sonnet-4-5-20250514".into(),
             client: Client::builder()
                 .timeout(Duration::from_secs(120))
                 .build()

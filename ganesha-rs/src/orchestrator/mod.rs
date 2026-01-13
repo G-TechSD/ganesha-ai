@@ -117,7 +117,7 @@ impl ProviderConfig {
         Self {
             name: "anthropic-sonnet".into(),
             endpoint: "https://api.anthropic.com".into(),
-            model: "claude-sonnet-4-20250514".into(),
+            model: "claude-sonnet-4-5-20250514".into(),
             tier: ModelTier::Cloud,
             api_key: std::env::var("ANTHROPIC_API_KEY").ok(),
             max_concurrent: 5,
