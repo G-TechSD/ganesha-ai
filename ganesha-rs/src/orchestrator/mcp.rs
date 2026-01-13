@@ -145,15 +145,15 @@ impl McpManager {
             category: ServerCategory::System,
         });
 
-        // Fetch - Web fetching
+        // Fetch - Web fetching (simple content retrieval)
         servers.insert("fetch".into(), McpServer {
             name: "fetch".into(),
-            description: "Web content fetching and processing".into(),
+            description: "Web content fetching - simpler than browser for static pages".into(),
             command: "npx".into(),
             args: vec!["-y".into(), "@modelcontextprotocol/server-fetch".into()],
             env: HashMap::new(),
             status: ServerStatus::NotInstalled,
-            auto_start: false,
+            auto_start: true,  // Auto-start for web tasks
             category: ServerCategory::Browser,
         });
 

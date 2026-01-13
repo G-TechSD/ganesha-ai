@@ -646,20 +646,22 @@ User question: "{}"
 Page data:
 {}
 
-INSTRUCTIONS:
-1. Analyze the Page Snapshot THOROUGHLY
-2. Extract ALL items that match the user's question
-3. Output JSON: {{"response":"your complete answer here"}}
+RESPOND WITH JSON: {{"response":"your complete answer"}}
 
-CRITICAL - LIST ALL ITEMS:
-- Do NOT truncate lists - include EVERY item found
-- Use bullet points (- item) for each item
-- If there are 20 items, list all 20
-- If asked about "latest" models, include ALL models shown on the page
-- NEVER say "and more..." or "etc." - LIST EVERYTHING
+RULES:
+1. DEDUPLICATE - List each unique item only ONCE (no duplicates!)
+2. COMPLETE - Finish all sentences, never cut off mid-word
+3. CONCISE - One line per item, no verbose descriptions
+4. ALL ITEMS - List every unique item found on the page
 
-Example good response: {{"response":"The website shows:\n- Item 1\n- Item 2\n- Item 3\n... (all items listed)"}}
-Example bad response: {{"response":"The website shows Item 1, Item 2, and others..."}} (WRONG - must list all)"#,
+FORMAT FOR LISTS:
+{{"response":"Found on the website:\n- Item A\n- Item B\n- Item C"}}
+
+BAD (duplicates): "- 2026 RAV4\n- 2026 RAV4 (hybrid)"
+GOOD (unique only): "- 2026 RAV4\n- 2026 RAV4 Hybrid"
+
+BAD (cut off): "- 2026 RAV4 (listed again in the"
+GOOD (complete): "- 2026 RAV4""#,
                 date_str, task, result_summary
             )
         } else {
@@ -930,8 +932,21 @@ CODE ANALYSIS TASKS:
 - Use: cat, find, head, grep to explore
 - Keep exploring until you have enough context
 
-WEBSITE/URL TASKS:
-Use MCP tools: {{"actions":[{{"mcp_tool":"playwright:browser_navigate","mcp_args":{{"url":"URL"}},"explanation":"Navigate"}}]}}
+WEB TASKS - Use the right tool:
+
+1. FETCH (simple content): Use fetch:fetch for getting page content
+   {{"actions":[{{"mcp_tool":"fetch:fetch","mcp_args":{{"url":"https://example.com"}},"explanation":"Get page content"}}]}}
+
+2. BROWSER (interactive): Use playwright for clicking, forms, dynamic sites
+   {{"actions":[{{"mcp_tool":"playwright:browser_navigate","mcp_args":{{"url":"URL"}},"explanation":"Browse site"}}]}}
+
+3. SEARCH (find websites): If URL unknown, search Google first!
+   {{"actions":[{{"mcp_tool":"fetch:fetch","mcp_args":{{"url":"https://www.google.com/search?q=nissan+usa+cars+2026"}},"explanation":"Search for site"}}]}}
+
+NEVER GUESS URLs! If user says "nissan cars" or "find X online":
+  → Search Google first, then visit the correct site
+  → "nissan cars" = search "nissan usa official site cars 2026"
+  → "latest iphones" = search "apple iphone models 2026"
 
 EXAMPLES:
 - "install apache and set doc root to /home/user/WWW" → {{"actions":[
