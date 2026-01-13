@@ -6,8 +6,9 @@
 //! - Interview-style question collection
 //!
 //! Uses crossterm for clean display without glitches.
+//! Supports Escape and Ctrl+C to navigate back from menus.
 
-use console::style;
+use console::{style, Term, Key};
 use std::io::{self, Write};
 
 /// Menu option with label and optional description
@@ -42,6 +43,46 @@ pub enum MenuResult {
     Custom(String),
     Back,
     Exit,
+}
+
+/// Read menu input with support for Escape and Ctrl+C to go back
+/// Returns None if user pressed Escape or Ctrl+C, Some(input) otherwise
+fn read_menu_input() -> Option<String> {
+    let term = Term::stdout();
+    let mut input = String::new();
+
+    loop {
+        match term.read_key() {
+            Ok(Key::Escape) => {
+                println!(); // Move to next line
+                return None; // Go back
+            }
+            Ok(Key::Enter) => {
+                println!(); // Move to next line
+                return Some(input);
+            }
+            Ok(Key::Backspace) => {
+                if !input.is_empty() {
+                    input.pop();
+                    // Clear and reprint
+                    print!("\r{} {}", style("Select option:").cyan(), input);
+                    print!(" \x08"); // Erase last char visually
+                    let _ = io::stdout().flush();
+                }
+            }
+            Ok(Key::Char(c)) => {
+                // Check for Ctrl+C (char code 3)
+                if c == '\x03' {
+                    println!();
+                    return None; // Go back
+                }
+                input.push(c);
+                print!("{}", c);
+                let _ = io::stdout().flush();
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Display a single-select menu and return the selected option
@@ -80,16 +121,15 @@ pub fn show_menu_with_prompt(title: &str, options: &[MenuOption], allow_custom: 
     println!("  {} {}", style("[Q]").yellow(), "Quit");
 
     println!("\n{}", style("─".repeat(60)).dim());
+    println!("{}", style("(Press Escape to go back)").dim());
     print!("{} ", style("Select option:").cyan());
     let _ = io::stdout().flush();
 
-    // Read input
-    let mut input = String::new();
-    if io::stdin().read_line(&mut input).is_err() {
-        return MenuResult::Exit;
-    }
-
-    let input = input.trim().to_lowercase();
+    // Read input with Escape/Ctrl+C support
+    let input = match read_menu_input() {
+        Some(s) => s.trim().to_lowercase(),
+        None => return MenuResult::Back, // Escape or Ctrl+C pressed
+    };
 
     // Handle special keys
     if input == "q" || input == "quit" || input == "exit" {
