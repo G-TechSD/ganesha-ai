@@ -1350,12 +1350,31 @@ fn is_image_analysis_request(input: &str) -> bool {
     has_analysis && has_image_ref
 }
 
-/// Find all image files in a directory
-fn find_images_in_directory(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+/// Find all image files in a directory (recursive, with limit)
+fn find_images_in_directory(dir: &std::path::Path, max_images: usize) -> Vec<std::path::PathBuf> {
     let mut images = Vec::new();
+    find_images_recursive(dir, &mut images, max_images, 0, 3); // Max depth 3
+    images
+}
+
+/// Recursive helper to find images with depth limit
+fn find_images_recursive(
+    dir: &std::path::Path,
+    images: &mut Vec<std::path::PathBuf>,
+    max_images: usize,
+    depth: usize,
+    max_depth: usize,
+) {
+    if depth > max_depth || images.len() >= max_images {
+        return;
+    }
 
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
+            if images.len() >= max_images {
+                break;
+            }
+
             let path = entry.path();
             if path.is_file() {
                 if let Some(ext) = path.extension() {
@@ -1364,11 +1383,17 @@ fn find_images_in_directory(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
                         images.push(path);
                     }
                 }
+            } else if path.is_dir() {
+                // Skip hidden directories and common system folders
+                if let Some(name) = path.file_name() {
+                    let name_str = name.to_string_lossy();
+                    if !name_str.starts_with('.') && name_str != "node_modules" && name_str != "target" {
+                        find_images_recursive(&path, images, max_images, depth + 1, max_depth);
+                    }
+                }
             }
         }
     }
-
-    images
 }
 
 /// Analyze an image using the vision model
@@ -1489,7 +1514,9 @@ async fn run_task_with_log<C: core::ConsentHandler>(
     };
 
     // Check if this is an image analysis request
-    if is_image_analysis_request(&task) {
+    let is_vision_request = is_image_analysis_request(&task);
+
+    if is_vision_request {
         let mut image_paths = extract_image_paths(&task, &engine.working_directory);
 
         // If no specific images found but user mentions "images in this folder" etc,
@@ -1500,40 +1527,34 @@ async fn run_task_with_log<C: core::ConsentHandler>(
              || lower_task.contains("pictures in") || lower_task.contains("this folder")
              || lower_task.contains("this directory") || lower_task.contains("current folder"))
         {
-            image_paths = find_images_in_directory(&engine.working_directory);
+            image_paths = find_images_in_directory(&engine.working_directory, 10); // Limit to 10 images
 
             if image_paths.is_empty() {
-                println!("{} No image files found in {}",
-                    style("ℹ").cyan(), engine.working_directory.display());
                 return format!("No image files found in {}", engine.working_directory.display());
-            } else {
-                println!("{} Found {} image(s) in {}",
-                    style("ℹ").cyan(), image_paths.len(), engine.working_directory.display());
             }
         }
 
         if !image_paths.is_empty() {
             // We have image files to analyze
             if let Some((provider, model)) = vision_config {
-                println!("{} Analyzing {} image(s) with vision model...",
-                    style("👁️").cyan(), image_paths.len());
+                println!("{} Analyzing {} image(s)...", style("👁️").cyan(), image_paths.len());
 
                 let mut results = Vec::new();
                 for (i, path) in image_paths.iter().enumerate() {
-                    let query = format!("Describe this image in detail. What do you see?");
-                    println!("{} [{}/{}] Analyzing {}...",
-                        style("→").dim(), i + 1, image_paths.len(), path.file_name().unwrap_or_default().to_string_lossy());
+                    let query = "Describe this image in detail. What do you see?";
+                    let filename = path.file_name().unwrap_or_default().to_string_lossy();
+                    println!("{} [{}/{}] {}",
+                        style("→").dim(), i + 1, image_paths.len(), filename);
 
-                    match analyze_image_with_vision(path, &query, provider, model).await {
+                    match analyze_image_with_vision(path, query, provider, model).await {
                         Ok(analysis) => {
-                            println!("\n{} {}", style("Image:").bold(), path.display());
-                            println!("{}", style(&analysis).cyan());
-                            results.push(format!("{}: {}", path.display(), analysis));
+                            println!("\n{} {}", style("📷").cyan(), filename);
+                            println!("{}\n", analysis);
+                            results.push(format!("{}: {}", filename, analysis));
                         }
                         Err(e) => {
-                            println!("{} Vision analysis failed for {}: {}",
-                                style("⚠").yellow(), path.display(), e);
-                            results.push(format!("{}: Error - {}", path.display(), e));
+                            println!("{} {}: {}", style("⚠").yellow(), filename, e);
+                            results.push(format!("{}: Error - {}", filename, e));
                         }
                     }
                 }
@@ -1542,9 +1563,6 @@ async fn run_task_with_log<C: core::ConsentHandler>(
                     return results.join("\n\n");
                 }
             } else {
-                // No vision config - let user know
-                println!("{} No vision model configured. Use /settings to configure vision.",
-                    style("ℹ").cyan());
                 return "Vision not configured. Run /settings to set up a vision model.".to_string();
             }
         }
