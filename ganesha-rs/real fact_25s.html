@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Generated Content</title>
+<style>
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  overflow-x: hidden;
+}
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+h1 {
+  text-align: center;
+  color: #e94560;
+  font-size: 3rem;
+  text-shadow: 0 0 20px rgba(233, 69, 96, 0.5);
+  margin-bottom: 2rem;
+}
+.stats {
+  text-align: center;
+  color: #eee;
+  margin-bottom: 2rem;
+  font-size: 1.2rem;
+}
+.bubble {
+  position: fixed;
+  background: rgba(233, 69, 96, 0.9);
+  border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
+  color: white;
+  padding: 15px 20px;
+  font-size: 12px;
+  max-width: 200px;
+  text-align: center;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+  cursor: pointer;
+  transition: transform 0.3s, box-shadow 0.3s;
+  animation: float var(--duration) ease-in-out infinite;
+}
+.bubble::before {
+  content: '';
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  background: inherit;
+  border-radius: 50%;
+  top: -8px;
+  left: 10px;
+}
+.bubble::after {
+  content: '';
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: inherit;
+  border-radius: 50%;
+  top: -15px;
+  left: 25px;
+}
+.bubble:hover {
+  transform: scale(1.1);
+  box-shadow: 0 8px 25px rgba(233, 69, 96, 0.5);
+  z-index: 1000;
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0) rotate(-2deg); }
+  50% { transform: translateY(-20px) rotate(2deg); }
+}
+.list-view {
+  display: grid;
+  gap: 1rem;
+}
+.list-item {
+  background: rgba(255,255,255,0.1);
+  padding: 1rem;
+  border-radius: 8px;
+  color: #eee;
+  transition: background 0.3s;
+}
+.list-item:hover {
+  background: rgba(233, 69, 96, 0.3);
+}
+.toggle-btn {
+  display: block;
+  margin: 2rem auto;
+  padding: 1rem 2rem;
+  background: #e94560;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background 0.3s;
+}
+.toggle-btn:hover {
+  background: #ff6b6b;
+}
+#bubbles { display: block; }
+#list { display: none; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Generated Content</h1>
+  <div class="stats">Total items: <span id="count">0</span></div>
+  <button class="toggle-btn" onclick="toggleView()">Switch to List View</button>
+</div>
+<div id="bubbles"></div>
+<div id="list" class="container list-view"></div>
+
+<script>
+const items = [
+  "1. Gargoyles were first used in medieval Europe as functional water spouts, channeling rainwater away from stone walls to prevent erosion.",
+  "2. The term “gargoyle” comes from the French word *gargouille*, meaning “throat,” referencing their role as a conduit for water.",
+  "3. Notre-Dame de Paris (completed 1345) features over 200 gargoyles, many depicting grotesque beasts and human figures.",
+  "4. In the 12th‑century Chartres Cathedral, the gargoyles were carved to resemble mythical creatures like dragons and griffins, intended to ward off evil spirits.",
+  "5. The largest known gargoyle is the “Gargoyle of St. Peter’s” in Rome, standing 3.6 meters tall and weighing approximately 1.2 tons.",
+  "6. Gargoyles often served as a visual reminder of mortality; their grotesque faces were meant to remind parishioners that life was fleeting.",
+  "7. The Gothic cathedral of Cologne houses the “Gargoyle of the Red Dragon,” which is believed to have been carved by the same workshop that produced the famous “St. Nicholas” gargoyles in Lübeck.",
+  "8. In 2013, a team of archaeologists discovered a hidden chamber beneath the Notre-Dame Cathedral’s cloister, containing a collection of original gargoyle molds used in the 13th century.",
+  "9. The word *gargoyle* was first recorded in English in the early 14th century, derived from Old French *garouille*.",
+  "10. Many medieval builders believed that gargoyles could “speak” to those who climbed them; a tradition of leaving offerings on their heads persisted until the 16th century.",
+  "11. The “Gargoyle of the Three‑Headed Dragon” at the Basilica di Santa Maria del Fiore in Florence is carved from a single block of Carrara marble, a rare feat for such a complex figure.",
+  "12. In the 19th‑century Gothic Revival movement, architects like Augustus Pugin revived gargoyles as decorative elements, even though their original water‑spout function was no longer necessary.",
+  "13. The University of Oxford’s Radcliffe Camera features a set of miniature gargoyles that were added during a 1930s restoration to honor the building’s medieval heritage.",
+  "14. In some regions of France, gargoyles were painted in bright colors to attract attention; however, most have faded over centuries due to weathering and pollution.",
+  "15. The “Gargoyle of the Angel” at Westminster Abbey is unique for its depiction of a winged creature with a human face, blending angelic and demonic iconography.",
+  "16. A 2007 study using laser scanning technology revealed that many gargoyles have subtle asymmetries in their limbs, suggesting they were carved by multiple artisans over time.",
+  "17. The “Gargoyle of the Serpent” at St. Paul's Cathedral in London was originally designed to direct rainwater away from the cathedral’s western façade, preventing stone erosion.",
+  "18. In medieval Italy, gargoyles were sometimes used as a form of civic propaganda, depicting local rulers or saints in heroic poses.",
+  "19. The “Gargoyle of the Dragon and the Lion” at the Cathedral of Santiago de Compostela was carved during the 13th‑century Reconquista to symbolize Christian triumph over Moorish forces.",
+  "20. In the 16th century, some gargoyles were repurposed as ornamental garden statues in aristocratic estates across Europe, reflecting changing tastes in architecture.",
+  "21. The “Gargoyle of the Owl” at the Basilica of Saint-Denis is notable for its detailed featherwork, a rare example of realistic animal depiction in medieval stone carving.",
+  "22. In 2019, researchers discovered that certain gargoyles at Notre-Dame were originally painted with pigments containing lead and vermilion, indicating an early use of color to enhance visual impact.",
+  "23. The “Gargoyle of the Cat” at the Cathedral of Saint-Étienne in Lyon is one of the few surviving examples where the creature’s tail forms a functional water‑spout channel.",
+  "24. In the 20th century, the restoration of the Cologne Cathedral included a meticulous cleaning process that revealed previously hidden carvings on several gargoyles, offering new insights into medieval iconography.",
+  "25. The “Gargoyle of the Dragon and the Serpent” at the Basilica of San Marco in Venice was carved from a single block of limestone imported from the island of Murano, showcasing the trade networks of the Venetian Republic.",
+];
+
+document.getElementById('count').textContent = items.length;
+
+let bubbleMode = true;
+const bubbleContainer = document.getElementById('bubbles');
+const listContainer = document.getElementById('list');
+
+// Create floating bubbles
+function createBubbles() {
+  bubbleContainer.innerHTML = '';
+  const displayed = new Set();
+  const maxBubbles = Math.min(30, items.length);
+
+  for (let i = 0; i < maxBubbles; i++) {
+    createBubble();
+  }
+}
+
+function createBubble() {
+  const item = items[Math.floor(Math.random() * items.length)];
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  bubble.textContent = item;
+  bubble.style.left = Math.random() * (window.innerWidth - 250) + 'px';
+  bubble.style.top = Math.random() * (window.innerHeight - 100) + 100 + 'px';
+  bubble.style.setProperty('--duration', (3 + Math.random() * 4) + 's');
+  bubble.onclick = () => {
+    bubble.remove();
+    setTimeout(createBubble, 1000);
+  };
+  bubbleContainer.appendChild(bubble);
+}
+
+// Create list view
+function createList() {
+  listContainer.innerHTML = items.map(item =>
+    `<div class="list-item">${item}</div>`
+  ).join('');
+}
+
+function toggleView() {
+  bubbleMode = !bubbleMode;
+  bubbleContainer.style.display = bubbleMode ? 'block' : 'none';
+  listContainer.style.display = bubbleMode ? 'none' : 'block';
+  document.querySelector('.toggle-btn').textContent =
+    bubbleMode ? 'Switch to List View' : 'Switch to Bubble View';
+}
+
+createBubbles();
+createList();
+
+// Refresh bubbles periodically
+setInterval(() => {
+  if (bubbleMode && bubbleContainer.children.length < 30) {
+    createBubble();
+  }
+}, 2000);
+</script>
+</body>
+</html>
