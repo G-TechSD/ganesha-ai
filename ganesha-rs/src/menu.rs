@@ -539,11 +539,9 @@ pub fn init_providers_from_env() {
             return;
         }
 
-        // Check for LM Studio servers
+        // Check for LM Studio servers (localhost only - user can add remote servers via menu)
         let lm_studio_servers = [
-            ("beast", "http://192.168.245.155:1234", "LM Studio BEAST"),
-            ("bedroom", "http://192.168.27.182:1234", "LM Studio BEDROOM"),
-            ("local", "http://localhost:1234", "LM Studio Local"),
+            ("lmstudio", "http://localhost:1234", "LM Studio (Local)"),
         ];
 
         for (name, endpoint, display_name) in &lm_studio_servers {
@@ -933,8 +931,18 @@ fn add_cloud_provider() {
 /// BIOS-style provider priority menu
 pub fn show_priority_menu() {
     loop {
-        let priority = get_priority();
+        let mut priority = get_priority();
         let providers = get_providers();
+
+        // If priority is empty but providers exist, populate priority from providers
+        if priority.is_empty() && !providers.is_empty() {
+            for provider in &providers {
+                if !priority.contains(&provider.name) {
+                    priority.push(provider.name.clone());
+                    unsafe { PROVIDER_PRIORITY.push(provider.name.clone()); }
+                }
+            }
+        }
 
         println!("\n{}", style("═".repeat(60)).dim());
         println!("{}", style("Provider Priority (Boot Order)").cyan().bold());
@@ -1219,46 +1227,153 @@ pub struct VisionSettings {
 
 /// MCP Server configuration
 pub fn show_mcp_settings() {
+    use crate::orchestrator::mcp::{McpManager, ServerStatus, connect_mcp_server, get_all_mcp_tools};
+
     println!("\n{}", style("═".repeat(60)).dim());
     println!("{}", style("MCP Server Configuration").cyan().bold());
     println!("{}\n", style("═".repeat(60)).dim());
 
     println!("{}", style("MCP (Model Context Protocol) servers extend Ganesha's capabilities.").dim());
-    println!("{}", style("They can provide tools, resources, and integrations.").dim());
+    println!("{}", style("They provide web browsing, documentation, and more.").dim());
     println!();
 
-    let options = vec![
-        MenuOption::with_description("Add MCP Server", "Connect to a new MCP server", "add"),
-        MenuOption::with_description("List Servers", "Show connected MCP servers", "list"),
-        MenuOption::with_description("Remove Server", "Disconnect an MCP server", "remove"),
-        MenuOption::with_description("Test Connection", "Test MCP server connectivity", "test"),
-    ];
+    let mut manager = McpManager::new();
 
-    match show_menu("MCP Servers", &options, false, true) {
-        MenuResult::Selected(v) => {
-            match v.as_str() {
-                "add" => {
-                    println!("\n{}", style("Add MCP Server").cyan().bold());
-                    if let Some(url) = text_input("Server URL (e.g., http://localhost:3000)", None) {
-                        let name = text_input("Server name", Some("mcp-server"));
-                        println!("\n{} MCP server '{}' added: {}", style("✓").green(), name.unwrap_or_default(), url);
-                        println!("{}", style("(Note: Full MCP integration coming soon)").dim());
+    loop {
+        let options = vec![
+            MenuOption::with_description("📋 List Servers", "Show available MCP servers and status", "list"),
+            MenuOption::with_description("🔌 Connect Server", "Connect to an MCP server", "connect"),
+            MenuOption::with_description("📦 Install All", "Install all default MCP servers", "install"),
+            MenuOption::with_description("🛠️ View Tools", "Show tools from connected servers", "tools"),
+            MenuOption::with_description("⬅️ Back", "Return to settings", "back"),
+        ];
+
+        match show_menu("MCP Servers", &options, false, true) {
+            MenuResult::Selected(v) => {
+                match v.as_str() {
+                    "list" => {
+                        println!("\n{}", style("Available MCP Servers:").cyan().bold());
+                        println!();
+                        for server in manager.list_servers() {
+                            let status_icon = match server.status {
+                                ServerStatus::Running => style("●").green(),
+                                ServerStatus::Stopped => style("○").yellow(),
+                                ServerStatus::Starting => style("◐").blue(),
+                                ServerStatus::Failed => style("✗").red(),
+                                ServerStatus::NotInstalled => style("◌").dim(),
+                            };
+                            let status_text = match server.status {
+                                ServerStatus::Running => "running",
+                                ServerStatus::Stopped => "stopped",
+                                ServerStatus::Starting => "starting",
+                                ServerStatus::Failed => "failed",
+                                ServerStatus::NotInstalled => "not installed",
+                            };
+                            println!("  {} {} - {} [{}]",
+                                status_icon,
+                                style(&server.name).bold(),
+                                server.description,
+                                style(status_text).dim()
+                            );
+                        }
+                        println!();
+                        println!("{}", style("Press Enter to continue...").dim());
+                        let _ = io::stdin().read_line(&mut String::new());
                     }
+                    "connect" => {
+                        println!("\n{}", style("Connect MCP Server:").cyan().bold());
+                        println!();
+
+                        // Show servers that aren't running
+                        let available: Vec<_> = manager.list_servers()
+                            .iter()
+                            .filter(|s| s.status != ServerStatus::Running)
+                            .map(|s| MenuOption::with_description(&s.name, &s.description, &s.name))
+                            .collect();
+
+                        if available.is_empty() {
+                            println!("  {} All servers are already running or not installed.", style("ℹ").cyan());
+                        } else {
+                            match show_menu("Select Server", &available, false, true) {
+                                MenuResult::Selected(name) => {
+                                    println!("\n  {} Connecting to {}...", style("⌛").yellow(), name);
+
+                                    // First check if installed
+                                    if let Some(server) = manager.get_server(&name) {
+                                        if server.status == ServerStatus::NotInstalled {
+                                            println!("  {} Installing first...", style("📦").cyan());
+                                            match manager.install_server(&name) {
+                                                Ok(_) => println!("  {} Installed successfully", style("✓").green()),
+                                                Err(e) => {
+                                                    println!("  {} Install failed: {}", style("✗").red(), e);
+                                                    continue;
+                                                }
+                                            }
+                                        }
+
+                                        // Get fresh server ref after potential install
+                                        if let Some(server) = manager.get_server(&name) {
+                                            match connect_mcp_server(server) {
+                                                Ok(_) => {
+                                                    println!("\n  {} Connected to {}", style("✓").green(), name);
+                                                }
+                                                Err(e) => {
+                                                    println!("  {} Connection failed: {}", style("✗").red(), e);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        println!("\n{}", style("Press Enter to continue...").dim());
+                        let _ = io::stdin().read_line(&mut String::new());
+                    }
+                    "install" => {
+                        println!("\n{}", style("Installing default MCP servers...").cyan().bold());
+                        println!();
+
+                        // Install all defaults (synchronous)
+                        match manager.install_defaults() {
+                            Ok(_) => println!("\n  {} Default servers installed", style("✓").green()),
+                            Err(e) => println!("\n  {} Some installations failed: {}", style("⚠").yellow(), e),
+                        }
+
+                        println!("\n{}", style("Press Enter to continue...").dim());
+                        let _ = io::stdin().read_line(&mut String::new());
+                    }
+                    "tools" => {
+                        println!("\n{}", style("Available MCP Tools:").cyan().bold());
+                        println!();
+
+                        let all_tools = get_all_mcp_tools();
+                        if all_tools.is_empty() {
+                            println!("  {} No MCP servers connected. Connect a server first.", style("ℹ").cyan());
+                        } else {
+                            for (server_name, tools) in all_tools {
+                                println!("  {} {} tools:", style("◆").cyan(), server_name);
+                                for tool in tools {
+                                    println!("    {} {}: {}",
+                                        style("•").dim(),
+                                        style(&tool.name).bold(),
+                                        tool.description.as_deref().unwrap_or("")
+                                    );
+                                }
+                                println!();
+                            }
+                        }
+
+                        println!("{}", style("Press Enter to continue...").dim());
+                        let _ = io::stdin().read_line(&mut String::new());
+                    }
+                    "back" => return,
+                    _ => {}
                 }
-                "list" => {
-                    println!("\n{}", style("Connected MCP Servers:").cyan().bold());
-                    println!("  {} No servers configured yet.", style("ℹ").dim());
-                    println!("{}", style("(Note: Full MCP integration coming soon)").dim());
-                }
-                "remove" | "test" => {
-                    println!("\n{} No MCP servers configured.", style("ℹ").cyan());
-                }
-                _ => {}
             }
-            println!("\n{}", style("Press Enter to continue...").dim());
-            let _ = io::stdin().read_line(&mut String::new());
+            MenuResult::Back | MenuResult::Exit => return,
+            _ => {}
         }
-        _ => {}
     }
 }
 

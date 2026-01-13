@@ -20,6 +20,8 @@ console = "0.15"                # Terminal colors/formatting
 indicatif = "0.17"              # Progress bars/spinners
 rustyline = "14.0"              # Readline for REPL (arrow keys, history)
 rand = "0.8"                    # Random selection for fun messages
+termimad = "0.30"               # Markdown rendering in terminal
+textwrap = "0.16"               # Text wrapping for pretty output
 
 # TUI
 ratatui = "0.29"                # Terminal UI framework
@@ -106,6 +108,10 @@ path = "src/main.rs"
 [[bin]]
 name = "ganesha-daemon"
 path = "src/bin/daemon.rs"
+
+[[bin]]
+name = "test_mcp"
+path = "src/bin/test_mcp.rs"
 
 # Computer Use (Vision + Input)
 # These are OPTIONAL and disabled by default for security

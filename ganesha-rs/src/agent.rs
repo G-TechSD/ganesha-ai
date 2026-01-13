@@ -8,6 +8,7 @@
 
 use crate::cli::{print_banner, print_error, print_info, print_success, print_warning};
 use crate::orchestrator::tools::{execute_tool, ToolRegistry};
+use crate::pretty;
 use console::style;
 use rustyline::error::ReadlineError;
 use rustyline::{Config, DefaultEditor, EditMode};
@@ -269,8 +270,8 @@ When you're done with a task, summarize what was accomplished."#,
                     content: response.clone(),
                 });
 
-                // Print the response
-                println!("\n{}", style(&response).cyan());
+                // Print the response with pretty formatting
+                pretty::print_ganesha_response(&response);
 
                 // Check if task seems complete
                 if self.is_task_complete(&response) {

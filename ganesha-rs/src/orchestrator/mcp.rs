@@ -85,40 +85,40 @@ impl McpManager {
     fn default_servers() -> HashMap<String, McpServer> {
         let mut servers = HashMap::new();
 
-        // Context7 - Documentation and library knowledge
+        // Context7 - Documentation and library knowledge (by Upstash)
         servers.insert("context7".into(), McpServer {
             name: "context7".into(),
-            description: "Library documentation and API knowledge".into(),
+            description: "Up-to-date library documentation for LLMs".into(),
             command: "npx".into(),
-            args: vec!["-y".into(), "@anthropic/mcp-server-context7".into()],
+            args: vec!["-y".into(), "@upstash/context7-mcp@latest".into()],
             env: HashMap::new(),
             status: ServerStatus::NotInstalled,
-            auto_start: true,
+            auto_start: false,  // Needs API key for best results
             category: ServerCategory::Documentation,
         });
 
-        // Playwright - Browser automation
+        // Playwright - Browser automation (official Microsoft)
         servers.insert("playwright".into(), McpServer {
             name: "playwright".into(),
-            description: "Browser automation and web scraping".into(),
+            description: "Browser automation via accessibility tree (no vision needed)".into(),
             command: "npx".into(),
-            args: vec!["-y".into(), "@anthropic/mcp-server-playwright".into()],
+            args: vec!["-y".into(), "@playwright/mcp@latest".into()],
             env: HashMap::new(),
             status: ServerStatus::NotInstalled,
             auto_start: true,
             category: ServerCategory::Browser,
         });
 
-        // Desktop Commander - System control
-        servers.insert("desktop-commander".into(), McpServer {
-            name: "desktop-commander".into(),
-            description: "Desktop automation and system control".into(),
+        // Playwright Execute Automation (alternative with more features)
+        servers.insert("playwright-ea".into(), McpServer {
+            name: "playwright-ea".into(),
+            description: "Playwright with device emulation (iPhone, Android, etc)".into(),
             command: "npx".into(),
-            args: vec!["-y".into(), "@anthropic/mcp-server-desktop-commander".into()],
+            args: vec!["-y".into(), "@executeautomation/playwright-mcp-server".into()],
             env: HashMap::new(),
             status: ServerStatus::NotInstalled,
-            auto_start: true,
-            category: ServerCategory::System,
+            auto_start: false,
+            category: ServerCategory::Browser,
         });
 
         // Filesystem - Enhanced file operations
@@ -201,8 +201,8 @@ impl McpManager {
         }
     }
 
-    /// Install a server
-    pub async fn install_server(&mut self, name: &str) -> Result<(), Box<dyn std::error::Error>> {
+    /// Install a server (synchronous - runs shell commands)
+    pub fn install_server(&mut self, name: &str) -> Result<(), Box<dyn std::error::Error>> {
         let server = self.servers.get(name)
             .ok_or_else(|| format!("Server {} not found", name))?
             .clone();
@@ -258,15 +258,15 @@ impl McpManager {
         Ok(())
     }
 
-    /// Install all default servers
-    pub async fn install_defaults(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    /// Install all default servers (synchronous)
+    pub fn install_defaults(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let names: Vec<String> = self.servers.keys()
             .filter(|n| self.servers[*n].auto_start)
             .cloned()
             .collect();
 
         for name in names {
-            if let Err(e) = self.install_server(&name).await {
+            if let Err(e) = self.install_server(&name) {
                 eprintln!("  Warning: Failed to install {}: {}", name, e);
             }
         }
@@ -457,20 +457,253 @@ pub struct McpError {
     pub message: String,
 }
 
+/// MCP Client for communicating with an MCP server via JSON-RPC over stdio
+pub struct McpClient {
+    stdin: Option<std::process::ChildStdin>,
+    stdout: Option<std::io::BufReader<std::process::ChildStdout>>,
+    request_id: std::sync::atomic::AtomicU64,
+    pub tools: Vec<McpToolDef>,
+    pub server_name: String,
+}
+
+impl Drop for McpClient {
+    fn drop(&mut self) {
+        // Take ownership of stdin/stdout and forget them to prevent blocking drops
+        // The child process will be killed when its handles are closed on process exit
+        if let Some(stdin) = self.stdin.take() {
+            std::mem::forget(stdin);
+        }
+        if let Some(stdout) = self.stdout.take() {
+            std::mem::forget(stdout);
+        }
+    }
+}
+
+/// MCP Tool definition from the server
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpToolDef {
+    pub name: String,
+    pub description: Option<String>,
+    #[serde(rename = "inputSchema")]
+    pub input_schema: Option<serde_json::Value>,
+}
+
+impl McpClient {
+    /// Connect to an MCP server
+    pub fn connect(server: &McpServer) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        use std::io::BufReader;
+        use std::process::{Command, Stdio};
+
+        let mut cmd = Command::new(&server.command);
+        cmd.args(&server.args);
+
+        for (key, value) in &server.env {
+            cmd.env(key, value);
+        }
+
+        cmd.stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+
+        let mut child = cmd.spawn()
+            .map_err(|e| format!("Failed to spawn MCP server {}: {}", server.name, e))?;
+
+        let stdin = child.stdin.take()
+            .ok_or("Failed to get stdin for MCP server")?;
+        let stdout = child.stdout.take()
+            .ok_or("Failed to get stdout for MCP server")?;
+
+        Ok(Self {
+            stdin: Some(stdin),
+            stdout: Some(BufReader::new(stdout)),
+            request_id: std::sync::atomic::AtomicU64::new(1),
+            tools: vec![],
+            server_name: server.name.clone(),
+        })
+    }
+
+    /// Get next request ID
+    fn next_id(&self) -> u64 {
+        self.request_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Send a JSON-RPC request and get response
+    fn send_request(&mut self, method: &str, params: Option<serde_json::Value>)
+        -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>>
+    {
+        use std::io::{BufRead, Write};
+
+        let id = self.next_id();
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": method,
+            "params": params.unwrap_or(serde_json::json!({}))
+        });
+
+        // Write request
+        let request_str = serde_json::to_string(&request)?;
+        let stdin = self.stdin.as_mut().ok_or("MCP stdin not available")?;
+        writeln!(stdin, "{}", request_str)?;
+        stdin.flush()?;
+
+        // Read response (may need multiple attempts for async servers)
+        let stdout = self.stdout.as_mut().ok_or("MCP stdout not available")?;
+        let mut line = String::new();
+        loop {
+            line.clear();
+            if stdout.read_line(&mut line)? == 0 {
+                return Err("MCP server closed connection".into());
+            }
+
+            if line.trim().is_empty() {
+                continue;
+            }
+
+            // Try to parse as JSON-RPC response
+            if let Ok(response) = serde_json::from_str::<serde_json::Value>(&line) {
+                // Check if this is our response
+                if response.get("id").and_then(|v| v.as_u64()) == Some(id) {
+                    if let Some(error) = response.get("error") {
+                        return Err(format!("MCP error: {}", error).into());
+                    }
+                    return Ok(response.get("result").cloned().unwrap_or(serde_json::json!(null)));
+                }
+                // If it's a notification, continue reading
+            }
+        }
+    }
+
+    /// Initialize the MCP connection
+    pub fn initialize(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let params = serde_json::json!({
+            "protocolVersion": "2024-11-05",
+            "capabilities": {
+                "roots": { "listChanged": true },
+                "sampling": {}
+            },
+            "clientInfo": {
+                "name": "ganesha",
+                "version": "3.0.0"
+            }
+        });
+
+        let result = self.send_request("initialize", Some(params))?;
+
+        // Send initialized notification
+        let notification = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized"
+        });
+        use std::io::Write;
+        let stdin = self.stdin.as_mut().ok_or("MCP stdin not available")?;
+        writeln!(stdin, "{}", serde_json::to_string(&notification)?)?;
+        stdin.flush()?;
+
+        Ok(())
+    }
+
+    /// List available tools from the server
+    pub fn list_tools(&mut self) -> Result<Vec<McpToolDef>, Box<dyn std::error::Error + Send + Sync>> {
+        let result = self.send_request("tools/list", None)?;
+
+        let tools: Vec<McpToolDef> = if let Some(tools_array) = result.get("tools") {
+            serde_json::from_value(tools_array.clone()).unwrap_or_default()
+        } else {
+            vec![]
+        };
+
+        self.tools = tools.clone();
+        Ok(tools)
+    }
+
+    /// Call a tool
+    pub fn call_tool(&mut self, name: &str, arguments: serde_json::Value)
+        -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>>
+    {
+        let params = serde_json::json!({
+            "name": name,
+            "arguments": arguments
+        });
+
+        self.send_request("tools/call", Some(params))
+    }
+}
+
+/// Global MCP client registry
+static MCP_CLIENTS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, McpClient>>>
+    = std::sync::OnceLock::new();
+
+fn get_clients() -> &'static std::sync::Mutex<std::collections::HashMap<String, McpClient>> {
+    MCP_CLIENTS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Connect to an MCP server and initialize it
+pub fn connect_mcp_server(server: &McpServer) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    connect_mcp_server_verbose(server, true)
+}
+
+/// Connect to an MCP server with optional verbose output
+pub fn connect_mcp_server_verbose(server: &McpServer, verbose: bool) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let mut client = McpClient::connect(server)?;
+    client.initialize()?;
+    let tools = client.list_tools()?;
+
+    if verbose {
+        println!("  Connected to {} with {} tools:", server.name, tools.len());
+        for tool in &tools {
+            println!("    - {}: {}", tool.name, tool.description.as_deref().unwrap_or(""));
+        }
+    }
+
+    let mut clients = get_clients().lock().unwrap();
+    clients.insert(server.name.clone(), client);
+    Ok(())
+}
+
+/// List tools from a connected MCP server
+pub fn list_mcp_tools(server_name: &str) -> Option<Vec<McpToolDef>> {
+    let clients = get_clients().lock().unwrap();
+    clients.get(server_name).map(|c| c.tools.clone())
+}
+
 /// Call an MCP tool
-pub async fn call_mcp_tool(
+pub fn call_mcp_tool(
     server_name: &str,
     tool_name: &str,
     args: serde_json::Value,
-    manager: &McpManager,
-) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-    // For now, this is a placeholder - actual MCP protocol implementation
-    // would involve JSON-RPC over stdio to the server process
+) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+    let mut clients = get_clients().lock().unwrap();
+    let client = clients.get_mut(server_name)
+        .ok_or_else(|| format!("MCP server {} not connected", server_name))?;
 
-    Err(format!(
-        "MCP tool call not yet implemented: {}::{}",
-        server_name, tool_name
-    ).into())
+    client.call_tool(tool_name, args)
+}
+
+/// Get all connected MCP servers and their tools
+pub fn get_all_mcp_tools() -> Vec<(String, Vec<McpToolDef>)> {
+    let clients = get_clients().lock().unwrap();
+    clients.iter()
+        .map(|(name, client)| (name.clone(), client.tools.clone()))
+        .collect()
+}
+
+/// Shutdown all MCP clients cleanly
+/// Call this before program exit to avoid tokio runtime panics
+pub fn shutdown_mcp_clients() {
+    let mut clients = get_clients().lock().unwrap();
+    // Clear all clients - their child processes will be killed
+    clients.clear();
+}
+
+/// Leak MCP clients to prevent drop during tokio shutdown
+/// The child processes will be cleaned up when the main process exits
+pub fn leak_mcp_clients() {
+    let mut clients = get_clients().lock().unwrap();
+    // Take ownership and forget each client to prevent Drop from running
+    for (_, client) in clients.drain() {
+        std::mem::forget(client);
+    }
 }
 
 #[cfg(test)]

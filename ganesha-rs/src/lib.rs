@@ -52,6 +52,9 @@ pub mod docs;
 // Safety system - multi-layered protection against dangerous actions
 pub mod safety;
 
+// Pretty output formatting
+pub mod pretty;
+
 // Smell Test - Ganesha's trunk detects the rotten (always available for validation)
 pub mod smell;
 

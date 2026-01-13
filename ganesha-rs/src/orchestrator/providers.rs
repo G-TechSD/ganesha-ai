@@ -368,37 +368,15 @@ impl ProviderManager {
     fn default_endpoints() -> HashMap<String, ProviderEndpoint> {
         let mut endpoints = HashMap::new();
 
-        // LM Studio - BEAST (primary local)
-        endpoints.insert("beast".into(), ProviderEndpoint {
+        // LM Studio - localhost (user can add remote servers via settings)
+        endpoints.insert("lmstudio".into(), ProviderEndpoint {
             provider_type: ProviderType::LmStudio,
-            name: "LM Studio BEAST".into(),
-            base_url: "http://192.168.245.155:1234".into(),
-            auth: AuthMethod::None,
-            default_model: "gpt-oss-20b".into(),
-            enabled: true,
-            priority: 1,
-        });
-
-        // LM Studio - BEDROOM (fast/vision)
-        endpoints.insert("bedroom".into(), ProviderEndpoint {
-            provider_type: ProviderType::LmStudio,
-            name: "LM Studio BEDROOM".into(),
-            base_url: "http://192.168.27.182:1234".into(),
-            auth: AuthMethod::None,
-            default_model: "ministral-3-3b".into(),
-            enabled: true,
-            priority: 2,
-        });
-
-        // LM Studio - localhost
-        endpoints.insert("local".into(), ProviderEndpoint {
-            provider_type: ProviderType::LmStudio,
-            name: "LM Studio Local".into(),
+            name: "LM Studio (Local)".into(),
             base_url: "http://localhost:1234".into(),
             auth: AuthMethod::None,
             default_model: "default".into(),
             enabled: true,
-            priority: 3,
+            priority: 1,
         });
 
         // OpenRouter - Aggregator (most users have this before local setup)

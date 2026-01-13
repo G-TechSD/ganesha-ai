@@ -487,7 +487,7 @@ mod tests {
         let goal = Goal {
             id: Uuid::new_v4(),
             created_at: Utc::now(),
-            description: "Build Ganesha 2.0".into(),
+            description: "Build Ganesha 3.0".into(),
             status: GoalStatus::Active,
             progress: 0.3,
             milestones: vec![

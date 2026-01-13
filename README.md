@@ -45,30 +45,43 @@ Pre-built binaries for the Rust version (v3.0.0):
 
 | Platform | Architecture | Download |
 |----------|-------------|----------|
-| **Linux** | x86_64 | [ganesha-linux-x86_64.tar.gz](https://github.com/G-TechSD/ganesha-ai/releases/latest/download/ganesha-linux-x86_64.tar.gz) |
-| **Linux** | ARM64 | [ganesha-linux-arm64.tar.gz](https://github.com/G-TechSD/ganesha-ai/releases/latest/download/ganesha-linux-arm64.tar.gz) |
-| **macOS** | Intel | [ganesha-macos-x86_64.tar.gz](https://github.com/G-TechSD/ganesha-ai/releases/latest/download/ganesha-macos-x86_64.tar.gz) |
-| **macOS** | Apple Silicon | [ganesha-macos-arm64.tar.gz](https://github.com/G-TechSD/ganesha-ai/releases/latest/download/ganesha-macos-arm64.tar.gz) |
-| **Windows** | x86_64 | [ganesha-windows-x86_64.zip](https://github.com/G-TechSD/ganesha-ai/releases/latest/download/ganesha-windows-x86_64.zip) |
+| **Linux** | x86_64 | [ganesha-linux-x86_64.tar.gz](https://bill-dev-linux-1/gtechsd/ganesha-ai/-/releases/permalink/latest/downloads/ganesha-linux-x86_64.tar.gz) |
+| **Linux** | ARM64 | [ganesha-linux-aarch64.tar.gz](https://bill-dev-linux-1/gtechsd/ganesha-ai/-/releases/permalink/latest/downloads/ganesha-linux-aarch64.tar.gz) |
+| **macOS** | Intel | [ganesha-macos-x86_64.tar.gz](https://bill-dev-linux-1/gtechsd/ganesha-ai/-/releases/permalink/latest/downloads/ganesha-macos-x86_64.tar.gz) |
+| **macOS** | Apple Silicon | [ganesha-macos-aarch64.tar.gz](https://bill-dev-linux-1/gtechsd/ganesha-ai/-/releases/permalink/latest/downloads/ganesha-macos-aarch64.tar.gz) |
+| **Windows** | x86_64 | [ganesha-windows-x86_64.zip](https://bill-dev-linux-1/gtechsd/ganesha-ai/-/releases/permalink/latest/downloads/ganesha-windows-x86_64.zip) |
 
-### Quick Install (Linux/macOS)
+### Quick Install
 
+**Linux/macOS (one-liner):**
 ```bash
-# Download and install latest release
-curl -fsSL https://raw.githubusercontent.com/G-TechSD/ganesha-ai/main/install.sh | bash
+curl -sSL https://bill-dev-linux-1/gtechsd/ganesha-ai/-/releases/permalink/latest/downloads/install.sh | bash
+```
+
+**Windows (PowerShell):**
+```powershell
+iwr -useb https://bill-dev-linux-1/gtechsd/ganesha-ai/-/releases/permalink/latest/downloads/install.ps1 | iex
+```
+
+### Self-Install from Binary
+
+If you've downloaded the binary directly:
+```bash
+# Run with --install flag to set up system-wide
+./ganesha --install
 ```
 
 ### Manual Install
 
 ```bash
 # Download for your platform
-wget https://github.com/G-TechSD/ganesha-ai/releases/latest/download/ganesha-linux-x86_64.tar.gz
+wget https://bill-dev-linux-1/gtechsd/ganesha-ai/-/releases/permalink/latest/downloads/ganesha-linux-x86_64.tar.gz
 
 # Extract
 tar -xzf ganesha-linux-x86_64.tar.gz
 
 # Move to PATH
-sudo mv ganesha /usr/local/bin/
+mv ganesha-linux-x86_64/ganesha ~/.local/bin/
 
 # Verify
 ganesha --version
@@ -308,7 +321,7 @@ MIT License - See LICENSE file.
 ## Author
 
 **G-Tech SD**
-- GitHub: [@G-TechSD](https://github.com/G-TechSD)
-- Repository: [ganesha-ai](https://github.com/G-TechSD/ganesha-ai)
+- GitLab: [gtechsd/ganesha-ai](https://bill-dev-linux-1/gtechsd/ganesha-ai)
+- GitHub: [G-TechSD/ganesha-ai](https://github.com/G-TechSD/ganesha-ai)
 
 *The first AI-powered system control tool. Predates the rest.*

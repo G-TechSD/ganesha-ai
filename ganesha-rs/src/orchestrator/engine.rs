@@ -14,6 +14,7 @@ use super::tools::{execute_tool, ToolRegistry};
 use super::wiggum::{LlmVerifier, VerificationResult, WiggumConfig, WiggumLoop};
 use super::memory::{GlobalMemory, SessionRecord, SessionOutcome, Goal, GoalStatus};
 use super::{ForkedContext, MiniMeTask, ModelTier, Orchestrator, ProviderConfig};
+use crate::pretty;
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -285,8 +286,8 @@ When the task is complete, summarize what was accomplished.
                     tool_call_id: None,
                 });
 
-                // Print the response
-                println!("\n\x1b[1;32m{}\x1b[0m", response);
+                // Print the response with pretty formatting
+                pretty::print_ganesha_response(&response);
 
                 // Check if task seems complete
                 if self.is_task_complete(&response) {

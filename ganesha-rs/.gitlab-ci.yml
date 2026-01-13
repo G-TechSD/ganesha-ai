@@ -1,0 +1,284 @@
+# Ganesha CI/CD Pipeline
+# Builds and releases for Linux, macOS, and Windows
+
+stages:
+  - build
+  - package
+  - release
+
+variables:
+  CARGO_HOME: ${CI_PROJECT_DIR}/.cargo
+  RUST_BACKTRACE: "1"
+
+# Cache Cargo dependencies
+.rust-cache: &rust-cache
+  cache:
+    key: ${CI_JOB_NAME}
+    paths:
+      - .cargo/
+      - target/
+
+# ============================================================================
+# BUILD STAGE
+# ============================================================================
+
+build:linux-x86_64:
+  stage: build
+  image: rust:latest
+  <<: *rust-cache
+  script:
+    - rustup target add x86_64-unknown-linux-gnu
+    - cargo build --release --target x86_64-unknown-linux-gnu
+  artifacts:
+    paths:
+      - target/x86_64-unknown-linux-gnu/release/ganesha
+    expire_in: 1 hour
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_PIPELINE_SOURCE == "web"
+
+build:linux-aarch64:
+  stage: build
+  image: rust:latest
+  <<: *rust-cache
+  before_script:
+    - apt-get update && apt-get install -y gcc-aarch64-linux-gnu
+    - rustup target add aarch64-unknown-linux-gnu
+  script:
+    - |
+      cat >> .cargo/config.toml << EOF
+      [target.aarch64-unknown-linux-gnu]
+      linker = "aarch64-linux-gnu-gcc"
+      EOF
+    - cargo build --release --target aarch64-unknown-linux-gnu
+  artifacts:
+    paths:
+      - target/aarch64-unknown-linux-gnu/release/ganesha
+    expire_in: 1 hour
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_PIPELINE_SOURCE == "web"
+
+build:windows-x86_64:
+  stage: build
+  image: rust:latest
+  <<: *rust-cache
+  before_script:
+    - apt-get update && apt-get install -y mingw-w64
+    - rustup target add x86_64-pc-windows-gnu
+  script:
+    - cargo build --release --target x86_64-pc-windows-gnu
+  artifacts:
+    paths:
+      - target/x86_64-pc-windows-gnu/release/ganesha.exe
+    expire_in: 1 hour
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_PIPELINE_SOURCE == "web"
+
+# macOS builds require macOS runners - skip if not available
+build:macos-x86_64:
+  stage: build
+  tags:
+    - macos
+  <<: *rust-cache
+  script:
+    - rustup target add x86_64-apple-darwin
+    - cargo build --release --target x86_64-apple-darwin
+  artifacts:
+    paths:
+      - target/x86_64-apple-darwin/release/ganesha
+    expire_in: 1 hour
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_PIPELINE_SOURCE == "web"
+  allow_failure: true  # Skip if no macOS runner
+
+build:macos-aarch64:
+  stage: build
+  tags:
+    - macos
+    - arm64
+  <<: *rust-cache
+  script:
+    - rustup target add aarch64-apple-darwin
+    - cargo build --release --target aarch64-apple-darwin
+  artifacts:
+    paths:
+      - target/aarch64-apple-darwin/release/ganesha
+    expire_in: 1 hour
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_PIPELINE_SOURCE == "web"
+  allow_failure: true  # Skip if no macOS runner
+
+# ============================================================================
+# PACKAGE STAGE
+# ============================================================================
+
+package:
+  stage: package
+  image: alpine:latest
+  dependencies:
+    - build:linux-x86_64
+    - build:linux-aarch64
+    - build:windows-x86_64
+    - build:macos-x86_64
+    - build:macos-aarch64
+  before_script:
+    - apk add --no-cache zip tar
+  script:
+    - |
+      VERSION=${CI_COMMIT_TAG:-dev}
+      VERSION=${VERSION#v}  # Remove 'v' prefix if present
+      mkdir -p dist
+
+      # Package Linux x86_64
+      if [ -f target/x86_64-unknown-linux-gnu/release/ganesha ]; then
+        mkdir -p pkg/ganesha-linux-x86_64
+        cp target/x86_64-unknown-linux-gnu/release/ganesha pkg/ganesha-linux-x86_64/
+        cp scripts/install.sh pkg/ganesha-linux-x86_64/
+        cp README.md pkg/ganesha-linux-x86_64/ || true
+        cd pkg && tar -czf ../dist/ganesha-${VERSION}-linux-x86_64.tar.gz ganesha-linux-x86_64 && cd ..
+        rm -rf pkg/ganesha-linux-x86_64
+      fi
+
+      # Package Linux aarch64
+      if [ -f target/aarch64-unknown-linux-gnu/release/ganesha ]; then
+        mkdir -p pkg/ganesha-linux-aarch64
+        cp target/aarch64-unknown-linux-gnu/release/ganesha pkg/ganesha-linux-aarch64/
+        cp scripts/install.sh pkg/ganesha-linux-aarch64/
+        cp README.md pkg/ganesha-linux-aarch64/ || true
+        cd pkg && tar -czf ../dist/ganesha-${VERSION}-linux-aarch64.tar.gz ganesha-linux-aarch64 && cd ..
+        rm -rf pkg/ganesha-linux-aarch64
+      fi
+
+      # Package Windows
+      if [ -f target/x86_64-pc-windows-gnu/release/ganesha.exe ]; then
+        mkdir -p pkg/ganesha-windows-x86_64
+        cp target/x86_64-pc-windows-gnu/release/ganesha.exe pkg/ganesha-windows-x86_64/
+        cp scripts/install.ps1 pkg/ganesha-windows-x86_64/
+        cp README.md pkg/ganesha-windows-x86_64/ || true
+        cd pkg && zip -rq ../dist/ganesha-${VERSION}-windows-x86_64.zip ganesha-windows-x86_64 && cd ..
+        rm -rf pkg/ganesha-windows-x86_64
+      fi
+
+      # Package macOS x86_64
+      if [ -f target/x86_64-apple-darwin/release/ganesha ]; then
+        mkdir -p pkg/ganesha-macos-x86_64
+        cp target/x86_64-apple-darwin/release/ganesha pkg/ganesha-macos-x86_64/
+        cp scripts/install.sh pkg/ganesha-macos-x86_64/
+        cp README.md pkg/ganesha-macos-x86_64/ || true
+        cd pkg && tar -czf ../dist/ganesha-${VERSION}-macos-x86_64.tar.gz ganesha-macos-x86_64 && cd ..
+        rm -rf pkg/ganesha-macos-x86_64
+      fi
+
+      # Package macOS aarch64
+      if [ -f target/aarch64-apple-darwin/release/ganesha ]; then
+        mkdir -p pkg/ganesha-macos-aarch64
+        cp target/aarch64-apple-darwin/release/ganesha pkg/ganesha-macos-aarch64/
+        cp scripts/install.sh pkg/ganesha-macos-aarch64/
+        cp README.md pkg/ganesha-macos-aarch64/ || true
+        cd pkg && tar -czf ../dist/ganesha-${VERSION}-macos-aarch64.tar.gz ganesha-macos-aarch64 && cd ..
+        rm -rf pkg/ganesha-macos-aarch64
+      fi
+
+      # Copy install scripts
+      cp scripts/install.sh dist/
+      cp scripts/install.ps1 dist/
+
+      # Generate checksums
+      cd dist
+      for f in *.tar.gz *.zip; do
+        [ -f "$f" ] && sha256sum "$f" > "${f}.sha256"
+      done
+      cd ..
+
+      echo "=== Packages created ==="
+      ls -la dist/
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_PIPELINE_SOURCE == "web"
+
+# ============================================================================
+# RELEASE STAGE
+# ============================================================================
+
+release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  dependencies:
+    - package
+  script:
+    - echo "Creating release for ${CI_COMMIT_TAG}"
+  release:
+    tag_name: $CI_COMMIT_TAG
+    name: "Ganesha $CI_COMMIT_TAG"
+    description: |
+      ## Installation
+
+      **Linux/macOS (one-liner):**
+      ```bash
+      curl -sSL ${CI_PROJECT_URL}/-/releases/${CI_COMMIT_TAG}/downloads/install.sh | bash
+      ```
+
+      **Windows (PowerShell):**
+      ```powershell
+      iwr -useb ${CI_PROJECT_URL}/-/releases/${CI_COMMIT_TAG}/downloads/install.ps1 | iex
+      ```
+
+      ## Downloads
+
+      | Platform | Architecture | Download |
+      |----------|--------------|----------|
+      | Linux | x86_64 | [ganesha-linux-x86_64.tar.gz](${CI_PROJECT_URL}/-/releases/${CI_COMMIT_TAG}/downloads/ganesha-linux-x86_64.tar.gz) |
+      | Linux | ARM64 | [ganesha-linux-aarch64.tar.gz](${CI_PROJECT_URL}/-/releases/${CI_COMMIT_TAG}/downloads/ganesha-linux-aarch64.tar.gz) |
+      | macOS | Intel | [ganesha-macos-x86_64.tar.gz](${CI_PROJECT_URL}/-/releases/${CI_COMMIT_TAG}/downloads/ganesha-macos-x86_64.tar.gz) |
+      | macOS | Apple Silicon | [ganesha-macos-aarch64.tar.gz](${CI_PROJECT_URL}/-/releases/${CI_COMMIT_TAG}/downloads/ganesha-macos-aarch64.tar.gz) |
+      | Windows | x86_64 | [ganesha-windows-x86_64.zip](${CI_PROJECT_URL}/-/releases/${CI_COMMIT_TAG}/downloads/ganesha-windows-x86_64.zip) |
+
+      ## Verification
+
+      SHA256 checksums are available for each download.
+    assets:
+      links:
+        - name: "ganesha-linux-x86_64.tar.gz"
+          url: "${CI_PROJECT_URL}/-/jobs/${CI_JOB_ID}/artifacts/file/dist/ganesha-${CI_COMMIT_TAG#v}-linux-x86_64.tar.gz"
+          filepath: "/ganesha-linux-x86_64.tar.gz"
+          link_type: "package"
+        - name: "ganesha-linux-aarch64.tar.gz"
+          url: "${CI_PROJECT_URL}/-/jobs/${CI_JOB_ID}/artifacts/file/dist/ganesha-${CI_COMMIT_TAG#v}-linux-aarch64.tar.gz"
+          filepath: "/ganesha-linux-aarch64.tar.gz"
+          link_type: "package"
+        - name: "ganesha-windows-x86_64.zip"
+          url: "${CI_PROJECT_URL}/-/jobs/${CI_JOB_ID}/artifacts/file/dist/ganesha-${CI_COMMIT_TAG#v}-windows-x86_64.zip"
+          filepath: "/ganesha-windows-x86_64.zip"
+          link_type: "package"
+        - name: "install.sh"
+          url: "${CI_PROJECT_URL}/-/jobs/${CI_JOB_ID}/artifacts/file/dist/install.sh"
+          filepath: "/install.sh"
+          link_type: "other"
+        - name: "install.ps1"
+          url: "${CI_PROJECT_URL}/-/jobs/${CI_JOB_ID}/artifacts/file/dist/install.ps1"
+          filepath: "/install.ps1"
+          link_type: "other"
+  rules:
+    - if: $CI_COMMIT_TAG
+
+# ============================================================================
+# TEST STAGE (optional, runs on merge requests)
+# ============================================================================
+
+test:
+  stage: build
+  image: rust:latest
+  <<: *rust-cache
+  script:
+    - cargo test --release
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
