@@ -644,11 +644,13 @@ EXAMPLES:
         let output = if cfg!(target_os = "windows") {
             Command::new("cmd")
                 .args(["/C", command])
+                .current_dir(&self.working_directory)
                 .output()
                 .await?
         } else {
             Command::new("sh")
                 .args(["-c", command])
+                .current_dir(&self.working_directory)
                 .output()
                 .await?
         };
@@ -730,6 +732,13 @@ When asked to analyze/explore/understand code:
 - Use: wc -l <file> for file sizes
 - Use: head -100 <file> for previews
 - Keep exploring until you have enough context to answer fully
+
+IMAGE FILE TASKS - CRITICAL:
+When user asks to "describe", "analyze", "what's in", "show me", or "tell me about" an IMAGE file:
+- You CANNOT see visual content of images - you have NO vision capability
+- DO NOT just run "file" or "ls" on images when asked for visual description
+- Instead, respond with: {{"response":"I cannot see the visual contents of images. I can only provide file metadata (dimensions, format). To describe what's IN an image, you'd need a vision-capable model. Would you like me to get the file metadata instead?"}}
+- Only run file/exiftool commands if user explicitly asks for metadata, not visual description
 
 WHEN TO ASK QUESTIONS (only these cases):
 - Truly ambiguous requirements with trade-offs

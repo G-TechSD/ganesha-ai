@@ -228,7 +228,18 @@ async fn main() {
         std::process::exit(1);
     }
 
-    print_info(&format!("Provider: {}", available.first().unwrap()));
+    // Show all available providers with primary/secondary designation
+    if available.len() == 1 {
+        print_info(&format!("Provider: {}", available[0]));
+    } else {
+        print_info(&format!("Primary: {} | Secondary: {}",
+            available[0],
+            available.get(1).map(|s| *s).unwrap_or("none")
+        ));
+        if available.len() > 2 {
+            print_info(&format!("Fallbacks: {}", available[2..].join(", ")));
+        }
+    }
 
     // Test mode - run comprehensive tests
     if args.test {
@@ -435,6 +446,90 @@ async fn run_repl<C: core::ConsentHandler>(
     // Initialize workflow engine
     let mut workflow = WorkflowEngine::new();
 
+    // Configure vision from saved config (not hardcoded)
+    // Read the ProviderManager's config to get the vision provider setting
+    let config_path = dirs::home_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join(".ganesha")
+        .join("config.json");
+
+    let vision_configured = if config_path.exists() {
+        // Try to read vision config from saved settings
+        if let Ok(content) = std::fs::read_to_string(&config_path) {
+            if let Ok(config) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(vision) = config.get("tiers").and_then(|t| t.get("vision")) {
+                    let endpoint = vision.get("endpoint").and_then(|e| e.as_str()).unwrap_or("");
+                    let model = vision.get("model").and_then(|m| m.as_str()).unwrap_or("");
+                    let description = vision.get("description").and_then(|d| d.as_str()).unwrap_or("Vision");
+
+                    if !endpoint.is_empty() && !model.is_empty() {
+                        // Check if the vision endpoint is actually available
+                        let endpoints = config.get("endpoints");
+                        let endpoint_url = endpoints
+                            .and_then(|e| e.get(endpoint))
+                            .and_then(|e| e.get("base_url"))
+                            .and_then(|u| u.as_str())
+                            .unwrap_or("");
+
+                        if !endpoint_url.is_empty() {
+                            let check_url = format!("{}/v1/models", endpoint_url);
+                            let is_online = reqwest::blocking::Client::builder()
+                                .timeout(std::time::Duration::from_secs(2))
+                                .build()
+                                .ok()
+                                .and_then(|c| c.get(&check_url).send().ok())
+                                .map(|r| r.status().is_success())
+                                .unwrap_or(false);
+
+                            if is_online {
+                                workflow.configure_vision(false, Some((endpoint.to_string(), model.to_string())));
+                                print_info(&format!("Vision: {} ({})", description, model));
+                                true
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
+    // Fallback: auto-detect vision providers if not configured
+    if !vision_configured {
+        // Check available providers for vision capability
+        let check_provider = |url: &str| -> bool {
+            reqwest::blocking::Client::builder()
+                .timeout(std::time::Duration::from_secs(2))
+                .build()
+                .ok()
+                .and_then(|c| c.get(&format!("{}/v1/models", url)).send().ok())
+                .map(|r| r.status().is_success())
+                .unwrap_or(false)
+        };
+
+        // Check secondary/vision servers (these typically have vision models)
+        if check_provider("http://192.168.27.182:1234") {
+            workflow.configure_vision(false, Some(("bedroom".to_string(), "default".to_string())));
+            print_info("Vision: bedroom server (auto-detected)");
+        } else if std::env::var("ANTHROPIC_API_KEY").is_ok() {
+            workflow.configure_vision(false, Some(("anthropic".to_string(), "claude-sonnet-4-5-20250514".to_string())));
+            print_info("Vision: Anthropic Claude (fallback)");
+        }
+    }
+
     // Session log for /log command
     let mut session_log: Vec<String> = vec![
         format!("=== Ganesha Session Started: {} ===", Local::now().format("%Y-%m-%d %H:%M:%S")),
@@ -533,6 +628,7 @@ async fn run_repl<C: core::ConsentHandler>(
                     println!("                 • Permissions");
 
                     println!("\n{}", style("CONTEXT:").yellow().bold());
+                    println!("  cd <path>      Change working directory");
                     println!("  /pwd           Show current working directory");
                     println!("  /mode          Show current mode only");
 
@@ -855,6 +951,47 @@ with real GitLab repositories and documentation.
 
                 if input == "/pwd" {
                     println!("{} Working directory: {}", style("📁").cyan(), engine.working_directory.display());
+                    continue;
+                }
+
+                // Handle cd command - change working directory
+                if input.starts_with("cd ") || input == "cd" {
+                    let path_str = input.strip_prefix("cd").unwrap_or("").trim();
+
+                    // Handle cd with no args -> go to home
+                    let target_path = if path_str.is_empty() {
+                        dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/"))
+                    } else {
+                        // Handle ~ expansion
+                        let expanded = if path_str.starts_with("~/") {
+                            dirs::home_dir()
+                                .unwrap_or_else(|| std::path::PathBuf::from("/"))
+                                .join(&path_str[2..])
+                        } else if path_str == "~" {
+                            dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/"))
+                        } else if path_str.starts_with('/') {
+                            std::path::PathBuf::from(path_str)
+                        } else {
+                            // Relative path
+                            engine.working_directory.join(path_str)
+                        };
+                        expanded
+                    };
+
+                    // Canonicalize to resolve .. and .
+                    match target_path.canonicalize() {
+                        Ok(canonical) => {
+                            if canonical.is_dir() {
+                                engine.working_directory = canonical.clone();
+                                println!("{} {}", style("📁").cyan(), canonical.display());
+                            } else {
+                                print_error(&format!("Not a directory: {}", target_path.display()));
+                            }
+                        }
+                        Err(_) => {
+                            print_error(&format!("No such directory: {}", target_path.display()));
+                        }
+                    }
                     continue;
                 }
 
