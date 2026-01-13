@@ -1025,7 +1025,15 @@ with real GitLab repositories and documentation.
                 }
 
                 // Process the task and capture output
-                let output = run_task_with_log(engine, input, code_mode).await;
+                // Get vision config for image analysis
+                let vision_cfg = if workflow.vision_config.is_available() {
+                    workflow.vision_config.cloud_vision_provider.as_ref()
+                        .zip(workflow.vision_config.cloud_vision_model.as_ref())
+                        .map(|(p, m)| (p.as_str(), m.as_str()))
+                } else {
+                    None
+                };
+                let output = run_task_with_log(engine, input, code_mode, vision_cfg).await;
                 session_log.push(format!("[{}] GANESHA: {}", Local::now().format("%H:%M:%S"), output));
 
                 // Auto-return to Chat mode if we auto-switched for this task
@@ -1265,11 +1273,212 @@ fn ask_multiple_choice(question: &core::MultipleChoiceQuestion) -> Option<String
     }
 }
 
+/// Check if a file is an image by extension
+fn is_image_file(path: &str) -> bool {
+    let lower = path.to_lowercase();
+    lower.ends_with(".png") || lower.ends_with(".jpg") || lower.ends_with(".jpeg")
+        || lower.ends_with(".gif") || lower.ends_with(".bmp") || lower.ends_with(".webp")
+        || lower.ends_with(".tiff") || lower.ends_with(".tif")
+}
+
+/// Extract image file paths from user input
+fn extract_image_paths(input: &str, working_dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut paths = Vec::new();
+
+    // Pattern 1: Quoted paths
+    let quoted_re = regex::Regex::new(r#"["']([^"']+\.(png|jpg|jpeg|gif|bmp|webp|tiff|tif))["']"#).ok();
+    if let Some(re) = quoted_re {
+        for cap in re.captures_iter(input) {
+            if let Some(m) = cap.get(1) {
+                let path_str = m.as_str();
+                let path = if path_str.starts_with('/') {
+                    std::path::PathBuf::from(path_str)
+                } else if path_str.starts_with("~/") {
+                    dirs::home_dir()
+                        .unwrap_or_else(|| std::path::PathBuf::from("/"))
+                        .join(&path_str[2..])
+                } else {
+                    working_dir.join(path_str)
+                };
+                if path.exists() {
+                    paths.push(path);
+                }
+            }
+        }
+    }
+
+    // Pattern 2: Unquoted file paths (with image extensions)
+    let unquoted_re = regex::Regex::new(r"(?:^|\s)([/~]?[a-zA-Z0-9_./-]+\.(png|jpg|jpeg|gif|bmp|webp|tiff|tif))(?:\s|$|[,.])")
+        .ok();
+    if let Some(re) = unquoted_re {
+        for cap in re.captures_iter(input) {
+            if let Some(m) = cap.get(1) {
+                let path_str = m.as_str();
+                let path = if path_str.starts_with('/') {
+                    std::path::PathBuf::from(path_str)
+                } else if path_str.starts_with("~/") {
+                    dirs::home_dir()
+                        .unwrap_or_else(|| std::path::PathBuf::from("/"))
+                        .join(&path_str[2..])
+                } else {
+                    working_dir.join(path_str)
+                };
+                if path.exists() && !paths.contains(&path) {
+                    paths.push(path);
+                }
+            }
+        }
+    }
+
+    paths
+}
+
+/// Check if user is asking to analyze/describe an image
+fn is_image_analysis_request(input: &str) -> bool {
+    let lower = input.to_lowercase();
+    let analysis_keywords = ["describe", "analyze", "what's in", "what is in", "tell me about",
+                             "show me", "look at", "examine", "what does", "explain"];
+    let image_keywords = ["image", "photo", "picture", "screenshot", "png", "jpg", "jpeg",
+                          "images in", "photos in", "pictures in"];
+
+    // Check for analysis keywords combined with image keywords or file extensions
+    let has_analysis = analysis_keywords.iter().any(|k| lower.contains(k));
+    let has_image_ref = image_keywords.iter().any(|k| lower.contains(k))
+        || lower.contains(".png") || lower.contains(".jpg") || lower.contains(".jpeg")
+        || lower.contains(".gif") || lower.contains(".webp");
+
+    has_analysis && has_image_ref
+}
+
+/// Find all image files in a directory
+fn find_images_in_directory(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut images = Vec::new();
+
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(ext) = path.extension() {
+                    let ext_lower = ext.to_string_lossy().to_lowercase();
+                    if matches!(ext_lower.as_str(), "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "tiff" | "tif") {
+                        images.push(path);
+                    }
+                }
+            }
+        }
+    }
+
+    images
+}
+
+/// Analyze an image using the vision model
+async fn analyze_image_with_vision(
+    image_path: &std::path::Path,
+    query: &str,
+    vision_provider: &str,
+    vision_model: &str,
+) -> Result<String, String> {
+    use base64_lib::Engine;
+    use crate::orchestrator::vision::{VisionAnalyzer, VisionConfig};
+
+    // Read and encode the image
+    let image_data = std::fs::read(image_path)
+        .map_err(|e| format!("Failed to read image: {}", e))?;
+    let base64_image = base64_lib::engine::general_purpose::STANDARD.encode(&image_data);
+
+    // Determine the endpoint URL from provider name
+    let endpoint = match vision_provider {
+        "bedroom" => "http://192.168.27.182:1234/v1/chat/completions",
+        "beast" => "http://192.168.245.155:1234/v1/chat/completions",
+        "anthropic" => "https://api.anthropic.com/v1/messages",
+        "openai" => "https://api.openai.com/v1/chat/completions",
+        _ if vision_provider.starts_with("http") => vision_provider,
+        _ => "http://192.168.27.182:1234/v1/chat/completions", // Default to bedroom
+    };
+
+    // For Anthropic, we need special handling
+    if vision_provider == "anthropic" {
+        return analyze_image_anthropic(&base64_image, query, vision_model).await;
+    }
+
+    // Use VisionAnalyzer for OpenAI-compatible endpoints
+    let config = VisionConfig {
+        endpoint: endpoint.to_string(),
+        model: vision_model.to_string(),
+        timeout: std::time::Duration::from_secs(60),
+    };
+
+    let analyzer = VisionAnalyzer::new(config);
+
+    // Query the image
+    analyzer.query_screen(&base64_image, query).await
+        .map_err(|e| format!("Vision analysis failed: {}", e))
+}
+
+/// Analyze image using Anthropic API (different format)
+async fn analyze_image_anthropic(
+    base64_image: &str,
+    query: &str,
+    model: &str,
+) -> Result<String, String> {
+    let api_key = std::env::var("ANTHROPIC_API_KEY")
+        .map_err(|_| "ANTHROPIC_API_KEY not set")?;
+
+    let client = reqwest::Client::new();
+
+    let request = serde_json::json!({
+        "model": model,
+        "max_tokens": 1024,
+        "messages": [{
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": base64_image
+                    }
+                },
+                {
+                    "type": "text",
+                    "text": query
+                }
+            ]
+        }]
+    });
+
+    let response = client
+        .post("https://api.anthropic.com/v1/messages")
+        .header("x-api-key", &api_key)
+        .header("anthropic-version", "2023-06-01")
+        .header("content-type", "application/json")
+        .json(&request)
+        .send()
+        .await
+        .map_err(|e| format!("API request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("Anthropic API error {}: {}", status, body));
+    }
+
+    let json: serde_json::Value = response.json().await
+        .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+    Ok(json["content"][0]["text"]
+        .as_str()
+        .unwrap_or("Unable to analyze image")
+        .to_string())
+}
+
 /// Run a task autonomously - execute commands, analyze results, continue until done
 async fn run_task_with_log<C: core::ConsentHandler>(
     engine: &mut GaneshaEngine<ProviderChain, C>,
     task: &str,
     code_mode: bool,
+    vision_config: Option<(&str, &str)>, // (provider, model)
 ) -> String {
     use rand::seq::SliceRandom;
 
@@ -1278,6 +1487,68 @@ async fn run_task_with_log<C: core::ConsentHandler>(
     } else {
         task.to_string()
     };
+
+    // Check if this is an image analysis request
+    if is_image_analysis_request(&task) {
+        let mut image_paths = extract_image_paths(&task, &engine.working_directory);
+
+        // If no specific images found but user mentions "images in this folder" etc,
+        // find images in the current directory
+        let lower_task = task.to_lowercase();
+        if image_paths.is_empty() &&
+            (lower_task.contains("images in") || lower_task.contains("photos in")
+             || lower_task.contains("pictures in") || lower_task.contains("this folder")
+             || lower_task.contains("this directory") || lower_task.contains("current folder"))
+        {
+            image_paths = find_images_in_directory(&engine.working_directory);
+
+            if image_paths.is_empty() {
+                println!("{} No image files found in {}",
+                    style("ℹ").cyan(), engine.working_directory.display());
+                return format!("No image files found in {}", engine.working_directory.display());
+            } else {
+                println!("{} Found {} image(s) in {}",
+                    style("ℹ").cyan(), image_paths.len(), engine.working_directory.display());
+            }
+        }
+
+        if !image_paths.is_empty() {
+            // We have image files to analyze
+            if let Some((provider, model)) = vision_config {
+                println!("{} Analyzing {} image(s) with vision model...",
+                    style("👁️").cyan(), image_paths.len());
+
+                let mut results = Vec::new();
+                for (i, path) in image_paths.iter().enumerate() {
+                    let query = format!("Describe this image in detail. What do you see?");
+                    println!("{} [{}/{}] Analyzing {}...",
+                        style("→").dim(), i + 1, image_paths.len(), path.file_name().unwrap_or_default().to_string_lossy());
+
+                    match analyze_image_with_vision(path, &query, provider, model).await {
+                        Ok(analysis) => {
+                            println!("\n{} {}", style("Image:").bold(), path.display());
+                            println!("{}", style(&analysis).cyan());
+                            results.push(format!("{}: {}", path.display(), analysis));
+                        }
+                        Err(e) => {
+                            println!("{} Vision analysis failed for {}: {}",
+                                style("⚠").yellow(), path.display(), e);
+                            results.push(format!("{}: Error - {}", path.display(), e));
+                        }
+                    }
+                }
+
+                if !results.is_empty() {
+                    return results.join("\n\n");
+                }
+            } else {
+                // No vision config - let user know
+                println!("{} No vision model configured. Use /settings to configure vision.",
+                    style("ℹ").cyan());
+                return "Vision not configured. Run /settings to set up a vision model.".to_string();
+            }
+        }
+    }
 
     let mut all_outputs: Vec<String> = vec![];
     let mut actions_taken: Vec<String> = vec![];
