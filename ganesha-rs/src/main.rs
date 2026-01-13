@@ -1336,18 +1336,35 @@ fn extract_image_paths(input: &str, working_dir: &std::path::Path) -> Vec<std::p
 /// Check if user is asking to analyze/describe an image
 fn is_image_analysis_request(input: &str) -> bool {
     let lower = input.to_lowercase();
+
+    // Must have analysis intent
     let analysis_keywords = ["describe", "analyze", "what's in", "what is in", "tell me about",
                              "show me", "look at", "examine", "what does", "explain"];
-    let image_keywords = ["image", "photo", "picture", "screenshot", "png", "jpg", "jpeg",
-                          "images in", "photos in", "pictures in"];
-
-    // Check for analysis keywords combined with image keywords or file extensions
     let has_analysis = analysis_keywords.iter().any(|k| lower.contains(k));
-    let has_image_ref = image_keywords.iter().any(|k| lower.contains(k))
-        || lower.contains(".png") || lower.contains(".jpg") || lower.contains(".jpeg")
-        || lower.contains(".gif") || lower.contains(".webp");
+    if !has_analysis {
+        return false;
+    }
 
-    has_analysis && has_image_ref
+    // Must reference images specifically (not just any file)
+    let image_keywords = ["image", "photo", "picture", "screenshot",
+                          "images in", "photos in", "pictures in"];
+    let has_image_word = image_keywords.iter().any(|k| lower.contains(k));
+
+    // Or reference specific image file extensions
+    let image_extensions = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff"];
+    let has_image_extension = image_extensions.iter().any(|ext| lower.contains(ext));
+
+    // Exclude non-image file extensions that might be mentioned
+    let non_image_extensions = [".html", ".htm", ".txt", ".md", ".rs", ".py", ".js", ".json",
+                                 ".xml", ".css", ".csv", ".log", ".sh", ".toml", ".yaml", ".yml"];
+    let has_non_image = non_image_extensions.iter().any(|ext| lower.contains(ext));
+
+    // If explicitly mentioning a non-image file, don't treat as image request
+    if has_non_image && !has_image_word && !has_image_extension {
+        return false;
+    }
+
+    has_image_word || has_image_extension
 }
 
 /// Find all image files in a directory (recursive, with limit)
