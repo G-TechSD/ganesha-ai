@@ -707,8 +707,8 @@ When task complete → transition to CHAT"#,
             self.vision_config.cloud_vision_model = Some(model);
         }
 
-        // Only enable if we have a vision-capable model
-        self.vision_config.enabled = self.vision_config.is_available();
+        // Enable if we have a vision-capable model (direct check, not is_available which depends on enabled)
+        self.vision_config.enabled = primary_has_vision || self.vision_config.cloud_vision_available;
     }
 
     /// Get status summary
