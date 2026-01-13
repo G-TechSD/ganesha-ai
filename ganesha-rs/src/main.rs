@@ -16,6 +16,7 @@ mod core;
 mod flux;
 mod logging;
 mod menu;
+mod pretty;
 mod providers;
 mod orchestrator;
 mod tui;
@@ -93,6 +94,10 @@ struct Args {
     #[arg(short, long)]
     quiet: bool,
 
+    /// Bare output - only the raw response, no formatting (for scripting)
+    #[arg(long)]
+    bare: bool,
+
     /// Configure providers and tiers
     #[arg(long)]
     configure: bool,
@@ -129,6 +134,14 @@ struct Args {
     #[arg(long, value_name = "SESSION")]
     resume: Option<String>,
 
+    /// Install ganesha system-wide (non-interactive)
+    #[arg(long)]
+    install: bool,
+
+    /// Uninstall ganesha from system
+    #[arg(long)]
+    uninstall: bool,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -159,6 +172,7 @@ enum ConfigAction {
 
 #[tokio::main]
 async fn main() {
+
     let args = Args::parse();
 
     // Initialize tracing for debug output
@@ -168,7 +182,24 @@ async fn main() {
             .init();
     }
 
-    // Check if ganesha is available system-wide
+    // Set bare mode for raw output (scripting)
+    if args.bare {
+        pretty::set_bare_mode(true);
+    }
+
+    // Handle --install flag (non-interactive installation)
+    if args.install {
+        install_ganesha(false);
+        return;
+    }
+
+    // Handle --uninstall flag
+    if args.uninstall {
+        uninstall_ganesha();
+        return;
+    }
+
+    // Check if ganesha is available system-wide (interactive first-run)
     check_and_install_system_wide();
 
     // Handle subcommands
@@ -275,7 +306,7 @@ async fn main() {
         if !task.is_empty() {
             match agent.run_task(&task).await {
                 Ok(result) => {
-                    println!("\n{}", style(&result.final_response).cyan());
+                    pretty::print_ganesha_response(&result.final_response);
                     if !args.quiet {
                         println!("\n{}", style(format!(
                             "Completed {} actions in {:?}",
@@ -310,7 +341,7 @@ async fn main() {
 
                         match agent.run_task(input).await {
                             Ok(result) => {
-                                println!("\n{}", style(&result.final_response).cyan());
+                                pretty::print_ganesha_response(&result.final_response);
                             }
                             Err(e) => {
                                 print_error(&format!("Error: {}", e));
@@ -509,21 +540,24 @@ async fn run_repl<C: core::ConsentHandler>(
 
     // Fallback: auto-detect vision providers if not configured
     if !vision_configured {
-        // Check available providers for vision capability
-        let check_provider = |url: &str| -> bool {
-            reqwest::blocking::Client::builder()
+        // Check available providers for vision capability using async reqwest
+        async fn check_provider(url: &str) -> bool {
+            let client = match reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(2))
-                .build()
-                .ok()
-                .and_then(|c| c.get(&format!("{}/v1/models", url)).send().ok())
-                .map(|r| r.status().is_success())
-                .unwrap_or(false)
-        };
+                .build() {
+                    Ok(c) => c,
+                    Err(_) => return false,
+                };
+            match client.get(&format!("{}/v1/models", url)).send().await {
+                Ok(r) => r.status().is_success(),
+                Err(_) => false,
+            }
+        }
 
-        // Check secondary/vision servers (these typically have vision models)
-        if check_provider("http://192.168.27.182:1234") {
-            workflow.configure_vision(false, Some(("bedroom".to_string(), "default".to_string())));
-            print_info("Vision: bedroom server (auto-detected)");
+        // Check local LM Studio for vision capability
+        if check_provider("http://localhost:1234").await {
+            workflow.configure_vision(false, Some(("lmstudio".to_string(), "default".to_string())));
+            print_info("Vision: LM Studio (local)");
         } else if std::env::var("ANTHROPIC_API_KEY").is_ok() {
             workflow.configure_vision(false, Some(("anthropic".to_string(), "claude-sonnet-4-5-20250514".to_string())));
             print_info("Vision: Anthropic Claude (fallback)");
@@ -534,6 +568,9 @@ async fn run_repl<C: core::ConsentHandler>(
     let mut session_log: Vec<String> = vec![
         format!("=== Ganesha Session Started: {} ===", Local::now().format("%Y-%m-%d %H:%M:%S")),
     ];
+
+    // High reasoning mode - more detailed analysis
+    let mut high_reasoning = false;
 
     // Track Ctrl+C for double-press exit
     let mut last_interrupt: Option<Instant> = None;
@@ -567,8 +604,10 @@ async fn run_repl<C: core::ConsentHandler>(
     loop {
         // Show current mode in prompt
         let mode_indicator = format!("[{}]", workflow.current_mode.display_name());
-        let prompt = format!("{} {} ",
-            style(mode_indicator).dim(),
+        let high_indicator = if high_reasoning { " 🧠" } else { "" };
+        let prompt = format!("{}{} {} ",
+            style(&mode_indicator).dim(),
+            style(high_indicator).cyan(),
             style("ganesha>").cyan().bold()
         );
 
@@ -613,6 +652,7 @@ async fn run_repl<C: core::ConsentHandler>(
                     println!("  /fix           Switch to Fix/Refine mode");
                     println!("  /eval          Switch to Evaluation mode");
                     println!("  /sysadmin      Switch to SysAdmin mode (system tasks)");
+                    println!("  /high          Toggle high reasoning mode (detailed analysis)");
 
                     println!("\n{}", style("MEMORY & SESSION:").yellow().bold());
                     println!("  /recall        Show conversation history");
@@ -621,11 +661,11 @@ async fn run_repl<C: core::ConsentHandler>(
                     println!("  /log [file]    Save session transcript to file");
 
                     println!("\n{}", style("SETTINGS & CONFIGURATION:").yellow().bold());
-                    println!("  /settings      Open settings menu:");
-                    println!("                 • Providers & Models");
-                    println!("                 • Vision settings");
-                    println!("                 • MCP Servers");
-                    println!("                 • Permissions");
+                    println!("  /settings      Open settings menu");
+                    println!("  /mcp           MCP Server management:");
+                    println!("                 • Connect Playwright (web testing)");
+                    println!("                 • Connect Context7 (documentation)");
+                    println!("                 • View available tools");
 
                     println!("\n{}", style("CONTEXT:").yellow().bold());
                     println!("  cd <path>      Change working directory");
@@ -688,10 +728,10 @@ Ganesha wasn't perfect at first, but it was reliable and harmless enough
 to officially earn its name: The Remover of Obstacles.
 "#);
 
-                    println!("{}", style("GANESHA 2.0 - JANUARY 2026").yellow().bold());
+                    println!("{}", style("GANESHA 3.0 - JANUARY 2026").yellow().bold());
                     println!("{}", style("─".repeat(70)).dim());
                     println!(r#"
-Ganesha 2 is a complete rewrite in Rust - blazingly fast, memory-safe,
+Ganesha 3 is a complete rewrite in Rust - blazingly fast, memory-safe,
 and way easier to get up and running. Single binary, no dependencies,
 no Python environment headaches. Just download and run.
 
@@ -702,13 +742,13 @@ Feature set that rivals (and often exceeds) the big players:
   • Workflow modes (Planning, Development, Testing, Evaluation)
   • Wiggum verification loop for autonomous task completion
   • Vision model support for screenshot analysis
-  • MCP server integration
+  • MCP server integration for browser automation and more
   • Git expertise built-in
   • BIOS-style provider priority configuration
   • Auto-detection of available models from local servers
 
 Coming soon: Claudia Coder - an autonomous development platform that
-harnesses all the best cloud providers and Ganesha 2 itself to create
+harnesses all the best cloud providers and Ganesha 3 itself to create
 long-horizon app development projects, completing them end-to-end
 including testing and UX iteration, producing clean, polished apps
 with real GitLab repositories and documentation.
@@ -924,6 +964,19 @@ with real GitLab repositories and documentation.
                     continue;
                 }
 
+                // High reasoning mode toggle
+                if input == "/high" {
+                    high_reasoning = !high_reasoning;
+                    if high_reasoning {
+                        println!("{} High reasoning mode {} - detailed analysis enabled",
+                            style("🧠").cyan(), style("ON").green().bold());
+                    } else {
+                        println!("{} High reasoning mode {} - normal mode",
+                            style("🧠").cyan(), style("OFF").yellow());
+                    }
+                    continue;
+                }
+
                 // Auto-detect and switch mode from input
                 if let Some(detected_mode) = workflow.detect_mode(input) {
                     if detected_mode != workflow.current_mode {
@@ -1024,7 +1077,26 @@ with real GitLab repositories and documentation.
                     continue;
                 }
 
+                // Handle MCP servers
+                if input == "/mcp" {
+                    menu::show_mcp_settings();
+                    println!("\n{}", style("─".repeat(60)).dim());
+                    println!("{}", style("Back to interactive mode.").dim());
+                    println!("{}\n", style("─".repeat(60)).dim());
+                    continue;
+                }
+
                 // Process the task and capture output
+                // Re-echo user input in green for visibility when scrolling
+                print!("\x1b[1A\x1b[2K");  // Move up one line and clear it
+                println!("{}{} {} {}",
+                    style(mode_indicator).dim(),
+                    style(high_indicator).cyan(),
+                    style("ganesha>").cyan().bold(),
+                    style(input).green()
+                );
+                println!();  // Line break after prompt for readability
+
                 // Get vision config for image analysis
                 let vision_cfg = if workflow.vision_config.is_available() {
                     workflow.vision_config.cloud_vision_provider.as_ref()
@@ -1033,7 +1105,7 @@ with real GitLab repositories and documentation.
                 } else {
                     None
                 };
-                let output = run_task_with_log(engine, input, code_mode, vision_cfg).await;
+                let output = run_task_with_log(engine, input, code_mode, vision_cfg, high_reasoning).await;
                 session_log.push(format!("[{}] GANESHA: {}", Local::now().format("%H:%M:%S"), output));
 
                 // Auto-return to Chat mode if we auto-switched for this task
@@ -1084,31 +1156,223 @@ with real GitLab repositories and documentation.
     session_log.push(format!("=== Session Ended: {} ===", Local::now().format("%Y-%m-%d %H:%M:%S")));
 }
 
+/// Get the install path for the current platform
+fn get_install_path() -> std::path::PathBuf {
+    use std::path::PathBuf;
+
+    #[cfg(target_os = "windows")]
+    {
+        // Windows: %LOCALAPPDATA%\Ganesha\ganesha.exe
+        dirs::data_local_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("Ganesha")
+            .join("ganesha.exe")
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Unix: ~/.local/bin/ganesha (user-writable, doesn't need sudo)
+        dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".local")
+            .join("bin")
+            .join("ganesha")
+    }
+}
+
+/// Check if ganesha is already in PATH
+fn is_installed() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("where")
+            .arg("ganesha")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::process::Command::new("which")
+            .arg("ganesha")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+}
+
+/// Install ganesha to system (cross-platform)
+fn install_ganesha(interactive: bool) {
+    use std::env;
+    use std::fs;
+    use std::path::PathBuf;
+
+    println!("\n{}", style("═".repeat(60)).dim());
+    println!("{}", style("Ganesha Installation").cyan().bold());
+    println!("{}\n", style("═".repeat(60)).dim());
+
+    // Get current executable path
+    let current_exe = match env::current_exe() {
+        Ok(path) => path,
+        Err(e) => {
+            print_error(&format!("Cannot determine executable path: {}", e));
+            std::process::exit(1);
+        }
+    };
+
+    let install_path = get_install_path();
+
+    // Create parent directory
+    if let Some(parent) = install_path.parent() {
+        if let Err(e) = fs::create_dir_all(parent) {
+            print_error(&format!("Cannot create directory {}: {}", parent.display(), e));
+            std::process::exit(1);
+        }
+    }
+
+    println!("{} {}", style("Source:").dim(), current_exe.display());
+    println!("{} {}", style("Target:").dim(), install_path.display());
+    println!();
+
+    // Copy binary
+    match fs::copy(&current_exe, &install_path) {
+        Ok(_) => {
+            // Set executable permission on Unix
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = fs::set_permissions(&install_path, fs::Permissions::from_mode(0o755));
+            }
+
+            print_success(&format!("Installed to {}", install_path.display()));
+
+            // Check if install location is in PATH
+            let install_dir = install_path.parent().unwrap();
+            let path_env = env::var("PATH").unwrap_or_default();
+            let in_path = path_env.split(if cfg!(windows) { ';' } else { ':' })
+                .any(|p| PathBuf::from(p) == install_dir);
+
+            if !in_path {
+                println!();
+                print_warning("Install directory is not in your PATH");
+                println!();
+
+                #[cfg(target_os = "windows")]
+                {
+                    println!("{}", style("Add to PATH by running:").dim());
+                    println!("  [Environment]::SetEnvironmentVariable('PATH', $env:PATH + ';{}', 'User')",
+                        install_dir.display());
+                    println!();
+                    println!("{}", style("Or add manually via System Properties > Environment Variables").dim());
+                }
+
+                #[cfg(target_os = "macos")]
+                {
+                    println!("{}", style("Add to your shell profile (~/.zshrc or ~/.bash_profile):").dim());
+                    println!("  export PATH=\"{}:$PATH\"", install_dir.display());
+                }
+
+                #[cfg(target_os = "linux")]
+                {
+                    println!("{}", style("Add to your shell profile (~/.bashrc or ~/.zshrc):").dim());
+                    println!("  export PATH=\"{}:$PATH\"", install_dir.display());
+                    println!();
+                    println!("{}", style("Then reload:").dim());
+                    println!("  source ~/.bashrc");
+                }
+            } else {
+                println!();
+                print_success("You can now run 'ganesha' from anywhere!");
+            }
+
+            // Check for Node.js/Playwright for browser automation
+            println!();
+            if std::process::Command::new("node").arg("--version").output().is_ok() {
+                println!("{}", style("Node.js detected. To enable browser automation:").dim());
+                println!("  npx playwright install chromium");
+            } else {
+                println!("{}", style("Optional: Install Node.js for browser automation features").dim());
+            }
+        }
+        Err(e) => {
+            print_error(&format!("Installation failed: {}", e));
+
+            #[cfg(unix)]
+            {
+                println!();
+                println!("{}", style("Try with sudo:").dim());
+                println!("  sudo cp {} /usr/local/bin/ganesha", current_exe.display());
+            }
+
+            std::process::exit(1);
+        }
+    }
+
+    println!();
+}
+
+/// Uninstall ganesha from system
+fn uninstall_ganesha() {
+    use std::fs;
+
+    println!("\n{}", style("═".repeat(60)).dim());
+    println!("{}", style("Ganesha Uninstallation").cyan().bold());
+    println!("{}\n", style("═".repeat(60)).dim());
+
+    let install_path = get_install_path();
+
+    if !install_path.exists() {
+        print_warning(&format!("Ganesha not found at {}", install_path.display()));
+        println!("{}", style("It may be installed elsewhere or already removed.").dim());
+        return;
+    }
+
+    match fs::remove_file(&install_path) {
+        Ok(_) => {
+            print_success(&format!("Removed {}", install_path.display()));
+
+            // Also try to remove config directory
+            if let Some(config_dir) = dirs::config_dir() {
+                let ganesha_config = config_dir.join("ganesha");
+                if ganesha_config.exists() {
+                    println!();
+                    println!("{}", style("Configuration directory remains at:").dim());
+                    println!("  {}", ganesha_config.display());
+                    println!("{}", style("Remove manually if desired.").dim());
+                }
+            }
+        }
+        Err(e) => {
+            print_error(&format!("Failed to remove: {}", e));
+            std::process::exit(1);
+        }
+    }
+
+    println!();
+}
+
 /// Check if ganesha is available system-wide and offer to install if not
 fn check_and_install_system_wide() {
     use std::env;
     use std::fs;
-    use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
 
-    // Check if 'ganesha' is already in PATH
-    if let Ok(output) = std::process::Command::new("which").arg("ganesha").output() {
-        if output.status.success() {
-            // Already installed
-            return;
-        }
+    // Check if already installed
+    if is_installed() {
+        return;
     }
 
     // Get current executable path
     let current_exe = match env::current_exe() {
         Ok(path) => path,
-        Err(_) => return, // Can't determine current exe
+        Err(_) => return,
     };
 
     // Check if we're already in a system location
     let exe_str = current_exe.to_string_lossy();
-    if exe_str.contains("/usr/") || exe_str.contains("/bin/") {
-        return; // Already in a system location
+    if exe_str.contains("/usr/") || exe_str.contains("/.local/bin")
+        || exe_str.contains("\\Program Files") || exe_str.contains("\\AppData\\Local\\Ganesha") {
+        return;
     }
 
     // Create marker file to track if we've asked before
@@ -1118,7 +1382,7 @@ fn check_and_install_system_wide() {
         .join(".install_offered");
 
     if marker_path.exists() {
-        return; // Already offered
+        return;
     }
 
     // Create the marker directory
@@ -1127,11 +1391,12 @@ fn check_and_install_system_wide() {
     }
 
     println!("\n{}", style("═".repeat(60)).dim());
-    println!("{}", style("Ganesha First Run Setup").cyan().bold());
+    println!("{}", style("Ganesha First Run").cyan().bold());
     println!("{}\n", style("═".repeat(60)).dim());
 
-    println!("{}", style("Would you like to install 'ganesha' command system-wide?").yellow());
-    println!("{}", style("This will copy the binary to /usr/local/bin/").dim());
+    let install_path = get_install_path();
+    println!("{}", style("Install 'ganesha' command for easy access?").yellow());
+    println!("{} {}", style("Location:").dim(), install_path.display());
     println!();
 
     print!("{} ", style("[Y/n]:").cyan());
@@ -1145,47 +1410,11 @@ fn check_and_install_system_wide() {
 
     let input = input.trim().to_lowercase();
     if input.is_empty() || input == "y" || input == "yes" {
-        // Try to install to /usr/local/bin
-        let install_path = PathBuf::from("/usr/local/bin/ganesha");
-
-        // Check if we need sudo
-        let needs_sudo = !fs::metadata("/usr/local/bin")
-            .map(|m| m.permissions().mode() & 0o200 != 0)
-            .unwrap_or(false);
-
-        let result = if needs_sudo {
-            // Use sudo to copy
-            std::process::Command::new("sudo")
-                .args(["cp", &current_exe.to_string_lossy(), "/usr/local/bin/ganesha"])
-                .status()
-                .and_then(|_| {
-                    std::process::Command::new("sudo")
-                        .args(["chmod", "+x", "/usr/local/bin/ganesha"])
-                        .status()
-                })
-        } else {
-            // Direct copy
-            fs::copy(&current_exe, &install_path)
-                .map(|_| std::process::ExitStatus::default())
-        };
-
-        match result {
-            Ok(status) if status.success() || status.code().is_none() => {
-                println!("\n{} Installed to /usr/local/bin/ganesha", style("✓").green());
-                println!("{}", style("You can now run 'ganesha' from anywhere!").dim());
-            }
-            Ok(_) | Err(_) => {
-                println!("\n{} Installation failed. You can manually copy:", style("⚠").yellow());
-                println!("  sudo cp {} /usr/local/bin/ganesha", current_exe.display());
-            }
-        }
+        install_ganesha(true);
     } else {
-        println!("\n{} Skipped installation.", style("ℹ").cyan());
-        println!("{}", style("You can install later with:").dim());
-        println!("  sudo cp {} /usr/local/bin/ganesha", current_exe.display());
+        println!("\n{} Skipped. Install later with: ganesha --install", style("ℹ").cyan());
     }
 
-    // Mark as offered
     let _ = fs::write(&marker_path, "offered");
     println!();
 }
@@ -1430,12 +1659,11 @@ async fn analyze_image_with_vision(
 
     // Determine the endpoint URL from provider name
     let endpoint = match vision_provider {
-        "bedroom" => "http://192.168.27.182:1234/v1/chat/completions",
-        "beast" => "http://192.168.245.155:1234/v1/chat/completions",
+        "lmstudio" | "local" => "http://localhost:1234/v1/chat/completions",
         "anthropic" => "https://api.anthropic.com/v1/messages",
         "openai" => "https://api.openai.com/v1/chat/completions",
         _ if vision_provider.starts_with("http") => vision_provider,
-        _ => "http://192.168.27.182:1234/v1/chat/completions", // Default to bedroom
+        _ => "http://localhost:1234/v1/chat/completions", // Default to local LM Studio
     };
 
     // For Anthropic, we need special handling
@@ -1521,11 +1749,14 @@ async fn run_task_with_log<C: core::ConsentHandler>(
     task: &str,
     code_mode: bool,
     vision_config: Option<(&str, &str)>, // (provider, model)
+    high_reasoning: bool,
 ) -> String {
     use rand::seq::SliceRandom;
 
     let task = if code_mode {
         format!("[CODE MODE] {}", task)
+    } else if high_reasoning {
+        format!("[DEEP ANALYSIS] Think step by step, consider all possibilities, and provide thorough reasoning: {}", task)
     } else {
         task.to_string()
     };
@@ -1565,12 +1796,11 @@ async fn run_task_with_log<C: core::ConsentHandler>(
 
                     match analyze_image_with_vision(path, query, provider, model).await {
                         Ok(analysis) => {
-                            println!("\n{} {}", style("📷").cyan(), filename);
-                            println!("{}\n", analysis);
+                            pretty::print_box(&format!("📷 {}", filename), &analysis);
                             results.push(format!("{}: {}", filename, analysis));
                         }
                         Err(e) => {
-                            println!("{} {}: {}", style("⚠").yellow(), filename, e);
+                            pretty::print_warning(&format!("{}: {}", filename, e));
                             results.push(format!("{}: Error - {}", filename, e));
                         }
                     }
@@ -1589,10 +1819,21 @@ async fn run_task_with_log<C: core::ConsentHandler>(
     let mut actions_taken: Vec<String> = vec![];
     let max_iterations = 10;  // Allow more iterations for complex tasks
 
-    // Initial planning
-    let thinking_msg = THINKING_MESSAGES
-        .choose(&mut rand::thread_rng())
-        .unwrap_or(&"🐘 Thinking...");
+    // Detect if this is a browser task (to avoid overlapping spinner messages)
+    let task_lower = task.to_lowercase();
+    let is_browser_task = task_lower.contains(".com") || task_lower.contains(".org")
+        || task_lower.contains(".net") || task_lower.contains(".io")
+        || task_lower.contains("website") || task_lower.contains("webpage")
+        || task_lower.contains("http://") || task_lower.contains("https://");
+
+    // Initial planning - use simple message for browser tasks (they show their own connecting message)
+    let thinking_msg = if is_browser_task {
+        "🐘 Planning..."
+    } else {
+        THINKING_MESSAGES
+            .choose(&mut rand::thread_rng())
+            .unwrap_or(&"🐘 Thinking...")
+    };
     let spinner = create_spinner(thinking_msg);
 
     let mut current_task = task.clone();
@@ -1652,16 +1893,41 @@ async fn run_task_with_log<C: core::ConsentHandler>(
     }
 
     // AGENTIC LOOP: Execute → Analyze → Continue until done
-    for iteration in 0..max_iterations {
+    for _iteration in 0..max_iterations {
         let has_actions = current_plan.actions.iter().any(|a| !a.command.is_empty());
         if !has_actions {
             break;
         }
 
+        // Check if plan has MCP/browser actions for spinner message
+        let has_browser_action = current_plan.actions.iter().any(|a|
+            a.command.starts_with("playwright:") || a.command.starts_with("browser:")
+        );
+        let has_mcp_action = current_plan.actions.iter().any(|a|
+            a.command.contains(':') && !a.command.starts_with("playwright:") && !a.command.starts_with("browser:")
+        );
+
+        // Create spinner for long-running operations
+        let spinner = if has_browser_action {
+            Some(create_spinner("🌐 Browsing..."))
+        } else if has_mcp_action {
+            Some(create_spinner("🔌 Processing..."))
+        } else {
+            None
+        };
+
         // Execute each command in the plan
         let results = match engine.execute(&current_plan).await {
-            Ok(r) => r,
+            Ok(r) => {
+                if let Some(s) = spinner {
+                    s.finish_and_clear();
+                }
+                r
+            }
             Err(e) => {
+                if let Some(s) = spinner {
+                    s.finish_and_clear();
+                }
                 if matches!(e, core::GaneshaError::UserCancelled) {
                     return "User cancelled".to_string();
                 }
@@ -1676,35 +1942,108 @@ async fn run_task_with_log<C: core::ConsentHandler>(
                 continue;
             }
 
-            // Show what we're running
-            println!("{} {}", style("Running:").dim(), style(&result.command).white());
+            // Check if this is an MCP action (has server:tool format)
+            let is_mcp_action = result.command.contains(':') &&
+                                result.command.split(':').next()
+                                    .map(|s| !s.contains('/') && !s.contains(' '))
+                                    .unwrap_or(false);
 
-            // Show output (truncated if very long)
-            let output = result.output.trim();
-            if !output.is_empty() {
-                let lines: Vec<&str> = output.lines().collect();
-                if lines.len() > 20 {
-                    for line in lines.iter().take(15) {
-                        println!("  {}", style(line).dim());
+            if is_mcp_action {
+                // Clean output for MCP actions
+                let output = result.output.trim();
+                let server = result.command.split(':').next().unwrap_or("mcp");
+                let tool = result.command.split(':').nth(1)
+                    .and_then(|s| s.split('|').next())
+                    .unwrap_or("tool");
+
+                // Browser-specific output
+                if server == "playwright" || server == "browser" {
+                    // Extract page URL and title from the output
+                    let mut page_url = String::new();
+                    let mut page_title = String::new();
+                    for line in output.lines() {
+                        if line.starts_with("- Page URL:") {
+                            page_url = line.trim_start_matches("- Page URL:").trim().to_string();
+                        } else if line.starts_with("- Page Title:") {
+                            page_title = line.trim_start_matches("- Page Title:").trim().to_string();
+                        }
                     }
-                    println!("  {} ({} more lines)", style("...").dim(), lines.len() - 15);
+
+                    if tool.contains("navigate") {
+                        if !page_url.is_empty() {
+                            println!("{} {}", style("🌐 Navigated to:").cyan(), page_url);
+                            if !page_title.is_empty() && page_title.len() < 80 {
+                                println!("   {}", style(&page_title).dim());
+                            }
+                        }
+                    } else if tool.contains("snapshot") {
+                        println!("{}", style("📸 Got page content").dim());
+                    } else {
+                        println!("{} {}", style("🔧").dim(), style(format!("{}:{}", server, tool)).dim());
+                    }
                 } else {
-                    for line in lines {
-                        println!("  {}", style(line).dim());
+                    // Other MCP tools (context7, fetch, git, etc.)
+                    println!("{} {}:{}", style("🔌").cyan(), style(server).white(), style(tool).dim());
+
+                    // Show output for non-browser MCP tools
+                    if !output.is_empty() && result.success {
+                        let lines: Vec<&str> = output.lines().collect();
+                        let show_lines = if lines.len() > 30 { 25 } else { lines.len() };
+                        for line in lines.iter().take(show_lines) {
+                            if line.len() < 120 {
+                                println!("   {}", style(line).dim());
+                            } else {
+                                println!("   {}...", style(&line[..117]).dim());
+                            }
+                        }
+                        if lines.len() > 30 {
+                            println!("   {} ({} more lines)", style("...").dim(), lines.len() - 25);
+                        }
                     }
                 }
-            }
 
-            // Show result status
-            let status = if result.success {
-                style("Command finished (SUCCESS)").green()
+                // Show error if failed
+                if !result.success {
+                    if let Some(ref err) = result.error {
+                        println!("  {}: {}", style("Error").red(), err);
+                    }
+                }
             } else {
-                style("Command finished (FAILED)").red()
-            };
-            println!("{}", status);
+                // Regular shell command output
+                println!("{} {}", style("Running:").dim(), style(&result.command).white());
 
-            if let Some(ref err) = result.error {
-                println!("  {}: {}", style("Error").red(), err);
+                // Show output (truncated only if very long)
+                let output = result.output.trim();
+                if !output.is_empty() {
+                    let lines: Vec<&str> = output.lines().collect();
+                    if lines.len() > 80 {
+                        // Very long output - show first 60 and last 10
+                        for line in lines.iter().take(60) {
+                            println!("  {}", style(line).dim());
+                        }
+                        println!("  {} ({} more lines)", style("...").dim(), lines.len() - 70);
+                        for line in lines.iter().skip(lines.len() - 10) {
+                            println!("  {}", style(line).dim());
+                        }
+                    } else {
+                        // Show all output
+                        for line in lines {
+                            println!("  {}", style(line).dim());
+                        }
+                    }
+                }
+
+                // Show result status
+                let status = if result.success {
+                    style("Command finished (SUCCESS)").green()
+                } else {
+                    style("Command finished (FAILED)").red()
+                };
+                println!("{}", status);
+
+                if let Some(ref err) = result.error {
+                    println!("  {}: {}", style("Error").red(), err);
+                }
             }
 
             println!();  // Blank line between commands
@@ -1728,11 +2067,33 @@ async fn run_task_with_log<C: core::ConsentHandler>(
 
                 // No more actions - show final response and exit
                 if !response.is_empty() {
-                    println!("\n{}", style(&response).cyan());
+                    pretty::print_ganesha_response(&response);
                     all_outputs.push(response);
-                } else if !actions_taken.is_empty() {
-                    // No response from LLM, generate a simple summary
-                    println!("\n{}", style(format!("Completed {} action(s).", actions_taken.len())).green());
+                } else if !results.is_empty() {
+                    // No response from LLM, generate a meaningful summary from explanations
+                    let successful = results.iter().filter(|r| r.success).count();
+                    let failed = results.iter().filter(|r| !r.success).count();
+
+                    // Build summary from explanations
+                    let summaries: Vec<&str> = results.iter()
+                        .filter(|r| r.success && !r.explanation.is_empty())
+                        .map(|r| r.explanation.as_str())
+                        .collect();
+
+                    if !summaries.is_empty() {
+                        let summary = if summaries.len() <= 3 {
+                            summaries.join(", ")
+                        } else {
+                            format!("{}, and {} more", summaries[..2].join(", "), summaries.len() - 2)
+                        };
+                        println!("\n{} {}", style("✓").green().bold(), style(&summary).green());
+                    } else if successful > 0 {
+                        println!("\n{} Completed {} action(s) successfully.", style("✓").green().bold(), successful);
+                    }
+
+                    if failed > 0 {
+                        println!("{} {} action(s) failed.", style("⚠").yellow(), failed);
+                    }
                 }
                 break;
             }
@@ -1741,9 +2102,18 @@ async fn run_task_with_log<C: core::ConsentHandler>(
                 if std::env::var("GANESHA_DEBUG").is_ok() {
                     print_warning(&format!("Analysis error: {}", e));
                 }
-                // Even on error, try to give a summary
-                if !actions_taken.is_empty() {
-                    println!("\n{}", style(format!("Executed {} command(s).", actions_taken.len())).dim());
+                // Even on error, try to give a summary from results
+                if !results.is_empty() {
+                    let successful = results.iter().filter(|r| r.success).count();
+                    let summaries: Vec<&str> = results.iter()
+                        .filter(|r| r.success && !r.explanation.is_empty())
+                        .map(|r| r.explanation.as_str())
+                        .collect();
+                    if !summaries.is_empty() {
+                        println!("\n{} {}", style("✓").green().bold(), summaries.join(", "));
+                    } else if successful > 0 {
+                        println!("\n{} Executed {} command(s).", style("✓").green(), successful);
+                    }
                 }
                 break;
             }
@@ -1768,7 +2138,7 @@ async fn run_task<C: core::ConsentHandler>(
     let max_iterations = 5;  // Safety limit
     let mut current_task = task.clone();
 
-    for iteration in 0..max_iterations {
+    for _iteration in 0..max_iterations {
         // Plan
         let plan = match engine.plan(&current_task).await {
             Ok(p) => p,
@@ -1796,8 +2166,8 @@ async fn run_task<C: core::ConsentHandler>(
         // Show execution summaries for commands
         for result in &results {
             if result.command.is_empty() && !result.explanation.is_empty() {
-                // Response action - show the response
-                println!("\n{}", console::style(&result.explanation).cyan());
+                // Response action - show the response with pretty formatting
+                pretty::print_ganesha_response(&result.explanation);
             } else if !result.command.is_empty() {
                 // Command execution - show friendly summary
                 print_action_summary(&result.command, result.success, &result.output, result.duration_ms);
@@ -1826,12 +2196,12 @@ async fn run_task<C: core::ConsentHandler>(
                 }
                 // Show the analysis response
                 if !response.is_empty() {
-                    println!("\n{}", console::style(&response).cyan());
+                    pretty::print_ganesha_response(&response);
                 }
 
                 // If there are more actions needed, continue the loop
                 if let Some(plan) = next_plan {
-                    if iteration < max_iterations - 1 {
+                    if _iteration < max_iterations - 1 {
                         print_info("Continuing with additional actions...");
                         // Execute the follow-up plan directly
                         match engine.execute(&plan).await {

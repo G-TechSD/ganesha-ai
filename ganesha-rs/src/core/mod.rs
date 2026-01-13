@@ -46,6 +46,7 @@ pub enum ActionType {
     PackageInstall,
     Response,  // Conversational response, no command execution
     Question,  // LLM wants to ask user a question with options
+    McpTool,   // MCP tool call (command = "server:tool|{json_args}")
     Custom(String),
 }
 
@@ -255,8 +256,18 @@ impl<L: LlmProvider, C: ConsentHandler> GaneshaEngine<L, C> {
             return self.plan_chunked_list(task, count, &item_type).await;
         }
 
+        // Auto-connect MCP servers based on task content
+        self.auto_connect_mcp_if_needed(task);
+
         // Build messages with conversation history
         let system_prompt = self.build_planning_prompt();
+
+        // Debug: Check if MCP tools are in prompt (only in debug mode)
+        if std::env::var("GANESHA_DEBUG").is_ok() {
+            if system_prompt.contains("MCP TOOLS AVAILABLE") {
+                eprintln!("[MCP] Tools included in prompt");
+            }
+        }
 
         // Build message list: system + history + current user message
         let mut messages = vec![ChatMessage::system(&system_prompt)];
@@ -294,10 +305,51 @@ impl<L: LlmProvider, C: ConsentHandler> GaneshaEngine<L, C> {
         let mut plan = ExecutionPlan::new(task);
         plan.actions = self.parse_actions(&response)?;
 
-        // Validate each action against access control (skip Response actions)
+        // Post-processing: Override shell commands for website tasks with MCP browser actions
+        // This handles the case where LLM uses container.exec/python/curl instead of MCP tools
+        // Also handles the case where LLM just outputs a URL as a Response
+        if Self::is_website_task(task) && Self::has_browser_mcp() {
+            let url = Self::extract_url_from_task(task);
+            let has_shell_action = plan.actions.iter().any(|a| matches!(a.action_type, ActionType::Shell));
+
+            // Check if LLM returned just a URL as a Response (not using MCP tools)
+            let has_url_response = plan.actions.iter().any(|a| {
+                matches!(a.action_type, ActionType::Response) && Self::is_url_response(&a.explanation)
+            });
+
+            // Override if LLM used shell command OR just returned URL text
+            if (has_shell_action || has_url_response) && !url.is_empty() {
+                // Replace the plan with MCP browser actions
+                plan.actions = vec![
+                    Action {
+                        id: uuid::Uuid::new_v4().to_string()[..8].to_string(),
+                        action_type: ActionType::McpTool,
+                        command: format!("playwright:browser_navigate|{{\"url\":\"{}\"}}", url),
+                        explanation: format!("Navigate to {}", url),
+                        risk_level: RiskLevel::Low,
+                        reversible: false,
+                        reverse_command: None,
+                        question: None,
+                    },
+                    Action {
+                        id: uuid::Uuid::new_v4().to_string()[..8].to_string(),
+                        action_type: ActionType::McpTool,
+                        command: "playwright:browser_snapshot|{}".to_string(),
+                        explanation: "Get page content".to_string(),
+                        risk_level: RiskLevel::Low,
+                        reversible: false,
+                        reverse_command: None,
+                        question: None,
+                    },
+                ];
+            }
+        }
+
+        // Validate each action against access control (skip Response and McpTool actions)
         for action in &mut plan.actions {
             // Response actions don't need access control - they're just text
-            if matches!(action.action_type, ActionType::Response) {
+            // McpTool actions are sandboxed by the MCP server - no shell access control needed
+            if matches!(action.action_type, ActionType::Response | ActionType::McpTool) {
                 continue;
             }
 
@@ -371,6 +423,75 @@ impl<L: LlmProvider, C: ConsentHandler> GaneshaEngine<L, C> {
                     error: None,
                     duration_ms: start.elapsed().as_millis() as u64,
                 });
+                continue;
+            }
+
+            // Handle MCP tool actions
+            if matches!(action.action_type, ActionType::McpTool) {
+                use crate::orchestrator::mcp::call_mcp_tool;
+
+                // Parse command format: "server:tool|{json_args}"
+                let (tool_part, args_json) = action.command.split_once('|')
+                    .unwrap_or((&action.command, "{}"));
+
+                let (server, tool) = match tool_part.split_once(':') {
+                    Some((s, t)) => (s, t),
+                    None => {
+                        results.push(ExecutionResult {
+                            action_id: action.id.clone(),
+                            command: action.command.clone(),
+                            explanation: action.explanation.clone(),
+                            success: false,
+                            output: String::new(),
+                            error: Some("Invalid MCP tool format".into()),
+                            duration_ms: start.elapsed().as_millis() as u64,
+                        });
+                        continue;
+                    }
+                };
+
+                let args: serde_json::Value = serde_json::from_str(args_json)
+                    .unwrap_or(serde_json::json!({}));
+
+                match call_mcp_tool(server, tool, args) {
+                    Ok(result) => {
+                        // Extract text content from MCP response
+                        // Format: {"content":[{"text":"...","type":"text"}]}
+                        let output = if let Some(content) = result.get("content") {
+                            if let Some(arr) = content.as_array() {
+                                arr.iter()
+                                    .filter_map(|item| item.get("text").and_then(|t| t.as_str()))
+                                    .collect::<Vec<_>>()
+                                    .join("\n")
+                            } else {
+                                result.to_string()
+                            }
+                        } else {
+                            // Fallback to string representation
+                            result.to_string()
+                        };
+                        results.push(ExecutionResult {
+                            action_id: action.id.clone(),
+                            command: format!("{}:{}", server, tool),
+                            explanation: action.explanation.clone(),
+                            success: true,
+                            output,
+                            error: None,
+                            duration_ms: start.elapsed().as_millis() as u64,
+                        });
+                    }
+                    Err(e) => {
+                        results.push(ExecutionResult {
+                            action_id: action.id.clone(),
+                            command: format!("{}:{}", server, tool),
+                            explanation: action.explanation.clone(),
+                            success: false,
+                            output: String::new(),
+                            error: Some(format!("MCP error: {}", e)),
+                            duration_ms: start.elapsed().as_millis() as u64,
+                        });
+                    }
+                }
                 continue;
             }
 
@@ -481,12 +602,19 @@ impl<L: LlmProvider, C: ConsentHandler> GaneshaEngine<L, C> {
                 // Response action - already handled
                 continue;
             }
+            // For browser/MCP content, allow more output so LLM can analyze full page
+            let max_output = if result.command.contains("browser") || result.command.contains("playwright") {
+                30000  // 30K for browser snapshots
+            } else {
+                8000   // 8K for regular commands
+            };
+
             result_summary.push_str(&format!(
                 "Command: {}\nStatus: {}\nOutput:\n{}\n\n",
                 result.command,
                 if result.success { "SUCCESS" } else { "FAILED" },
-                if result.output.len() > 2000 {
-                    format!("{}...(truncated)", &result.output[..2000])
+                if result.output.len() > max_output {
+                    format!("{}...(truncated)", &result.output[..max_output])
                 } else {
                     result.output.clone()
                 }
@@ -501,8 +629,26 @@ impl<L: LlmProvider, C: ConsentHandler> GaneshaEngine<L, C> {
             return Ok((String::new(), None));
         }
 
-        let system_prompt = format!(
-            r#"You are Ganesha, an autonomous AI assistant. The user asked: "{}"
+        // Check if this was a browser/MCP task - provide appropriate prompt
+        let has_browser_output = result_summary.contains("Page Snapshot") ||
+                                  result_summary.contains("browser_navigate") ||
+                                  result_summary.contains("Page URL:");
+
+        let system_prompt = if has_browser_output {
+            format!(
+                r#"You are Ganesha. The user asked: "{}"
+
+Page data:
+{}
+
+Analyze the Page Snapshot and answer the user's question completely.
+Output JSON: {{"response":"your complete answer here"}}
+Use bullet points (- item) for lists. List ALL items found, not just a few."#,
+                task, result_summary
+            )
+        } else {
+            format!(
+                r#"You are Ganesha, an autonomous AI assistant. The user asked: "{}"
 
 Commands executed:
 {}
@@ -538,8 +684,9 @@ EXAMPLES:
 - Partial exploration → {{"actions":[{{"command":"cat src/main.rs","explanation":"Read main entry point"}}]}}
 - Complete analysis → {{"response":"The codebase is organized into X modules. Key files are..."}}
 - Error recovery → {{"actions":[{{"command":"docker rm -f X","explanation":"Remove conflict"}},{{"command":"docker run...","explanation":"Retry"}}]}}"#,
-            task, result_summary
-        );
+                task, result_summary
+            )
+        };
 
         // Build messages for LLM
         let user_msg = format!("Analyze the results and respond to: {}", task);
@@ -710,48 +857,213 @@ EXAMPLES:
             ""
         };
 
-        format!(r#"You are Ganesha, an autonomous AI system assistant. Working directory: {}{}
+        // Get available MCP tools
+        let mcp_section = self.build_mcp_tools_prompt();
+        if std::env::var("GANESHA_DEBUG").is_ok() {
+            if mcp_section.is_empty() {
+                eprintln!("[DEBUG] MCP: No tools in prompt (none connected)");
+            } else {
+                eprintln!("[DEBUG] MCP: {} chars of tools in prompt", mcp_section.len());
+                eprintln!("[DEBUG] MCP section preview: {}", &mcp_section[..mcp_section.len().min(200)]);
+            }
+        }
+
+        format!(r#"You are Ganesha, an autonomous AI system assistant. Working directory: {}{}{}
 
 OUTPUT FORMAT - MANDATORY JSON:
-System tasks: {{"actions":[{{"command":"cmd","explanation":"brief"}}]}}
+Multi-step tasks: {{"actions":[{{"command":"cmd1","explanation":"step 1"}},{{"command":"cmd2","explanation":"step 2"}},{{"command":"cmd3","explanation":"step 3"}}]}}
+MCP tools: {{"actions":[{{"mcp_tool":"server:tool","mcp_args":{{"key":"value"}},"explanation":"brief"}}]}}
 Simple answers: {{"response":"brief answer"}}
 Need clarification: {{"question":"What do you want?","options":["Option A","Option B","Option C"]}}
 
-CRITICAL BEHAVIOR RULES:
+CRITICAL: COMPLETE ALL STEPS IN ONE RESPONSE
+- Generate ALL commands needed to FULLY complete the task
+- Do NOT stop after one command - include ALL necessary steps
+- Example: "install X and configure Y" = update + install + mkdir + edit config + restart service
+- Chain related operations: apt update && apt install, mkdir && chown, etc.
+- ALWAYS verify your work with a final check command
+
+BEHAVIOR RULES:
 - BE AUTONOMOUS: Don't tell the user to do things - DO them yourself
-- NEVER say "you can cd to..." - YOU should cd and explore
-- NEVER say "you can run..." - YOU should run the command
-- For analysis tasks: explore ALL relevant files, don't stop after one
-- Output ONLY valid JSON - no prefixes like "JSON only", no markdown
+- NEVER say "you can..." - YOU do it directly
+- For installations: apt update first, then install, then configure, then verify
+- For configurations: create directories, edit files, set permissions, restart services
+
+INSTALLATION TASKS (like "install apache/nginx/docker"):
+Generate ALL steps in one response:
+1. Update package lists: sudo apt-get update
+2. Install package: sudo apt-get install -y <package>
+3. Create any requested directories: sudo mkdir -p /path
+4. Configure if needed: edit config files
+5. Set permissions: sudo chown/chmod
+6. Enable/restart service: sudo systemctl enable --now <service>
+7. Verify: systemctl status or curl localhost
+
+CONFIG TASKS (like "set document root to X"):
+1. Create directory: sudo mkdir -p /path/to/dir
+2. Set ownership: sudo chown -R www-data:www-data /path
+3. Edit config: use sed or echo to modify config file
+4. Restart service: sudo systemctl restart <service>
 
 CODE ANALYSIS TASKS:
-When asked to analyze/explore/understand code:
 - Read multiple files to get full picture
-- Use: cat <file> (NOT sed - use cat for whole file)
-- Use: find . -name "*.ext" to find files
-- Use: wc -l <file> for file sizes
-- Use: head -100 <file> for previews
-- Keep exploring until you have enough context to answer fully
+- Use: cat, find, head, grep to explore
+- Keep exploring until you have enough context
 
-IMAGE FILE TASKS - CRITICAL:
-When user asks to "describe", "analyze", "what's in", "show me", or "tell me about" an IMAGE file:
-- You CANNOT see visual content of images - you have NO vision capability
-- DO NOT just run "file" or "ls" on images when asked for visual description
-- Instead, respond with: {{"response":"I cannot see the visual contents of images. I can only provide file metadata (dimensions, format). To describe what's IN an image, you'd need a vision-capable model. Would you like me to get the file metadata instead?"}}
-- Only run file/exiftool commands if user explicitly asks for metadata, not visual description
-
-WHEN TO ASK QUESTIONS (only these cases):
-- Truly ambiguous requirements with trade-offs
-- Destructive operations needing confirmation
-- Multiple valid approaches with real differences
-
-VERIFICATION:
-After installations/configurations, verify with a command.
+WEBSITE/URL TASKS:
+Use MCP tools: {{"actions":[{{"mcp_tool":"playwright:browser_navigate","mcp_args":{{"url":"URL"}},"explanation":"Navigate"}}]}}
 
 EXAMPLES:
-- "is nginx running" → {{"actions":[{{"command":"systemctl status nginx | grep Active","explanation":"Check status"}}]}}
-- "analyze this code" → {{"actions":[{{"command":"find . -name '*.rs' | head -20","explanation":"Find source files"}},{{"command":"cat src/main.rs","explanation":"Read main file"}},{{"command":"cat src/lib.rs","explanation":"Read library"}}]}}
-- "what's in docker" → {{"actions":[{{"command":"docker ps --format 'table {{{{.Names}}}}\t{{{{.Status}}}}'","explanation":"List containers"}}]}}"#, self.working_directory.display(), auto_mode)
+- "install apache and set doc root to /home/user/WWW" → {{"actions":[
+    {{"command":"sudo apt-get update && sudo apt-get install -y apache2","explanation":"Install Apache"}},
+    {{"command":"sudo mkdir -p /home/user/WWW && sudo chown -R www-data:www-data /home/user/WWW","explanation":"Create doc root"}},
+    {{"command":"sudo sed -i 's|DocumentRoot /var/www/html|DocumentRoot /home/user/WWW|' /etc/apache2/sites-available/000-default.conf","explanation":"Update config"}},
+    {{"command":"sudo systemctl restart apache2","explanation":"Apply changes"}},
+    {{"command":"systemctl status apache2 | head -5","explanation":"Verify"}}
+  ]}}
+- "what time is it" → {{"response":"It's currently [time]"}}
+- "is nginx running" → {{"actions":[{{"command":"systemctl status nginx | grep Active","explanation":"Check status"}}]}}"#, self.working_directory.display(), auto_mode, mcp_section)
+    }
+
+    /// Build MCP tools section for prompt (if any MCP servers are connected)
+    fn build_mcp_tools_prompt(&self) -> String {
+        use crate::orchestrator::mcp::get_all_mcp_tools;
+
+        let mcp_tools = get_all_mcp_tools();
+        if mcp_tools.is_empty() {
+            return String::new();
+        }
+
+        let mut section = String::from("\n\nMCP TOOLS AVAILABLE (use mcp_tool/mcp_args format):\n");
+
+        for (server, tools) in mcp_tools {
+            section.push_str(&format!("{}:\n", server));
+            for tool in tools.iter().take(8) {
+                section.push_str(&format!("  - {}:{} - {}\n",
+                    server, tool.name,
+                    tool.description.as_deref().unwrap_or("").chars().take(60).collect::<String>()
+                ));
+            }
+            if tools.len() > 8 {
+                section.push_str(&format!("  ... +{} more\n", tools.len() - 8));
+            }
+        }
+
+        // Add dynamic examples based on connected server
+        section.push_str("\nWEBSITE EXAMPLES (USE THESE FOR ANY WEBSITE REQUEST):\n");
+
+        // Find tools for examples
+        let mcp_tools = get_all_mcp_tools();
+        for (server, tools) in &mcp_tools {
+            let mut has_navigate = false;
+            let mut has_snapshot = false;
+
+            for tool in tools {
+                if !has_navigate && tool.name.contains("navigate") && !tool.name.contains("back") {
+                    section.push_str(&format!(
+                        "- \"see google.com\" → {{\"actions\":[{{\"mcp_tool\":\"{}:{}\",\"mcp_args\":{{\"url\":\"https://google.com\"}},\"explanation\":\"Navigate\"}}]}}\n",
+                        server, tool.name
+                    ));
+                    has_navigate = true;
+                }
+                if !has_snapshot && tool.name.contains("snapshot") {
+                    section.push_str(&format!(
+                        "- \"what's on the page\" → {{\"actions\":[{{\"mcp_tool\":\"{}:{}\",\"mcp_args\":{{}},\"explanation\":\"Get page content\"}}]}}\n",
+                        server, tool.name
+                    ));
+                    has_snapshot = true;
+                }
+            }
+        }
+
+        section
+    }
+
+    /// Auto-connect MCP servers based on task content
+    /// Detects if task needs browser/web capabilities and connects playwright if not already connected
+    fn auto_connect_mcp_if_needed(&self, task: &str) {
+        use crate::orchestrator::mcp::{get_all_mcp_tools, connect_mcp_server_verbose, McpManager};
+
+        let task_lower = task.to_lowercase();
+
+        // Check if task needs browser capabilities
+        let needs_browser = task_lower.contains("website")
+            || task_lower.contains("webpage")
+            || task_lower.contains("web page")
+            || task_lower.contains("browse")
+            || task_lower.contains("browser")
+            || task_lower.contains("navigate to")
+            || task_lower.contains("go to http")
+            || task_lower.contains("go to www")
+            || task_lower.contains("open http")
+            || task_lower.contains("open www")
+            || task_lower.contains("visit http")
+            || task_lower.contains("visit www")
+            || task_lower.contains(".com")
+            || task_lower.contains(".org")
+            || task_lower.contains(".net")
+            || task_lower.contains(".io")
+            || task_lower.contains("what's on")
+            || task_lower.contains("whats on")
+            || task_lower.contains("can you see")
+            || task_lower.contains("look at")
+            || regex::Regex::new(r"https?://").map(|re| re.is_match(&task_lower)).unwrap_or(false);
+
+        if !needs_browser {
+            return;
+        }
+
+        // Check if any browser MCP is already connected
+        let connected = get_all_mcp_tools();
+        let has_browser = connected.iter().any(|(name, _)| {
+            name.contains("playwright") || name.contains("browser") || name.contains("puppeteer")
+        });
+
+        if has_browser {
+            return; // Already have a browser server connected
+        }
+
+        // Auto-connect playwright quietly
+        let manager = McpManager::new();
+
+        // Try regular playwright first (matches prompt examples), then playwright-ea
+        let server = manager.get_server("playwright")
+            .or_else(|| manager.get_server("playwright-ea"));
+
+        if let Some(server) = server {
+            // Use quiet mode - just show a brief message
+            eprintln!("🌐 Connecting browser...");
+            match connect_mcp_server_verbose(server, false) {
+                Ok(_) => {
+                    eprintln!("✓ Browser ready ({})", server.name);
+                }
+                Err(e) => {
+                    eprintln!("⚠ Browser connection failed: {}", e);
+                }
+            }
+        }
+
+        // Also auto-connect context7 for documentation/library questions
+        let needs_docs = task_lower.contains("documentation")
+            || task_lower.contains(" docs")
+            || task_lower.contains("library")
+            || task_lower.contains("api reference")
+            || task_lower.contains("how to use")
+            || task_lower.contains("code example")
+            || (task_lower.contains("how do") && (task_lower.contains("react") || task_lower.contains("node") || task_lower.contains("python") || task_lower.contains("rust")));
+
+        if needs_docs {
+            let has_context7 = connected.iter().any(|(name, _)| name == "context7");
+            if !has_context7 {
+                if let Some(server) = manager.get_server("context7") {
+                    eprintln!("📚 Connecting documentation...");
+                    match connect_mcp_server_verbose(server, false) {
+                        Ok(_) => eprintln!("✓ Documentation ready (context7)"),
+                        Err(e) => eprintln!("⚠ Documentation connection failed: {}", e),
+                    }
+                }
+            }
+        }
     }
 
     /// Detect if a task requests a large list (>20 items)
@@ -1289,11 +1601,26 @@ setInterval(() => {{
     }
 
     fn parse_actions(&self, response: &str) -> Result<Vec<Action>, GaneshaError> {
-        // Strip LLM control tokens (LM Studio, etc.)
+        // Check for LM Studio function-calling format FIRST (before stripping)
+        // This format gets destroyed by strip_control_tokens's prefix removal
+        // We do light cleanup here: remove only the control tokens, not prefixes
+        let lightly_cleaned = Self::strip_control_tokens_preserve_prefix(response);
+        if std::env::var("GANESHA_DEBUG").is_ok() {
+            eprintln!("[DEBUG] Lightly cleaned: {}", &lightly_cleaned[..lightly_cleaned.len().min(150)]);
+        }
+        if let Some(action) = Self::parse_lm_studio_function_call(&lightly_cleaned) {
+            return Ok(vec![action]);
+        }
+
+        // Now do full stripping for standard JSON parsing
         let response = Self::strip_control_tokens(response);
 
         // Strip markdown code block markers
         let response = Self::strip_markdown_code_blocks(&response);
+
+        if std::env::var("GANESHA_DEBUG").is_ok() {
+            eprintln!("[DEBUG] Stripped response: {}", &response[..response.len().min(200)]);
+        }
 
         // First, try to extract JSON from response
         // Look for JSON containing "actions" or "response" key
@@ -1358,11 +1685,16 @@ setInterval(() => {{
 
             #[derive(Deserialize)]
             struct ActionJson {
+                #[serde(default)]
                 command: String,
+                #[serde(default)]
                 explanation: String,
                 #[serde(default)]
                 reversible: bool,
                 reverse_command: Option<String>,
+                // MCP tool fields
+                mcp_tool: Option<String>,
+                mcp_args: Option<serde_json::Value>,
             }
 
             // Try to parse as action plan
@@ -1374,15 +1706,35 @@ setInterval(() => {{
                     return Ok(parsed
                         .actions
                         .into_iter()
-                        .map(|a| Action {
-                            id: Uuid::new_v4().to_string()[..8].to_string(),
-                            action_type: ActionType::Shell,
-                            command: a.command,
-                            explanation: a.explanation,
-                            risk_level: RiskLevel::Low, // Will be set by access check
-                            reversible: a.reversible,
-                            reverse_command: a.reverse_command,
-                            question: None,
+                        .map(|a| {
+                            // Check for MCP tool call
+                            if let Some(mcp_tool) = a.mcp_tool {
+                                // Encode args in command: "server:tool|{json_args}"
+                                let args_json = a.mcp_args
+                                    .map(|v| serde_json::to_string(&v).unwrap_or_default())
+                                    .unwrap_or_else(|| "{}".to_string());
+                                Action {
+                                    id: Uuid::new_v4().to_string()[..8].to_string(),
+                                    action_type: ActionType::McpTool,
+                                    command: format!("{}|{}", mcp_tool, args_json),
+                                    explanation: a.explanation,
+                                    risk_level: RiskLevel::Low,
+                                    reversible: false,
+                                    reverse_command: None,
+                                    question: None,
+                                }
+                            } else {
+                                Action {
+                                    id: Uuid::new_v4().to_string()[..8].to_string(),
+                                    action_type: ActionType::Shell,
+                                    command: a.command,
+                                    explanation: a.explanation,
+                                    risk_level: RiskLevel::Low,
+                                    reversible: a.reversible,
+                                    reverse_command: a.reverse_command,
+                                    question: None,
+                                }
+                            }
                         })
                         .collect());
                 }
@@ -1500,22 +1852,76 @@ setInterval(() => {{
                 }
             }
 
-            // JSON parsing failed - fall back to treating as conversational response
-            // This handles cases where LLM outputs malformed JSON or large content
+            // JSON parsing failed - try regex extraction for {"response":"..."}
+            // This handles curly quotes and other characters that break JSON parsing
+            if let Ok(re) = regex::Regex::new(r#"[""]response[""]\s*:\s*[""](.+)[""]"#) {
+                if let Some(caps) = re.captures(&sanitized) {
+                    if let Some(text) = caps.get(1) {
+                        let extracted = text.as_str()
+                            .replace("\\n", "\n")
+                            .replace("\\t", "\t")
+                            .replace("\\\"", "\"");
+                        if !extracted.is_empty() {
+                            return Ok(vec![Action {
+                                id: Uuid::new_v4().to_string()[..8].to_string(),
+                                action_type: ActionType::Response,
+                                command: String::new(),
+                                explanation: extracted,
+                                risk_level: RiskLevel::Low,
+                                reversible: false,
+                                reverse_command: None,
+                                question: None,
+                            }]);
+                        }
+                    }
+                }
+            }
+
+            // Final fallback - strip JSON wrapper if present
+            let clean_text = response.trim()
+                .trim_start_matches('{').trim_end_matches('}')
+                .trim();
+            // Remove "response": prefix if present
+            let clean_text = if clean_text.contains("\"response\"") {
+                clean_text.split(':').skip(1).collect::<Vec<_>>().join(":").trim().trim_matches('"').to_string()
+            } else {
+                clean_text.to_string()
+            };
+
             return Ok(vec![Action {
                 id: Uuid::new_v4().to_string()[..8].to_string(),
                 action_type: ActionType::Response,
                 command: String::new(),
-                explanation: response.trim().to_string(),
+                explanation: clean_text,
                 risk_level: RiskLevel::Low,
                 reversible: false,
                 reverse_command: None,
-                                question: None,
+                question: None,
             }]);
         } else {
-            // No JSON found - treat the entire response as a conversational answer
-            // This handles LLMs that don't follow the JSON format
+            // No JSON found - check if it's a bare URL that should be converted to MCP action
             let clean_response = response.trim();
+
+            // Check if response is just a URL and MCP browser tools are available
+            if Self::is_url_response(&clean_response) && Self::has_browser_mcp() {
+                // Auto-convert bare URL to MCP navigate action
+                if std::env::var("GANESHA_DEBUG").is_ok() {
+                    eprintln!("[DEBUG] Auto-converting bare URL to MCP navigate: {}", clean_response);
+                }
+                return Ok(vec![Action {
+                    id: Uuid::new_v4().to_string()[..8].to_string(),
+                    action_type: ActionType::McpTool,
+                    command: format!("playwright:browser_navigate|{{\"url\":\"{}\"}}", clean_response),
+                    explanation: format!("Navigate to {}", clean_response),
+                    risk_level: RiskLevel::Low,
+                    reversible: false,
+                    reverse_command: None,
+                    question: None,
+                }]);
+            }
+
+            // Treat the entire response as a conversational answer
+            // This handles LLMs that don't follow the JSON format
             if clean_response.is_empty() {
                 Err(GaneshaError::LlmError("Empty response from LLM".into()))
             } else {
@@ -1575,6 +1981,20 @@ setInterval(() => {{
         }
 
         // Common LLM control token patterns to remove
+        result = Self::remove_control_tokens(&result);
+        result.trim().to_string()
+    }
+
+    /// Strip control tokens but preserve the prefix (for LM Studio function-call parsing)
+    fn strip_control_tokens_preserve_prefix(response: &str) -> String {
+        let result = Self::remove_control_tokens(response);
+        Self::normalize_unicode_punctuation(&result).trim().to_string()
+    }
+
+    /// Remove LLM control tokens from string
+    fn remove_control_tokens(text: &str) -> String {
+        let mut result = text.to_string();
+
         let patterns = [
             "<|channel|>",
             "<|constrain|>",
@@ -1589,8 +2009,6 @@ setInterval(() => {{
             "<|eot_id|>",
             "<|start_header_id|>",
             "<|end_header_id|>",
-            "final ",  // Often follows <|channel|>
-            "response",  // Often follows <|constrain|>
         ];
 
         for pattern in patterns {
@@ -1679,6 +2097,203 @@ setInterval(() => {{
         }
 
         result
+    }
+
+    /// Parse LM Studio's function-calling format
+    /// Format: "commentary to=server:tool mcp_args code{json_args}"
+    /// Example: "commentary to=playwright:browser_navigate mcp_args code{"url":"https://google.com"}"
+    fn parse_lm_studio_function_call(response: &str) -> Option<Action> {
+        // Pattern to match LM Studio function call format
+        // Matches: anything to=tool_name ... {json}
+        // Tool name can contain letters, numbers, underscore, colon, dot, hyphen
+        // Intermediate words like "mcp_args", "code", "json" are optionally matched
+        // Handles multiple formats:
+        // - mcp_args='{"url":"..."}'>  (with single quotes and equals)
+        // - mcp_args={"url":"..."}     (with equals only)
+        // - mcp_args {"url":"..."}     (space only)
+        // - code{"url":"..."}          (no separator)
+        let re = regex::Regex::new(
+            r#"(?s)(?:commentary|assistant\w*)?\s*to=([a-zA-Z0-9_:.\-]+)\s+(?:mcp_args|code|json)?[='"]*\s*(\{.+)"#
+        ).ok()?;
+
+        let caps = match re.captures(response) {
+            Some(c) => c,
+            None => {
+                if std::env::var("GANESHA_DEBUG").is_ok() && response.contains("to=") {
+                    eprintln!("[DEBUG] LM Studio regex didn't match. Response: {}", &response[..response.len().min(150)]);
+                }
+                return None;
+            }
+        };
+        let tool_name = caps.get(1)?.as_str();
+        let raw_args = caps.get(2)?.as_str();
+
+        // Extract just the JSON part - find balanced braces
+        let args_json = Self::extract_first_json(raw_args)?;
+
+        if std::env::var("GANESHA_DEBUG").is_ok() {
+            eprintln!("[DEBUG] LM Studio regex matched. Tool: {}, Args: {}", tool_name, &args_json[..args_json.len().min(100)]);
+        }
+
+        // Filter out non-MCP tools like container.exec, functions.*, etc.
+        // Check if tool name matches any connected MCP server
+        let is_mcp_tool = if tool_name.contains(':') {
+            use crate::orchestrator::mcp::get_all_mcp_tools;
+            let connected_servers = get_all_mcp_tools();
+            let server_prefix = tool_name.split(':').next().unwrap_or("");
+            // Check if the prefix matches any connected MCP server
+            connected_servers.iter().any(|(name, _)| name == server_prefix)
+        } else {
+            false
+        };
+
+        if !is_mcp_tool {
+            // This is an LM Studio built-in function, not an MCP tool
+            // Let the normal JSON parsing handle it
+            return None;
+        }
+
+        // Validate that args_json is valid JSON
+        let args: serde_json::Value = serde_json::from_str(&args_json).ok()?;
+
+        // Ensure tool_name has server:tool format
+        // If no colon, assume it's a playwright tool (most common)
+        let full_tool_name = if tool_name.contains(':') {
+            tool_name.to_string()
+        } else {
+            format!("playwright:{}", tool_name)
+        };
+
+        if std::env::var("GANESHA_DEBUG").is_ok() {
+            eprintln!("[DEBUG] Parsed LM Studio function call: {} with args {}", full_tool_name, args_json);
+        }
+
+        Some(Action {
+            id: Uuid::new_v4().to_string()[..8].to_string(),
+            action_type: ActionType::McpTool,
+            command: format!("{}|{}", full_tool_name, args_json),
+            explanation: format!("MCP tool call: {}", full_tool_name),
+            risk_level: RiskLevel::Low,
+            reversible: false,
+            reverse_command: None,
+            question: None,
+        })
+    }
+
+    /// Extract the first complete JSON object from a string by tracking balanced braces
+    fn extract_first_json(text: &str) -> Option<String> {
+        let mut depth = 0;
+        let mut start: Option<usize> = None;
+
+        for (i, ch) in text.char_indices() {
+            match ch {
+                '{' => {
+                    if depth == 0 {
+                        start = Some(i);
+                    }
+                    depth += 1;
+                }
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        if let Some(s) = start {
+                            return Some(text[s..=i].to_string());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// Check if response is just a URL (LLM outputting URL instead of proper JSON)
+    fn is_url_response(response: &str) -> bool {
+        let trimmed = response.trim();
+        // Check if it's a single line that looks like a URL
+        if trimmed.lines().count() > 1 {
+            return false;
+        }
+        // Match common URL patterns
+        trimmed.starts_with("http://") ||
+        trimmed.starts_with("https://") ||
+        (trimmed.contains('.') && !trimmed.contains(' ') &&
+         (trimmed.ends_with(".com") || trimmed.ends_with(".org") ||
+          trimmed.ends_with(".net") || trimmed.ends_with(".io") ||
+          trimmed.ends_with(".edu") || trimmed.ends_with(".gov") ||
+          trimmed.contains(".com/") || trimmed.contains(".org/")))
+    }
+
+    /// Check if browser MCP tools are connected
+    fn has_browser_mcp() -> bool {
+        use crate::orchestrator::mcp::get_all_mcp_tools;
+        let tools = get_all_mcp_tools();
+        tools.iter().any(|(name, _)| {
+            name.contains("playwright") || name.contains("browser")
+        })
+    }
+
+    /// Check if task is about a website/URL
+    fn is_website_task(task: &str) -> bool {
+        let lower = task.to_lowercase();
+        // Check for explicit URLs
+        if lower.contains("http://") || lower.contains("https://") {
+            return true;
+        }
+        // Check for domain patterns
+        let domain_patterns = [
+            ".com", ".org", ".net", ".io", ".edu", ".gov", ".co.uk",
+            ".de", ".fr", ".jp", ".au", ".ca", ".ru", ".cn", ".in",
+        ];
+        for pattern in domain_patterns {
+            if lower.contains(pattern) {
+                return true;
+            }
+        }
+        // Check for website-related keywords
+        let keywords = [
+            "website", "webpage", "web page", "browse", "visit",
+            "go to", "navigate to", "open", "check out", "look at",
+        ];
+        let website_verbs = keywords.iter().any(|k| lower.contains(k));
+        // Also check if they're asking about items/content on a site
+        let content_ask = lower.contains("what is on") ||
+                          lower.contains("what's on") ||
+                          lower.contains("items on") ||
+                          lower.contains("show me");
+        website_verbs || content_ask
+    }
+
+    /// Extract URL from task description
+    fn extract_url_from_task(task: &str) -> String {
+        // First check for explicit URLs
+        let words: Vec<&str> = task.split_whitespace().collect();
+        for word in &words {
+            if word.starts_with("http://") || word.starts_with("https://") {
+                return word.to_string();
+            }
+        }
+        // Look for domain patterns and construct URL
+        let domain_patterns = [
+            ".com", ".org", ".net", ".io", ".edu", ".gov", ".co.uk",
+        ];
+        for word in &words {
+            let lower = word.to_lowercase();
+            for pattern in &domain_patterns {
+                if lower.contains(pattern) {
+                    // Strip punctuation from the word
+                    let clean = word.trim_matches(|c: char| !c.is_alphanumeric() && c != '.' && c != '-');
+                    if !clean.is_empty() {
+                        // Make sure it has https:// prefix
+                        if clean.starts_with("http") {
+                            return clean.to_string();
+                        }
+                        return format!("https://{}", clean);
+                    }
+                }
+            }
+        }
+        String::new()
     }
 
     /// Extract the best JSON object from response (one containing "actions" or "response")

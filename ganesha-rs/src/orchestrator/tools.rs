@@ -179,7 +179,7 @@ impl ToolRegistry {
     }
 
     pub fn get_tools_json(&self) -> Value {
-        let tools: Vec<Value> = self.tools.values().map(|t| {
+        let mut tools: Vec<Value> = self.tools.values().map(|t| {
             json!({
                 "type": "function",
                 "function": {
@@ -189,6 +189,21 @@ impl ToolRegistry {
                 }
             })
         }).collect();
+
+        // Add MCP tools from connected servers
+        for (server_name, mcp_tools) in super::mcp::get_all_mcp_tools() {
+            for tool in mcp_tools {
+                tools.push(json!({
+                    "type": "function",
+                    "function": {
+                        "name": format!("{}:{}", server_name, tool.name),
+                        "description": format!("[MCP:{}] {}", server_name, tool.description.unwrap_or_default()),
+                        "parameters": tool.input_schema.unwrap_or(json!({"type": "object", "properties": {}}))
+                    }
+                }));
+            }
+        }
+
         json!(tools)
     }
 }
@@ -213,9 +228,46 @@ pub async fn execute_tool(
         "glob" => exec_glob(args, cwd),
         "grep" => exec_grep(args, cwd),
         "web_fetch" => exec_web_fetch(args).await,
-        _ => ToolExecResult {
+        _ => {
+            // Check if this is an MCP tool (format: "server:tool")
+            if let Some((server, tool)) = name.split_once(':') {
+                return exec_mcp_tool(server, tool, args);
+            }
+
+            // Also check for MCP tools without prefix in connected servers
+            let mcp_tools = super::mcp::get_all_mcp_tools();
+            for (server_name, tools) in mcp_tools {
+                if tools.iter().any(|t| t.name == name) {
+                    return exec_mcp_tool(&server_name, name, args);
+                }
+            }
+
+            ToolExecResult {
+                success: false,
+                output: format!("Unknown tool: {}", name),
+                metadata: HashMap::new(),
+            }
+        }
+    }
+}
+
+/// Execute an MCP tool
+fn exec_mcp_tool(server: &str, tool: &str, args: &Value) -> ToolExecResult {
+    match super::mcp::call_mcp_tool(server, tool, args.clone()) {
+        Ok(result) => {
+            let mut metadata = HashMap::new();
+            metadata.insert("mcp_server".into(), json!(server));
+            metadata.insert("mcp_tool".into(), json!(tool));
+
+            ToolExecResult {
+                success: true,
+                output: serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()),
+                metadata,
+            }
+        }
+        Err(e) => ToolExecResult {
             success: false,
-            output: format!("Unknown tool: {}", name),
+            output: format!("MCP tool error: {}", e),
             metadata: HashMap::new(),
         },
     }
