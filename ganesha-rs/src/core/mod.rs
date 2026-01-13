@@ -634,17 +634,33 @@ impl<L: LlmProvider, C: ConsentHandler> GaneshaEngine<L, C> {
                                   result_summary.contains("browser_navigate") ||
                                   result_summary.contains("Page URL:");
 
+        // Get current date/time for context
+        let now = chrono::Local::now();
+        let date_str = now.format("%B %d, %Y at %H:%M").to_string();
+
         let system_prompt = if has_browser_output {
             format!(
-                r#"You are Ganesha. The user asked: "{}"
+                r#"You are Ganesha. Current date: {}.
+User question: "{}"
 
 Page data:
 {}
 
-Analyze the Page Snapshot and answer the user's question completely.
-Output JSON: {{"response":"your complete answer here"}}
-Use bullet points (- item) for lists. List ALL items found, not just a few."#,
-                task, result_summary
+INSTRUCTIONS:
+1. Analyze the Page Snapshot THOROUGHLY
+2. Extract ALL items that match the user's question
+3. Output JSON: {{"response":"your complete answer here"}}
+
+CRITICAL - LIST ALL ITEMS:
+- Do NOT truncate lists - include EVERY item found
+- Use bullet points (- item) for each item
+- If there are 20 items, list all 20
+- If asked about "latest" models, include ALL models shown on the page
+- NEVER say "and more..." or "etc." - LIST EVERYTHING
+
+Example good response: {{"response":"The website shows:\n- Item 1\n- Item 2\n- Item 3\n... (all items listed)"}}
+Example bad response: {{"response":"The website shows Item 1, Item 2, and others..."}} (WRONG - must list all)"#,
+                date_str, task, result_summary
             )
         } else {
             format!(
@@ -868,7 +884,11 @@ EXAMPLES:
             }
         }
 
-        format!(r#"You are Ganesha, an autonomous AI system assistant. Working directory: {}{}{}
+        let now = chrono::Local::now();
+        let date_context = now.format("Current date: %B %d, %Y (%H:%M)").to_string();
+
+        format!(r#"You are Ganesha, an autonomous AI system assistant. {}
+Working directory: {}{}{}
 
 OUTPUT FORMAT - MANDATORY JSON:
 Multi-step tasks: {{"actions":[{{"command":"cmd1","explanation":"step 1"}},{{"command":"cmd2","explanation":"step 2"}},{{"command":"cmd3","explanation":"step 3"}}]}}
@@ -922,7 +942,7 @@ EXAMPLES:
     {{"command":"systemctl status apache2 | head -5","explanation":"Verify"}}
   ]}}
 - "what time is it" → {{"response":"It's currently [time]"}}
-- "is nginx running" → {{"actions":[{{"command":"systemctl status nginx | grep Active","explanation":"Check status"}}]}}"#, self.working_directory.display(), auto_mode, mcp_section)
+- "is nginx running" → {{"actions":[{{"command":"systemctl status nginx | grep Active","explanation":"Check status"}}]}}"#, date_context, self.working_directory.display(), auto_mode, mcp_section)
     }
 
     /// Build MCP tools section for prompt (if any MCP servers are connected)
