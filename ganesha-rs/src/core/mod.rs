@@ -477,18 +477,19 @@ impl<L: LlmProvider, C: ConsentHandler> GaneshaEngine<L, C> {
                                 }
                             }
                         }
-                        "exec" => {
+                        "exec" | "execute" | "shell" | "run" | "cmd" => {
                             // Model hallucinated this tool - redirect to show helpful error
                             // Commands should use the "command" field, not mcp_tool
                             let cmd = args.get("command")
                                 .or_else(|| args.get("cmd"))
+                                .or_else(|| args.get("script"))
                                 .and_then(|c| c.as_str())
                                 .unwrap_or("");
 
                             if cmd.is_empty() {
-                                Err("Use 'command' field for shell commands, not mcp_tool. Example: {\"actions\":[{\"command\":\"ls -la\",\"explanation\":\"List files\"}]}".to_string())
+                                Err("Shell commands must use the 'command' field, NOT mcp_tool. Correct format: {\"actions\":[{\"command\":\"pwd\",\"explanation\":\"Show directory\"}]}".to_string())
                             } else {
-                                Err(format!("Use 'command' field instead: {{\"actions\":[{{\"command\":\"{}\",\"explanation\":\"Execute\"}}]}}", cmd))
+                                Err(format!("Shell commands must use 'command' field: {{\"actions\":[{{\"command\":\"{}\",\"explanation\":\"Execute\"}}]}}", cmd))
                             }
                         }
                         _ => Err(format!("Unknown ganesha tool: {}. Available: web_search", tool))
@@ -961,10 +962,15 @@ EXAMPLES:
 Working directory: {}{}{}
 
 OUTPUT FORMAT - MANDATORY JSON:
-Multi-step tasks: {{"actions":[{{"command":"cmd1","explanation":"step 1"}},{{"command":"cmd2","explanation":"step 2"}},{{"command":"cmd3","explanation":"step 3"}}]}}
-MCP tools: {{"actions":[{{"mcp_tool":"server:tool","mcp_args":{{"key":"value"}},"explanation":"brief"}}]}}
+Shell commands (ls, pwd, cat, apt, etc.): {{"actions":[{{"command":"ls -la","explanation":"list files"}}]}}
+MCP tools (web search, browser): {{"actions":[{{"mcp_tool":"ganesha:web_search","mcp_args":{{"query":"search term"}},"explanation":"search"}}]}}
 Simple answers: {{"response":"brief answer"}}
 Need clarification: {{"question":"What do you want?","options":["Option A","Option B","Option C"]}}
+
+IMPORTANT - Use the correct field:
+- "command" field = ALL shell commands (ls, pwd, cat, grep, apt, systemctl, etc.)
+- "mcp_tool" field = ONLY for MCP server tools (ganesha:web_search, playwright:*, fetch:*)
+- NEVER use mcp_tool for shell commands like pwd, ls, cat - use "command" instead!
 
 CRITICAL: COMPLETE ALL STEPS IN ONE RESPONSE
 - Generate ALL commands needed to FULLY complete the task
