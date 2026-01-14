@@ -55,6 +55,9 @@ pub mod safety;
 // Pretty output formatting
 pub mod pretty;
 
+// Web Search - Brave Search API and DuckDuckGo fallback
+pub mod websearch;
+
 // Smell Test - Ganesha's trunk detects the rotten (always available for validation)
 pub mod smell;
 
@@ -107,6 +110,9 @@ pub use docs::{DocsLoader, DocsProvider, DocSnippet, Context7Provider, LocalDocs
 
 // Smell Test - always available
 pub use smell::{Trunk, SmellTest, SmellWarning, SmellCategory, quick_smell};
+
+// Web Search - always available
+pub use websearch::{SearchResult, SearchResponse, search as web_search, format_results as format_search_results};
 
 // AI Cursor and mouse control
 #[cfg(feature = "computer-use")]

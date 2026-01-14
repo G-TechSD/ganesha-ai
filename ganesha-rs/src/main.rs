@@ -20,6 +20,7 @@ mod pretty;
 mod providers;
 mod orchestrator;
 mod tui;
+mod websearch;
 mod workflow;
 
 use clap::{Parser, Subcommand};
@@ -34,7 +35,7 @@ use chrono::Local;
 #[derive(Parser)]
 #[command(name = "ganesha")]
 #[command(author = "G-Tech SD")]
-#[command(version = "3.0.0")]
+#[command(version = "3.14.0")]
 #[command(about = "The Remover of Obstacles - AI-Powered System Control")]
 #[command(long_about = r#"
 Ganesha translates natural language into safe, executable system commands.
@@ -142,6 +143,14 @@ struct Args {
     #[arg(long)]
     uninstall: bool,
 
+    /// Resume the last session
+    #[arg(long)]
+    last: bool,
+
+    /// Select from previous sessions to resume
+    #[arg(long)]
+    sessions: bool,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -197,6 +206,16 @@ async fn main() {
     if args.uninstall {
         uninstall_ganesha();
         return;
+    }
+
+    // Handle --last flag - resume last session
+    if args.last {
+        handle_last_session();
+    }
+
+    // Handle --sessions flag - select from previous sessions
+    if args.sessions {
+        handle_sessions_selection();
     }
 
     // Check if ganesha is available system-wide (interactive first-run)
@@ -306,12 +325,12 @@ async fn main() {
         if !task.is_empty() {
             match agent.run_task(&task).await {
                 Ok(result) => {
-                    pretty::print_ganesha_response(&result.final_response);
-                    if !args.quiet {
-                        println!("\n{}", style(format!(
-                            "Completed {} actions in {:?}",
-                            result.actions.len(),
-                            result.duration
+                    let metrics = pretty::ResponseMetrics::new(result.duration.as_millis() as u64);
+                    pretty::print_ganesha_response_with_metrics(&result.final_response, Some(metrics));
+                    if !args.quiet && result.actions.len() > 1 {
+                        println!("{}", style(format!(
+                            "  {} actions completed",
+                            result.actions.len()
                         )).dim());
                     }
                 }
@@ -341,7 +360,8 @@ async fn main() {
 
                         match agent.run_task(input).await {
                             Ok(result) => {
-                                pretty::print_ganesha_response(&result.final_response);
+                                let metrics = pretty::ResponseMetrics::new(result.duration.as_millis() as u64);
+                                pretty::print_ganesha_response_with_metrics(&result.final_response, Some(metrics));
                             }
                             Err(e) => {
                                 print_error(&format!("Error: {}", e));
@@ -662,6 +682,7 @@ async fn run_repl<C: core::ConsentHandler>(
 
                     println!("\n{}", style("SETTINGS & CONFIGURATION:").yellow().bold());
                     println!("  /settings      Open settings menu");
+                    println!("  /models        Browse and select models from all providers");
                     println!("  /mcp           MCP Server management:");
                     println!("                 • Connect Playwright (web testing)");
                     println!("                 • Connect Context7 (documentation)");
@@ -1086,6 +1107,15 @@ with real GitLab repositories and documentation.
                     continue;
                 }
 
+                // Handle model selection
+                if input == "/models" {
+                    menu::show_models_menu();
+                    println!("\n{}", style("─".repeat(60)).dim());
+                    println!("{}", style("Back to interactive mode.").dim());
+                    println!("{}\n", style("─".repeat(60)).dim());
+                    continue;
+                }
+
                 // Process the task and capture output
                 // Re-echo user input in green for visibility when scrolling
                 print!("\x1b[1A\x1b[2K");  // Move up one line and clear it
@@ -1349,6 +1379,131 @@ fn uninstall_ganesha() {
     }
 
     println!();
+}
+
+/// Handle --last flag - show info about the last session
+fn handle_last_session() {
+    use orchestrator::memory::GlobalMemory;
+
+    let memory = GlobalMemory::load();
+
+    if memory.sessions.is_empty() {
+        print_warning("No previous sessions found");
+        println!("{}", style("Start a new session to build history.").dim());
+        return;
+    }
+
+    let last = memory.sessions.last().unwrap();
+    println!();
+    println!("{}", style("═".repeat(60)).dim());
+    println!("{}", style("Last Session").cyan().bold());
+    println!("{}", style("═".repeat(60)).dim());
+
+    println!("{} {}", style("Task:").dim(), style(&last.primary_task).white().bold());
+    println!("{} {}", style("Started:").dim(), last.started_at.format("%Y-%m-%d %H:%M:%S"));
+    println!("{} {:?}", style("Outcome:").dim(), last.outcome);
+    println!("{} {} files", style("Modified:").dim(), last.files_modified.len());
+    println!("{} {} commands", style("Executed:").dim(), last.commands_executed.len());
+
+    if !last.key_learnings.is_empty() {
+        println!("{}", style("\nKey Learnings:").dim());
+        for learning in &last.key_learnings {
+            println!("  • {}", learning);
+        }
+    }
+
+    println!();
+    println!("{}", style("Continue with this context? Use: ganesha \"continue last task\"").cyan());
+    println!();
+}
+
+/// Handle --sessions flag - select from previous sessions
+fn handle_sessions_selection() {
+    use orchestrator::memory::GlobalMemory;
+    use dialoguer::{theme::ColorfulTheme, Select};
+
+    let memory = GlobalMemory::load();
+
+    if memory.sessions.is_empty() {
+        print_warning("No previous sessions found");
+        println!("{}", style("Start a new session to build history.").dim());
+        return;
+    }
+
+    println!();
+    println!("{}", style("═".repeat(60)).dim());
+    println!("{}", style("Session History").cyan().bold());
+    println!("{}", style("═".repeat(60)).dim());
+    println!();
+
+    // Build selection items (most recent first, up to 20)
+    let sessions: Vec<_> = memory.sessions.iter().rev().take(20).collect();
+    let items: Vec<String> = sessions.iter().map(|s| {
+        format!("[{}] {} ({:?})",
+            s.started_at.format("%m-%d %H:%M"),
+            truncate_str(&s.primary_task, 40),
+            s.outcome
+        )
+    }).collect();
+
+    let selection = Select::with_theme(&ColorfulTheme::default())
+        .with_prompt("Select a session to view")
+        .items(&items)
+        .default(0)
+        .interact_opt();
+
+    match selection {
+        Ok(Some(idx)) => {
+            let session = sessions[idx];
+            println!();
+            println!("{}", style("─".repeat(60)).dim());
+            println!("{} {}", style("Task:").dim(), style(&session.primary_task).white().bold());
+            println!("{} {}", style("Started:").dim(), session.started_at.format("%Y-%m-%d %H:%M:%S"));
+            println!("{} {}", style("Ended:").dim(), session.ended_at.format("%Y-%m-%d %H:%M:%S"));
+            println!("{} {:?}", style("Outcome:").dim(), session.outcome);
+
+            if !session.files_modified.is_empty() {
+                println!("{}", style("\nFiles Modified:").dim());
+                for file in session.files_modified.iter().take(10) {
+                    println!("  • {}", file);
+                }
+                if session.files_modified.len() > 10 {
+                    println!("  ... and {} more", session.files_modified.len() - 10);
+                }
+            }
+
+            if !session.commands_executed.is_empty() {
+                println!("{}", style("\nCommands Executed:").dim());
+                for cmd in session.commands_executed.iter().take(5) {
+                    println!("  • {}", truncate_str(cmd, 60));
+                }
+                if session.commands_executed.len() > 5 {
+                    println!("  ... and {} more", session.commands_executed.len() - 5);
+                }
+            }
+
+            if !session.key_learnings.is_empty() {
+                println!("{}", style("\nKey Learnings:").dim());
+                for learning in &session.key_learnings {
+                    println!("  • {}", learning);
+                }
+            }
+
+            println!();
+        }
+        _ => {
+            println!("{}", style("Cancelled").dim());
+        }
+    }
+}
+
+/// Helper to truncate strings for display
+fn truncate_str(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        format!("{}...", &s[..max_len.saturating_sub(3)])
+    }
 }
 
 /// Check if ganesha is available system-wide and offer to install if not
@@ -1752,6 +1907,10 @@ async fn run_task_with_log<C: core::ConsentHandler>(
     high_reasoning: bool,
 ) -> String {
     use rand::seq::SliceRandom;
+    use pretty::ResponseMetrics;
+
+    // Start timing from user prompt
+    let task_start = std::time::Instant::now();
 
     let task = if code_mode {
         format!("[CODE MODE] {}", task)
@@ -1885,7 +2044,8 @@ async fn run_task_with_log<C: core::ConsentHandler>(
     if current_plan.actions.iter().all(|a| a.command.is_empty()) {
         for action in &current_plan.actions {
             if !action.explanation.is_empty() && !matches!(action.action_type, core::ActionType::Question) {
-                pretty::print_ganesha_response(&action.explanation);
+                let metrics = ResponseMetrics::new(task_start.elapsed().as_millis() as u64);
+                pretty::print_ganesha_response_with_metrics(&action.explanation, Some(metrics));
                 all_outputs.push(action.explanation.clone());
             }
         }
@@ -2067,7 +2227,8 @@ async fn run_task_with_log<C: core::ConsentHandler>(
 
                 // No more actions - show final response and exit
                 if !response.is_empty() {
-                    pretty::print_ganesha_response(&response);
+                    let metrics = ResponseMetrics::new(task_start.elapsed().as_millis() as u64);
+                    pretty::print_ganesha_response_with_metrics(&response, Some(metrics));
                     all_outputs.push(response);
                 } else if !results.is_empty() {
                     // No response from LLM, generate a meaningful summary from explanations
@@ -2128,11 +2289,16 @@ async fn run_task<C: core::ConsentHandler>(
     task: &str,
     code_mode: bool,
 ) {
+    use pretty::ResponseMetrics;
+
     let task = if code_mode {
         format!("[CODE MODE] {}", task)
     } else {
         task.to_string()
     };
+
+    // Start timing from user prompt
+    let task_start = std::time::Instant::now();
 
     // Agentic loop - plan, execute, analyze, repeat if needed
     let max_iterations = 5;  // Safety limit
@@ -2166,8 +2332,9 @@ async fn run_task<C: core::ConsentHandler>(
         // Show execution summaries for commands
         for result in &results {
             if result.command.is_empty() && !result.explanation.is_empty() {
-                // Response action - show the response with pretty formatting
-                pretty::print_ganesha_response(&result.explanation);
+                // Response action - show the response with pretty formatting and metrics
+                let metrics = ResponseMetrics::new(task_start.elapsed().as_millis() as u64);
+                pretty::print_ganesha_response_with_metrics(&result.explanation, Some(metrics));
             } else if !result.command.is_empty() {
                 // Command execution - show friendly summary
                 print_action_summary(&result.command, result.success, &result.output, result.duration_ms);
@@ -2196,7 +2363,8 @@ async fn run_task<C: core::ConsentHandler>(
                 }
                 // Show the analysis response
                 if !response.is_empty() {
-                    pretty::print_ganesha_response(&response);
+                    let metrics = ResponseMetrics::new(task_start.elapsed().as_millis() as u64);
+                    pretty::print_ganesha_response_with_metrics(&response, Some(metrics));
                 }
 
                 // If there are more actions needed, continue the loop

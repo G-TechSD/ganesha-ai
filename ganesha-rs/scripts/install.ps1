@@ -1,8 +1,8 @@
 # Ganesha Installer for Windows
-# https://bill-dev-linux-1/gtechsd/ganesha-ai
+# https://github.com/G-TechSD/ganesha-ai
 #
 # Usage (PowerShell):
-#   iwr -useb https://bill-dev-linux-1/gtechsd/ganesha-ai/-/releases/permalink/latest/downloads/install.ps1 | iex
+#   iwr -useb https://raw.githubusercontent.com/G-TechSD/ganesha-ai/main/ganesha-rs/scripts/install.ps1 | iex
 #
 # Or download and run:
 #   .\install.ps1
@@ -10,7 +10,7 @@
 $ErrorActionPreference = "Stop"
 
 # Configuration
-$GitLabUrl = "https://bill-dev-linux-1/gtechsd/ganesha-ai"
+$GitHubUrl = "https://github.com/G-TechSD/ganesha-ai"
 $Version = if ($env:GANESHA_VERSION) { $env:GANESHA_VERSION } else { "latest" }
 $InstallDir = "$env:LOCALAPPDATA\Ganesha"
 $BinaryName = "ganesha.exe"
@@ -35,9 +35,9 @@ Write-Host "Platform: windows-$Arch" -ForegroundColor DarkGray
 
 # Determine download URL
 if ($Version -eq "latest") {
-    $DownloadUrl = "$GitLabUrl/-/releases/permalink/latest/downloads/ganesha-windows-x86_64.zip"
+    $DownloadUrl = "$GitHubUrl/releases/latest/download/ganesha-windows-x86_64.zip"
 } else {
-    $DownloadUrl = "$GitLabUrl/-/releases/$Version/downloads/ganesha-windows-x86_64.zip"
+    $DownloadUrl = "$GitHubUrl/releases/download/v$Version/ganesha-windows-x86_64.zip"
 }
 
 Write-Host "Download URL: $DownloadUrl" -ForegroundColor DarkGray
@@ -130,7 +130,8 @@ try {
 
     Write-Host ""
     Write-Host "===========================================================" -ForegroundColor Cyan
-    Write-Host "Documentation: $GitLabUrl" -ForegroundColor DarkGray
+    Write-Host "Documentation: $GitHubUrl" -ForegroundColor DarkGray
+    Write-Host "Website: https://ganesha-ai.com" -ForegroundColor DarkGray
     Write-Host "===========================================================" -ForegroundColor Cyan
     Write-Host ""
 }

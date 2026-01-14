@@ -1,6 +1,6 @@
 [package]
 name = "ganesha"
-version = "3.0.0"
+version = "3.14.0"
 edition = "2021"
 authors = ["G-Tech SD <dev@gtechsd.com>"]
 description = "The Remover of Obstacles - AI-Powered System Control"
@@ -70,6 +70,7 @@ flate2 = "1.0"                  # Compression for rollback snapshots
 md5 = "0.7"                     # Hashing for file change detection
 base64_lib = { package = "base64", version = "0.21" }  # Base64 encoding (always available)
 urlencoding = "2.1"             # URL encoding for OAuth2
+html-escape = "0.2"             # HTML entity decoding for web scraping
 
 # HTTP server for API
 axum = "0.7"

@@ -453,6 +453,52 @@ impl<L: LlmProvider, C: ConsentHandler> GaneshaEngine<L, C> {
                 let args: serde_json::Value = serde_json::from_str(args_json)
                     .unwrap_or(serde_json::json!({}));
 
+                // Handle built-in "ganesha:" tools
+                if server == "ganesha" {
+                    let result: Result<String, String> = match tool {
+                        "web_search" => {
+                            let query = args.get("query").and_then(|q| q.as_str()).unwrap_or("");
+                            let max_results = args.get("max_results").and_then(|m| m.as_u64()).unwrap_or(10) as usize;
+
+                            // Directly await the async search
+                            match crate::websearch::search(query, max_results).await {
+                                Ok(response) => {
+                                    let output = crate::websearch::format_results(&response);
+                                    Ok(output)
+                                }
+                                Err(e) => Err(e)
+                            }
+                        }
+                        _ => Err(format!("Unknown ganesha tool: {}", tool))
+                    };
+
+                    match result {
+                        Ok(output) => {
+                            results.push(ExecutionResult {
+                                action_id: action.id.clone(),
+                                command: format!("ganesha:{}", tool),
+                                explanation: action.explanation.clone(),
+                                success: true,
+                                output,
+                                error: None,
+                                duration_ms: start.elapsed().as_millis() as u64,
+                            });
+                        }
+                        Err(e) => {
+                            results.push(ExecutionResult {
+                                action_id: action.id.clone(),
+                                command: format!("ganesha:{}", tool),
+                                explanation: action.explanation.clone(),
+                                success: false,
+                                output: String::new(),
+                                error: Some(format!("Ganesha tool error: {}", e)),
+                                duration_ms: start.elapsed().as_millis() as u64,
+                            });
+                        }
+                    }
+                    continue;
+                }
+
                 match call_mcp_tool(server, tool, args) {
                     Ok(result) => {
                         // Extract text content from MCP response
@@ -932,21 +978,30 @@ CODE ANALYSIS TASKS:
 - Use: cat, find, head, grep to explore
 - Keep exploring until you have enough context
 
-WEB TASKS - Use the right tool:
+WEB SEARCH - USE SELECTIVELY:
 
-1. FETCH (simple content): Use fetch:fetch for getting page content
-   {{"actions":[{{"mcp_tool":"fetch:fetch","mcp_args":{{"url":"https://example.com"}},"explanation":"Get page content"}}]}}
+Use ganesha:web_search ONLY when user explicitly asks to search the web or needs current/external information.
+DO NOT use web search for: greetings, basic knowledge, system commands, or questions you can answer directly.
 
-2. BROWSER (interactive): Use playwright for clicking, forms, dynamic sites
-   {{"actions":[{{"mcp_tool":"playwright:browser_navigate","mcp_args":{{"url":"URL"}},"explanation":"Browse site"}}]}}
+WHEN TO SEARCH (explicit web requests):
+- "search for X" / "look up X online" / "find X on the web" → use ganesha:web_search
+- "what's the latest news about X" → use ganesha:web_search
+- "go to X website" → use ganesha:web_search to find URL first
 
-3. SEARCH (find websites): If URL unknown, search Google first!
-   {{"actions":[{{"mcp_tool":"fetch:fetch","mcp_args":{{"url":"https://www.google.com/search?q=nissan+usa+cars+2026"}},"explanation":"Search for site"}}]}}
+WHEN NOT TO SEARCH (answer directly instead):
+- "hello" / "hi" → respond with greeting
+- "what is air" / "what is water" → explain using your knowledge
+- "how do I install X" → provide commands directly
+- "list files" / "show disk usage" → execute system commands
 
-NEVER GUESS URLs! If user says "nissan cars" or "find X online":
-  → Search Google first, then visit the correct site
-  → "nissan cars" = search "nissan usa official site cars 2026"
-  → "latest iphones" = search "apple iphone models 2026"
+Search format:
+{{"actions":[{{"mcp_tool":"ganesha:web_search","mcp_args":{{"query":"your search terms","max_results":10}},"explanation":"Search the web"}}]}}
+
+FETCH (only for KNOWN URLs provided by user or from search results):
+{{"actions":[{{"mcp_tool":"fetch:fetch","mcp_args":{{"url":"https://exact-url.com"}},"explanation":"Get page"}}]}}
+
+BROWSER (only for interactive tasks: clicking, filling forms, JavaScript sites):
+{{"actions":[{{"mcp_tool":"playwright:browser_navigate","mcp_args":{{"url":"URL"}},"explanation":"Browse"}}]}}
 
 EXAMPLES:
 - "install apache and set doc root to /home/user/WWW" → {{"actions":[
@@ -984,8 +1039,13 @@ EXAMPLES:
             }
         }
 
+        // Remind about web search but not too aggressively
+        section.push_str("\nWEB SEARCH: Use ganesha:web_search only for explicit web/search requests.\n");
+        section.push_str("- \"search for X\" or \"look up X online\" → use ganesha:web_search\n");
+        section.push_str("- Greetings, basic questions, commands → respond directly, no search needed.\n");
+
         // Add dynamic examples based on connected server
-        section.push_str("\nWEBSITE EXAMPLES (USE THESE FOR ANY WEBSITE REQUEST):\n");
+        section.push_str("\nBROWSER EXAMPLES (only for navigating to KNOWN URLs):\n");
 
         // Find tools for examples
         let mcp_tools = get_all_mcp_tools();
@@ -2171,19 +2231,25 @@ setInterval(() => {{
         }
 
         // Filter out non-MCP tools like container.exec, functions.*, etc.
-        // Check if tool name matches any connected MCP server
-        let is_mcp_tool = if tool_name.contains(':') {
+        // Check if tool name matches any connected MCP server OR built-in ganesha tools
+        let is_valid_tool = if tool_name.contains(':') {
             use crate::orchestrator::mcp::get_all_mcp_tools;
-            let connected_servers = get_all_mcp_tools();
             let server_prefix = tool_name.split(':').next().unwrap_or("");
-            // Check if the prefix matches any connected MCP server
-            connected_servers.iter().any(|(name, _)| name == server_prefix)
+
+            // Allow "ganesha:" prefix for built-in tools (web_search, etc.)
+            if server_prefix == "ganesha" {
+                true
+            } else {
+                // Check if the prefix matches any connected MCP server
+                let connected_servers = get_all_mcp_tools();
+                connected_servers.iter().any(|(name, _)| name == server_prefix)
+            }
         } else {
             false
         };
 
-        if !is_mcp_tool {
-            // This is an LM Studio built-in function, not an MCP tool
+        if !is_valid_tool {
+            // This is an LM Studio built-in function, not an MCP or Ganesha tool
             // Let the normal JSON parsing handle it
             return None;
         }

@@ -338,8 +338,36 @@ pub fn print_divider() {
     println!("{}", style("─".repeat(width)).dim());
 }
 
-/// Print Ganesha's response in a nice format
+/// Response metrics for display
+#[derive(Default, Clone)]
+pub struct ResponseMetrics {
+    pub elapsed_ms: u64,
+    pub prompt_tokens: Option<u32>,
+    pub completion_tokens: Option<u32>,
+}
+
+impl ResponseMetrics {
+    pub fn new(elapsed_ms: u64) -> Self {
+        Self {
+            elapsed_ms,
+            prompt_tokens: None,
+            completion_tokens: None,
+        }
+    }
+
+    /// Estimate tokens from text (roughly 4 chars = 1 token)
+    pub fn estimate_tokens(text: &str) -> u32 {
+        (text.len() as f64 / 4.0).ceil() as u32
+    }
+}
+
+/// Print Ganesha's response in a nice format with timestamp
 pub fn print_ganesha_response(response: &str) {
+    print_ganesha_response_with_metrics(response, None);
+}
+
+/// Print Ganesha's response with optional metrics
+pub fn print_ganesha_response_with_metrics(response: &str, metrics: Option<ResponseMetrics>) {
     // Unescape common escape sequences (LLMs sometimes output literal \n)
     let response = response
         .replace("\\n", "\n")
@@ -352,9 +380,115 @@ pub fn print_ganesha_response(response: &str) {
         return;
     }
 
-    // Always use boxed format for consistent output
+    // Always use boxed format for consistent output with timestamp
+    let timestamp = chrono::Local::now().format("[%H:%M:%S]").to_string();
     println!();
-    print_box("Ganesha", &response);
+    print_box_with_timestamp("Ganesha", &response, &timestamp);
+
+    // Print metrics line if available
+    if let Some(m) = metrics {
+        print_metrics_line(&response, &m);
+    }
+}
+
+/// Print a compact metrics line below the response
+fn print_metrics_line(response: &str, metrics: &ResponseMetrics) {
+    let elapsed_secs = metrics.elapsed_ms as f64 / 1000.0;
+
+    // Use provided tokens or estimate from response
+    let tokens = metrics.completion_tokens
+        .unwrap_or_else(|| ResponseMetrics::estimate_tokens(response));
+
+    // Calculate tokens per second
+    let tps = if elapsed_secs > 0.0 {
+        tokens as f64 / elapsed_secs
+    } else {
+        0.0
+    };
+
+    // Format elapsed time nicely
+    let elapsed_str = if elapsed_secs < 1.0 {
+        format!("{}ms", metrics.elapsed_ms)
+    } else if elapsed_secs < 60.0 {
+        format!("{:.1}s", elapsed_secs)
+    } else {
+        let mins = (elapsed_secs / 60.0).floor() as u64;
+        let secs = elapsed_secs % 60.0;
+        format!("{}m{:.0}s", mins, secs)
+    };
+
+    // Compact display: ⏱ 2.3s · ~145 tokens · 63 tok/s
+    println!(
+        "{}",
+        style(format!(
+            "  ⏱ {} · ~{} tokens · {:.0} tok/s",
+            elapsed_str, tokens, tps
+        )).dim()
+    );
+}
+
+/// Print a boxed message with a timestamp
+pub fn print_box_with_timestamp(title: &str, content: &str, timestamp: &str) {
+    // Bare mode: just print content
+    if is_bare_mode() {
+        println!("{}", content);
+        return;
+    }
+
+    let width = term_width().min(100).max(40);
+    let inner_width = width - 4; // Account for borders and padding
+
+    // Top border with title and timestamp
+    let title_display = format!(" {} ", style(title).green().bold());
+    let ts_display = format!(" {} ", style(timestamp).dim());
+    let title_len = title.len() + 2;
+    let ts_len = timestamp.len() + 2;
+    let top_width = inner_width + 2;
+    let remaining = top_width.saturating_sub(title_len + ts_len);
+
+    println!(
+        "{}{}{}{}{}{}",
+        style(BOX_TOP_LEFT).blue(),
+        title_display,
+        style(BOX_HORIZONTAL.repeat(remaining)).blue(),
+        ts_display,
+        style(BOX_HORIZONTAL).blue(),
+        style(BOX_TOP_RIGHT).blue()
+    );
+
+    // Content with markdown rendering
+    let formatted = render_markdown(content, inner_width);
+    for line in formatted.lines() {
+        let vis_width = visible_width(line);
+        let display_line = if vis_width > inner_width {
+            truncate_visible(line, inner_width)
+        } else {
+            line.to_string()
+        };
+
+        let display_vis_width = visible_width(&display_line);
+        let padding = if display_vis_width < inner_width {
+            inner_width - display_vis_width
+        } else {
+            0
+        };
+
+        println!(
+            "{} {}{} {}",
+            style(BOX_VERTICAL).blue(),
+            display_line,
+            " ".repeat(padding),
+            style(BOX_VERTICAL).blue()
+        );
+    }
+
+    // Bottom border
+    println!(
+        "{}{}{}",
+        style(BOX_BOTTOM_LEFT).blue(),
+        style(BOX_HORIZONTAL.repeat(inner_width + 2)).blue(),
+        style(BOX_BOTTOM_RIGHT).blue()
+    );
 }
 
 /// Animated typing effect for responses

@@ -168,6 +168,20 @@ impl ToolRegistry {
                 "required": ["description"]
             }),
         });
+
+        // Web Search tool - search the internet
+        self.tools.insert("web_search".into(), ToolDef {
+            name: "web_search".into(),
+            description: "Search the web for information. Uses Brave Search API if available, falls back to DuckDuckGo. Returns search results with titles, URLs, and snippets.".into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query"},
+                    "max_results": {"type": "integer", "description": "Maximum results to return (default 10, max 20)"}
+                },
+                "required": ["query"]
+            }),
+        });
     }
 
     pub fn get_tool(&self, name: &str) -> Option<&ToolDef> {
@@ -228,6 +242,7 @@ pub async fn execute_tool(
         "glob" => exec_glob(args, cwd),
         "grep" => exec_grep(args, cwd),
         "web_fetch" => exec_web_fetch(args).await,
+        "web_search" => exec_web_search(args).await,
         _ => {
             // Check if this is an MCP tool (format: "server:tool")
             if let Some((server, tool)) = name.split_once(':') {
@@ -589,6 +604,41 @@ fn exec_grep(args: &Value, cwd: &str) -> ToolExecResult {
         Err(e) => ToolExecResult {
             success: false,
             output: format!("Search error: {}", e),
+            metadata: HashMap::new(),
+        },
+    }
+}
+
+async fn exec_web_search(args: &Value) -> ToolExecResult {
+    let query = args["query"].as_str().unwrap_or("");
+    let max_results = args["max_results"].as_u64().unwrap_or(10) as usize;
+
+    if query.is_empty() {
+        return ToolExecResult {
+            success: false,
+            output: "Search query is required".into(),
+            metadata: HashMap::new(),
+        };
+    }
+
+    match crate::websearch::search(query, max_results.min(20)).await {
+        Ok(response) => {
+            let formatted = crate::websearch::format_results(&response);
+
+            let mut metadata = HashMap::new();
+            metadata.insert("query".into(), json!(query));
+            metadata.insert("provider".into(), json!(response.provider));
+            metadata.insert("result_count".into(), json!(response.results.len()));
+
+            ToolExecResult {
+                success: true,
+                output: formatted,
+                metadata,
+            }
+        }
+        Err(e) => ToolExecResult {
+            success: false,
+            output: format!("Search failed: {}", e),
             metadata: HashMap::new(),
         },
     }
