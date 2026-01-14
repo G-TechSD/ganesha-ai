@@ -1448,6 +1448,178 @@ pub fn show_session_history() {
     }
 }
 
+/// Show available models from all providers with dynamic fetching
+pub fn show_models_menu() {
+    use console::style;
+    use std::io::{self, Write};
+
+    println!("\n{}", style("═".repeat(60)).dim());
+    println!("{}", style("Available Models").cyan().bold());
+    println!("{}\n", style("═".repeat(60)).dim());
+
+    println!("{}", style("Fetching models from connected providers...").dim());
+    println!();
+
+    let providers = get_providers();
+
+    if providers.is_empty() {
+        println!("{} No providers configured. Use /settings to add providers.", style("ℹ").cyan());
+        println!("\n{}", style("Press Enter to continue...").dim());
+        let _ = io::stdin().read_line(&mut String::new());
+        return;
+    }
+
+    let mut all_models: Vec<(String, String, String)> = vec![]; // (provider, model_id, display_name)
+
+    for provider in &providers {
+        if !provider.enabled {
+            continue;
+        }
+
+        let models = fetch_local_models(&provider.endpoint, &provider.provider_type);
+
+        if models.is_empty() {
+            // Show the configured default model if we can't fetch dynamically
+            all_models.push((
+                provider.name.clone(),
+                provider.model.clone(),
+                format!("{} (configured)", provider.model)
+            ));
+        } else {
+            for model in models {
+                all_models.push((
+                    provider.name.clone(),
+                    model.clone(),
+                    model
+                ));
+            }
+        }
+    }
+
+    // Also check OpenRouter if available
+    if let Ok(key) = std::env::var("OPENROUTER_API_KEY") {
+        println!("{}", style("Checking OpenRouter...").dim());
+        let models = fetch_openrouter_models_blocking(&key);
+        for (id, name) in models.into_iter().take(15) { // Limit to top 15
+            all_models.push(("openrouter".to_string(), id, name));
+        }
+    }
+
+    if all_models.is_empty() {
+        println!("{} No models found from any provider.", style("⚠").yellow());
+        println!("\n{}", style("Press Enter to continue...").dim());
+        let _ = io::stdin().read_line(&mut String::new());
+        return;
+    }
+
+    // Group by provider
+    let mut current_provider = String::new();
+    for (i, (provider, model_id, display_name)) in all_models.iter().enumerate() {
+        if provider != &current_provider {
+            current_provider = provider.clone();
+            println!("\n{}", style(format!("  {}:", provider.to_uppercase())).cyan().bold());
+        }
+        println!("    {} {} {}",
+            style(format!("[{}]", i + 1)).yellow(),
+            style(&display_name).bold(),
+            if model_id != display_name { style(format!("({})", model_id)).dim() } else { style("".to_string()).dim() }
+        );
+    }
+
+    println!("\n{}", style("─".repeat(60)).dim());
+    println!("{}", style("Enter a number to select a model, or press Enter to go back.").dim());
+    print!("{} ", style("Select model:").cyan());
+    let _ = io::stdout().flush();
+
+    let mut input = String::new();
+    if io::stdin().read_line(&mut input).is_err() {
+        return;
+    }
+
+    let input = input.trim();
+    if input.is_empty() {
+        return;
+    }
+
+    if let Ok(num) = input.parse::<usize>() {
+        if num > 0 && num <= all_models.len() {
+            let (provider, model_id, _) = &all_models[num - 1];
+            println!("\n{} Selected: {} from {}", style("✓").green(), model_id, provider);
+            println!("{}", style("Model selection saved for this session.").dim());
+
+            // Store the selection (update the provider's model)
+            unsafe {
+                for p in CONFIGURED_PROVIDERS.iter_mut() {
+                    if &p.name == provider {
+                        p.model = model_id.clone();
+                        break;
+                    }
+                }
+            }
+        } else {
+            println!("{} Invalid selection.", style("⚠").yellow());
+        }
+    }
+
+    println!("\n{}", style("Press Enter to continue...").dim());
+    let _ = io::stdin().read_line(&mut String::new());
+}
+
+/// Fetch OpenRouter models (blocking)
+fn fetch_openrouter_models_blocking(api_key: &str) -> Vec<(String, String)> {
+    use std::time::Duration;
+
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return vec![],
+    };
+
+    let response = match client
+        .get("https://openrouter.ai/api/v1/models")
+        .bearer_auth(api_key)
+        .send()
+    {
+        Ok(r) => r,
+        Err(_) => return vec![],
+    };
+
+    if !response.status().is_success() {
+        return vec![];
+    }
+
+    let text = match response.text() {
+        Ok(t) => t,
+        Err(_) => return vec![],
+    };
+
+    // Parse OpenRouter format: { "data": [{ "id": "...", "name": "..." }] }
+    #[derive(serde::Deserialize)]
+    struct OpenRouterModels {
+        data: Vec<OpenRouterModel>,
+    }
+    #[derive(serde::Deserialize)]
+    struct OpenRouterModel {
+        id: String,
+        name: Option<String>,
+    }
+
+    if let Ok(parsed) = serde_json::from_str::<OpenRouterModels>(&text) {
+        // Return popular/recommended models first
+        let priority_models = ["claude", "gpt-4", "gpt-5", "gemini", "llama", "mistral", "deepseek"];
+        let mut models: Vec<_> = parsed.data.into_iter()
+            .filter(|m| priority_models.iter().any(|p| m.id.to_lowercase().contains(p)))
+            .map(|m| (m.id.clone(), m.name.unwrap_or(m.id)))
+            .collect();
+        models.sort_by(|a, b| a.1.cmp(&b.1));
+        return models;
+    }
+
+    vec![]
+}
+
 /// Main settings menu
 pub fn show_settings_menu() {
     loop {

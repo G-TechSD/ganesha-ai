@@ -1,9 +1,9 @@
 #!/bin/bash
 # Ganesha Installer for Linux and macOS
-# https://bill-dev-linux-1/gtechsd/ganesha-ai
+# https://github.com/G-TechSD/ganesha-ai
 #
 # Usage:
-#   curl -sSL https://bill-dev-linux-1/gtechsd/ganesha-ai/-/releases/permalink/latest/downloads/install.sh | bash
+#   curl -sSL https://raw.githubusercontent.com/G-TechSD/ganesha-ai/main/ganesha-rs/scripts/install.sh | bash
 #
 # Or download and run:
 #   chmod +x install.sh && ./install.sh
@@ -64,16 +64,16 @@ fi
 echo -e "${DIM}Detected platform: ${PLATFORM}${NC}"
 
 # Configuration
-GITLAB_URL="https://bill-dev-linux-1/gtechsd/ganesha-ai"
+GITHUB_URL="https://github.com/G-TechSD/ganesha-ai"
 VERSION="${GANESHA_VERSION:-latest}"
 INSTALL_DIR="${HOME}/.local/bin"
 BINARY_NAME="ganesha"
 
 # Determine download URL
 if [ "$VERSION" = "latest" ]; then
-    DOWNLOAD_URL="${GITLAB_URL}/-/releases/permalink/latest/downloads/ganesha-${PLATFORM}.tar.gz"
+    DOWNLOAD_URL="${GITHUB_URL}/releases/latest/download/ganesha-${PLATFORM}.tar.gz"
 else
-    DOWNLOAD_URL="${GITLAB_URL}/-/releases/${VERSION}/downloads/ganesha-${PLATFORM}.tar.gz"
+    DOWNLOAD_URL="${GITHUB_URL}/releases/download/v${VERSION}/ganesha-${PLATFORM}.tar.gz"
 fi
 
 echo -e "${DIM}Download URL: ${DOWNLOAD_URL}${NC}"
@@ -170,6 +170,7 @@ fi
 
 echo ""
 echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
-echo -e "${DIM}Documentation: ${GITLAB_URL}${NC}"
+echo -e "${DIM}Documentation: ${GITHUB_URL}${NC}"
+echo -e "${DIM}Website: https://ganesha-ai.com${NC}"
 echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
 echo ""

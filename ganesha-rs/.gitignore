@@ -1,6 +1,51 @@
-node_modules/
+# Build artifacts
 target/
+dist/
+*.tar.gz
+*.zip
+
+# Dependencies
+node_modules/
 *.pyc
 __pycache__/
+
+# Environment
 .env
+.env.local
+.env.*.local
+
+# Logs
 *.log
+logs/
+
+# Test files
+*.test.txt
+test_*.sh
+cat_facts*
+
+# System directories created during testing
+etc-*/
+
+# IDE and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.*.sw?
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+
+# Rust specific
+*.pdb
+
+# Website (separate deployment)
+website/

@@ -33,34 +33,36 @@ ganesha "set up nginx as a reverse proxy for port 3000"
 - **Safe by Default** - User consent required before execution
 - **Rollback Support** - Undo any session's changes
 - **Cross-Platform** - Linux, macOS, Windows
-- **MCP Compatible** - Use as a tool in Claude Code or any MCP client
-- **HTTP API** - Integrate with web apps like Claudia Admin
+- **MCP Integration** - Connect to Playwright, filesystem, fetch servers
+- **Web Search** - Built-in search via Brave API or DuckDuckGo
+- **Session Memory** - Resume with `--last` or browse with `--sessions`
+- **Response Metrics** - See timing, tokens, and speed for each response
 - **Flux Capacitor** - Time-boxed autonomous task execution
 
 ---
 
 ## Downloads
 
-Pre-built binaries for the Rust version (v3.0.0):
+Pre-built binaries for the Rust version (v3.14.0):
 
 | Platform | Architecture | Download |
 |----------|-------------|----------|
-| **Linux** | x86_64 | [ganesha-linux-x86_64.tar.gz](https://bill-dev-linux-1/gtechsd/ganesha-ai/-/releases/permalink/latest/downloads/ganesha-linux-x86_64.tar.gz) |
-| **Linux** | ARM64 | [ganesha-linux-aarch64.tar.gz](https://bill-dev-linux-1/gtechsd/ganesha-ai/-/releases/permalink/latest/downloads/ganesha-linux-aarch64.tar.gz) |
-| **macOS** | Intel | [ganesha-macos-x86_64.tar.gz](https://bill-dev-linux-1/gtechsd/ganesha-ai/-/releases/permalink/latest/downloads/ganesha-macos-x86_64.tar.gz) |
-| **macOS** | Apple Silicon | [ganesha-macos-aarch64.tar.gz](https://bill-dev-linux-1/gtechsd/ganesha-ai/-/releases/permalink/latest/downloads/ganesha-macos-aarch64.tar.gz) |
-| **Windows** | x86_64 | [ganesha-windows-x86_64.zip](https://bill-dev-linux-1/gtechsd/ganesha-ai/-/releases/permalink/latest/downloads/ganesha-windows-x86_64.zip) |
+| **Linux** | x86_64 | [ganesha-linux-x86_64.tar.gz](https://github.com/G-TechSD/ganesha-ai/releases/latest/download/ganesha-linux-x86_64.tar.gz) |
+| **Linux** | ARM64 | [ganesha-linux-aarch64.tar.gz](https://github.com/G-TechSD/ganesha-ai/releases/latest/download/ganesha-linux-aarch64.tar.gz) |
+| **macOS** | Intel | [ganesha-macos-x86_64.tar.gz](https://github.com/G-TechSD/ganesha-ai/releases/latest/download/ganesha-macos-x86_64.tar.gz) |
+| **macOS** | Apple Silicon | [ganesha-macos-aarch64.tar.gz](https://github.com/G-TechSD/ganesha-ai/releases/latest/download/ganesha-macos-aarch64.tar.gz) |
+| **Windows** | x86_64 | [ganesha-windows-x86_64.zip](https://github.com/G-TechSD/ganesha-ai/releases/latest/download/ganesha-windows-x86_64.zip) |
 
 ### Quick Install
 
 **Linux/macOS (one-liner):**
 ```bash
-curl -sSL https://bill-dev-linux-1/gtechsd/ganesha-ai/-/releases/permalink/latest/downloads/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/G-TechSD/ganesha-ai/main/ganesha-rs/scripts/install.sh | bash
 ```
 
 **Windows (PowerShell):**
 ```powershell
-iwr -useb https://bill-dev-linux-1/gtechsd/ganesha-ai/-/releases/permalink/latest/downloads/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/G-TechSD/ganesha-ai/main/ganesha-rs/scripts/install.ps1 | iex
 ```
 
 ### Self-Install from Binary
@@ -75,13 +77,13 @@ If you've downloaded the binary directly:
 
 ```bash
 # Download for your platform
-wget https://bill-dev-linux-1/gtechsd/ganesha-ai/-/releases/permalink/latest/downloads/ganesha-linux-x86_64.tar.gz
+wget https://github.com/G-TechSD/ganesha-ai/releases/latest/download/ganesha-linux-x86_64.tar.gz
 
 # Extract
 tar -xzf ganesha-linux-x86_64.tar.gz
 
 # Move to PATH
-mv ganesha-linux-x86_64/ganesha ~/.local/bin/
+mv ganesha ~/.local/bin/
 
 # Verify
 ganesha --version
@@ -129,6 +131,12 @@ ganesha --code "create a React login form"
 
 # Rollback last session
 ganesha --rollback
+
+# Resume last session context
+ganesha --last
+
+# Browse and select from session history
+ganesha --sessions
 ```
 
 ### Flux Capacitor (Autonomous Mode)
@@ -299,6 +307,14 @@ This rewrite (v3.0) adds:
 - Async-first architecture
 - Clean, modern codebase
 
+**v3.14** (current) adds:
+- Session resume (`--last`, `--sessions`)
+- Built-in web search (Brave/DuckDuckGo)
+- MCP server chaining (Playwright, fetch, filesystem)
+- Response metrics (timing, tokens, tok/s)
+- Timestamps throughout for auditing
+- Improved terminal output formatting
+
 ---
 
 ## Why "Ganesha"?
@@ -321,7 +337,7 @@ MIT License - See LICENSE file.
 ## Author
 
 **G-Tech SD**
-- GitLab: [gtechsd/ganesha-ai](https://bill-dev-linux-1/gtechsd/ganesha-ai)
 - GitHub: [G-TechSD/ganesha-ai](https://github.com/G-TechSD/ganesha-ai)
+- Website: [ganesha-ai.com](https://ganesha-ai.com)
 
 *The first AI-powered system control tool. Predates the rest.*

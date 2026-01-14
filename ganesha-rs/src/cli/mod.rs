@@ -48,7 +48,24 @@ pub fn print_banner() {
         style(format!("                        Version {}", env!("CARGO_PKG_VERSION")))
             .dim()
     );
+    // Show current date and time
+    let now = chrono::Local::now();
+    println!(
+        "{}",
+        style(format!("                   {}", now.format("%A, %B %d, %Y %H:%M")))
+            .dim()
+    );
     println!();
+}
+
+/// Get current timestamp for audit logging
+pub fn timestamp() -> String {
+    chrono::Local::now().format("[%H:%M:%S]").to_string()
+}
+
+/// Print a timestamped message
+pub fn print_timestamped(msg: &str) {
+    println!("{} {}", style(timestamp()).dim(), msg);
 }
 
 pub fn print_info(msg: &str) {
@@ -56,15 +73,18 @@ pub fn print_info(msg: &str) {
 }
 
 pub fn print_success(msg: &str) {
-    println!("{} {}", style("✓").green().bold(), msg);
+    let ts = timestamp();
+    println!("{} {} {}", style(ts).dim(), style("✓").green().bold(), msg);
 }
 
 pub fn print_error(msg: &str) {
-    println!("{} {}", style("✗").red().bold(), msg);
+    let ts = timestamp();
+    println!("{} {} {}", style(ts).dim(), style("✗").red().bold(), msg);
 }
 
 pub fn print_warning(msg: &str) {
-    println!("{} {}", style("⚠").yellow().bold(), msg);
+    let ts = timestamp();
+    println!("{} {} {}", style(ts).dim(), style("⚠").yellow().bold(), msg);
 }
 
 fn risk_style(risk: &RiskLevel) -> Style {
@@ -337,12 +357,13 @@ fn extract_redirect_target(cmd: &str) -> Option<String> {
     None
 }
 
-/// Print a friendly action summary
+/// Print a friendly action summary with timestamp
 pub fn print_action_summary(command: &str, success: bool, output: &str, duration_ms: u64) {
     let description = describe_action(command, success);
+    let ts = timestamp();
 
     if success {
-        println!("{} {}", style("✓").green().bold(), description);
+        println!("{} {} {}", style(ts).dim(), style("✓").green().bold(), description);
 
         // Show output if there is any meaningful content
         let trimmed = output.trim();
@@ -363,7 +384,7 @@ pub fn print_action_summary(command: &str, success: bool, output: &str, duration
             println!("{}", style(format!("  ({}ms)", duration_ms)).dim());
         }
     } else {
-        println!("{} {}", style("✗").red().bold(), description);
+        println!("{} {} {}", style(ts).dim(), style("✗").red().bold(), description);
     }
 }
 
