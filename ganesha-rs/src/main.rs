@@ -653,7 +653,7 @@ async fn run_repl<C: core::ConsentHandler>(
                 session_log.push(format!("[{}] USER: {}", Local::now().format("%H:%M:%S"), input));
 
                 // Handle exit commands
-                if matches!(input.to_lowercase().as_str(), "exit" | "quit" | "q" | ":q") {
+                if matches!(input.to_lowercase().as_str(), "exit" | "quit" | "/quit" | "q" | ":q" | "/exit") {
                     println!("{}", style("Namaste 🙏").yellow());
                     break;
                 }

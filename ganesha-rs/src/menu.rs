@@ -539,7 +539,8 @@ pub fn init_providers_from_env() {
             return;
         }
 
-        // Check for LM Studio servers (localhost only - user can add remote servers via menu)
+        // Check for LM Studio servers
+        // Note: For network servers, use the /settings menu to add custom endpoints
         let lm_studio_servers = [
             ("lmstudio", "http://localhost:1234", "LM Studio (Local)"),
         ];
@@ -1453,6 +1454,9 @@ pub fn show_models_menu() {
     use console::style;
     use std::io::{self, Write};
 
+    // Initialize providers from environment to sync with actual connections
+    init_providers_from_env();
+
     println!("\n{}", style("═".repeat(60)).dim());
     println!("{}", style("Available Models").cyan().bold());
     println!("{}\n", style("═".repeat(60)).dim());
@@ -1463,7 +1467,10 @@ pub fn show_models_menu() {
     let providers = get_providers();
 
     if providers.is_empty() {
-        println!("{} No providers configured. Use /settings to add providers.", style("ℹ").cyan());
+        println!("{} No providers configured in menu system.", style("ℹ").cyan());
+        println!();
+        println!("{}", style("Note: Ganesha auto-detects providers at startup (shown in header).").dim());
+        println!("{}", style("To manage providers here, use /settings > Providers & Connections.").dim());
         println!("\n{}", style("Press Enter to continue...").dim());
         let _ = io::stdin().read_line(&mut String::new());
         return;
