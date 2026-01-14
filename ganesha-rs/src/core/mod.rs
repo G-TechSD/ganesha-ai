@@ -457,19 +457,41 @@ impl<L: LlmProvider, C: ConsentHandler> GaneshaEngine<L, C> {
                 if server == "ganesha" {
                     let result: Result<String, String> = match tool {
                         "web_search" => {
-                            let query = args.get("query").and_then(|q| q.as_str()).unwrap_or("");
-                            let max_results = args.get("max_results").and_then(|m| m.as_u64()).unwrap_or(10) as usize;
+                            // Try multiple ways to get the query (LLMs format it differently)
+                            let query = args.get("query")
+                                .and_then(|q| q.as_str())
+                                .or_else(|| args.get("q").and_then(|q| q.as_str()))
+                                .or_else(|| args.get("search").and_then(|q| q.as_str()))
+                                .unwrap_or("");
 
-                            // Directly await the async search
-                            match crate::websearch::search(query, max_results).await {
-                                Ok(response) => {
-                                    let output = crate::websearch::format_results(&response);
-                                    Ok(output)
+                            if query.is_empty() {
+                                Err(format!("Empty search query. Args received: {}", args))
+                            } else {
+                                let max_results = args.get("max_results").and_then(|m| m.as_u64()).unwrap_or(10) as usize;
+                                match crate::websearch::search(query, max_results).await {
+                                    Ok(response) => {
+                                        let output = crate::websearch::format_results(&response);
+                                        Ok(output)
+                                    }
+                                    Err(e) => Err(e)
                                 }
-                                Err(e) => Err(e)
                             }
                         }
-                        _ => Err(format!("Unknown ganesha tool: {}", tool))
+                        "exec" => {
+                            // Model hallucinated this tool - redirect to show helpful error
+                            // Commands should use the "command" field, not mcp_tool
+                            let cmd = args.get("command")
+                                .or_else(|| args.get("cmd"))
+                                .and_then(|c| c.as_str())
+                                .unwrap_or("");
+
+                            if cmd.is_empty() {
+                                Err("Use 'command' field for shell commands, not mcp_tool. Example: {\"actions\":[{\"command\":\"ls -la\",\"explanation\":\"List files\"}]}".to_string())
+                            } else {
+                                Err(format!("Use 'command' field instead: {{\"actions\":[{{\"command\":\"{}\",\"explanation\":\"Execute\"}}]}}", cmd))
+                            }
+                        }
+                        _ => Err(format!("Unknown ganesha tool: {}. Available: web_search", tool))
                     };
 
                     match result {
