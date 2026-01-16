@@ -688,20 +688,17 @@ impl SafetyFilter {
         let ctx_lower = context.to_lowercase();
 
         // Check for unsaved work + close action
-        if ctx_lower.contains("unsaved") || ctx_lower.contains("not saved") {
-            if action.action_type == "CLICK" || action.action_type == "DOUBLE_CLICK" {
-                if ctx_lower.contains("close") || ctx_lower.contains("exit") || ctx_lower.contains("quit") {
+        if (ctx_lower.contains("unsaved") || ctx_lower.contains("not saved"))
+            && (action.action_type == "CLICK" || action.action_type == "DOUBLE_CLICK")
+                && (ctx_lower.contains("close") || ctx_lower.contains("exit") || ctx_lower.contains("quit")) {
                     return Some((45, "Attempting to close with unsaved work".to_string()));
                 }
-            }
-        }
 
         // Check for dialog with dangerous options
-        if ctx_lower.contains("dialog") || ctx_lower.contains("popup") {
-            if ctx_lower.contains("delete") || ctx_lower.contains("format") || ctx_lower.contains("erase") {
+        if (ctx_lower.contains("dialog") || ctx_lower.contains("popup"))
+            && (ctx_lower.contains("delete") || ctx_lower.contains("format") || ctx_lower.contains("erase")) {
                 return Some((35, "Interacting with destructive dialog".to_string()));
             }
-        }
 
         // Check for fake/scam indicators
         if ctx_lower.contains("fake") || ctx_lower.contains("scam") || ctx_lower.contains("phishing") {
@@ -717,12 +714,11 @@ impl SafetyFilter {
         match action.action_type.as_str() {
             "TYPE" => {
                 // Check if typing sensitive data in suspicious context
-                if ctx_lower.contains("password") || ctx_lower.contains("credential") {
-                    if ctx_lower.contains("fake") || ctx_lower.contains("phishing") ||
-                       ctx_lower.contains("suspicious") {
+                if (ctx_lower.contains("password") || ctx_lower.contains("credential"))
+                    && (ctx_lower.contains("fake") || ctx_lower.contains("phishing") ||
+                       ctx_lower.contains("suspicious")) {
                         return Some((60, "Typing credentials on suspicious page".to_string()));
                     }
-                }
             }
             "DOUBLE_CLICK" => {
                 // Double-click on executable or suspicious file
@@ -1184,7 +1180,7 @@ Your response:"#,
     ) -> AdvisorVerdict {
         self.escalation_count += 1;
 
-        let prompt = self.build_advisor_prompt(
+        let _prompt = self.build_advisor_prompt(
             screen_context,
             planned_action,
             &escalation_reason,
@@ -1220,14 +1216,13 @@ Your response:"#,
         ];
 
         for indicator in block_indicators {
-            if ctx_lower.contains(indicator) {
-                if action_type == "CLICK" || action_type == "DOUBLE_CLICK" {
+            if ctx_lower.contains(indicator)
+                && (action_type == "CLICK" || action_type == "DOUBLE_CLICK") {
                     return AdvisorVerdict::Block {
                         reason: format!("Dangerous indicator '{}' detected in context", indicator),
                         danger_level: "HIGH".to_string(),
                     };
                 }
-            }
         }
 
         // If action is WAIT, always approve
@@ -1303,7 +1298,7 @@ impl ThreePassVerifier {
         model_uncertain: bool,
     ) -> SafetyVerdict {
         // Pass 1: Pre-screen
-        let pre_screen = self.two_pass.pre_screen(screen_context);
+        let _pre_screen = self.two_pass.pre_screen(screen_context);
 
         // Pass 2: Safety filter
         let verdict = self.two_pass.verify_action(action, screen_context);

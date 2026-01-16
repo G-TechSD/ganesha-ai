@@ -58,6 +58,12 @@ pub struct StatusBar {
 
 const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
+impl Default for StatusBar {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StatusBar {
     pub fn new() -> Self {
         Self {
@@ -104,6 +110,12 @@ pub struct TuiApp {
     pub mode: TuiMode,
     pub settings: SettingsView,
     pub voice_level: f32, // 0.0 - 1.0
+}
+
+impl Default for TuiApp {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TuiApp {
@@ -287,7 +299,7 @@ fn render_voice_visualizer(frame: &mut Frame, app: &TuiApp, area: Rect) {
     
     let width = area.width.saturating_sub(4) as usize;
     let filled = (visual_level * width as f32) as usize;
-    let bar: String = std::iter::repeat("█").take(filled).collect();
+    let bar: String = std::iter::repeat_n("█", filled).collect();
     
     let is_active = level > 0.01;
     let color = if is_active { Color::Red } else { Color::DarkGray };

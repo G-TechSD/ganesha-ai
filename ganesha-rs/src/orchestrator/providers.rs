@@ -16,7 +16,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 
 use crate::core::config::{
-    ModelTier, ProviderType, AuthMethod, TierMapping, TierConfig, GaneshaConfig,
+    ModelTier, ProviderType, AuthMethod, TierMapping, TierConfig,
     ProviderEndpoint, SlashCommand, parse_slash_command, OAuth2Config, ConfigManager,
     TokenResponse, ModelInfo,
 };
@@ -691,7 +691,7 @@ impl ProviderManager {
 
             let mut input = String::new();
             io::stdin().read_line(&mut input)?;
-            let parts: Vec<&str> = input.trim().split_whitespace().collect();
+            let parts: Vec<&str> = input.split_whitespace().collect();
 
             if parts.is_empty() {
                 continue;
@@ -771,7 +771,7 @@ impl ProviderManager {
 
             let mut input = String::new();
             io::stdin().read_line(&mut input)?;
-            let parts: Vec<&str> = input.trim().split_whitespace().collect();
+            let parts: Vec<&str> = input.split_whitespace().collect();
 
             if parts.is_empty() {
                 continue;
@@ -833,7 +833,7 @@ impl ProviderManager {
                 }
                 "test" => {
                     println!("\n  Testing providers...\n");
-                    for (name, _) in &self.endpoints {
+                    for name in self.endpoints.keys() {
                         let online = self.check_endpoint(name).await;
                         let status = if online { "\x1b[32m✓\x1b[0m" } else { "\x1b[31m✗\x1b[0m" };
                         println!("  {} {}", status, name);
@@ -1241,7 +1241,7 @@ impl ProviderManager {
     async fn fetch_lmstudio_models(&self) -> Result<Vec<ModelInfo>, Box<dyn std::error::Error + Send + Sync>> {
         let mut all_models = vec![];
 
-        for (_, endpoint) in &self.endpoints {
+        for endpoint in self.endpoints.values() {
             if endpoint.provider_type != ProviderType::LmStudio {
                 continue;
             }
@@ -1453,16 +1453,14 @@ impl ProviderManager {
     }
 
     fn infer_cost(&self, model_id: &str, is_input: bool) -> f64 {
-        let base = if model_id.contains("5.2") {
+        
+        if model_id.contains("5.2") {
             if is_input { 5.0 } else { 15.0 }
         } else if model_id.contains("o3") {
             if is_input { 1.1 } else { 4.4 }
         } else if model_id.contains("4o") {
             if is_input { 2.5 } else { 10.0 }
-        } else {
-            if is_input { 0.5 } else { 1.5 }
-        };
-        base
+        } else if is_input { 0.5 } else { 1.5 }
     }
 
     fn infer_tier(&self, model_id: &str) -> ModelTier {
@@ -1566,7 +1564,7 @@ impl ProviderManager {
         // Parse port from redirect URI
         let port: u16 = redirect_uri
             .split(':')
-            .last()
+            .next_back()
             .and_then(|s| s.split('/').next())
             .and_then(|s| s.parse().ok())
             .unwrap_or(8420);

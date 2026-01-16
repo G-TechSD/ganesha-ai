@@ -251,10 +251,8 @@ impl MemoryDb {
             })
         })?;
 
-        for row in rows {
-            if let Ok(session) = row {
-                sessions.push(session);
-            }
+        for session in rows.flatten() {
+            sessions.push(session);
         }
 
         Ok(sessions)
@@ -299,10 +297,8 @@ impl MemoryDb {
             })
         })?;
 
-        for row in rows {
-            if let Ok(session) = row {
-                sessions.push(session);
-            }
+        for session in rows.flatten() {
+            sessions.push(session);
         }
 
         Ok(sessions)
@@ -383,10 +379,8 @@ impl MemoryDb {
             })
         })?;
 
-        for row in rows {
-            if let Ok(goal) = row {
-                goals.push(goal);
-            }
+        for goal in rows.flatten() {
+            goals.push(goal);
         }
 
         Ok(goals)
@@ -464,10 +458,8 @@ impl MemoryDb {
             })
         })?;
 
-        for row in rows {
-            if let Ok(pattern) = row {
-                patterns.push(pattern);
-            }
+        for pattern in rows.flatten() {
+            patterns.push(pattern);
         }
 
         Ok(patterns)
@@ -552,10 +544,8 @@ impl MemoryDb {
             })
         })?;
 
-        for row in rows {
-            if let Ok(entry) = row {
-                entries.push(entry);
-            }
+        for entry in rows.flatten() {
+            entries.push(entry);
         }
 
         Ok(entries)

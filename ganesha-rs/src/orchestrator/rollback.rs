@@ -173,7 +173,7 @@ impl RollbackManager {
         // Some commands have obvious inverses
         let parts: Vec<&str> = command.split_whitespace().collect();
 
-        match parts.get(0).map(|s| *s) {
+        match parts.first().copied() {
             Some("mkdir") => {
                 if let Some(dir) = parts.get(1) {
                     return Some(format!("rmdir {}", dir));

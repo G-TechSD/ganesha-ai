@@ -264,11 +264,10 @@ impl<L: LlmProvider, C: ConsentHandler> GaneshaEngine<L, C> {
         let system_prompt = self.build_planning_prompt();
 
         // Debug: Check if MCP tools are in prompt (only in debug mode)
-        if std::env::var("GANESHA_DEBUG").is_ok() {
-            if system_prompt.contains("MCP TOOLS AVAILABLE") {
+        if std::env::var("GANESHA_DEBUG").is_ok()
+            && system_prompt.contains("MCP TOOLS AVAILABLE") {
                 eprintln!("[MCP] Tools included in prompt");
             }
-        }
 
         // Build message list: system + history + current user message
         let mut messages = vec![ChatMessage::system(&system_prompt)];
@@ -1229,7 +1228,7 @@ EXAMPLES:
     }
 
     /// Build a prompt for generating a specific chunk of items
-    fn build_chunk_prompt(item_type: &str, start: u32, end: u32, context: &str) -> String {
+    fn build_chunk_prompt(_item_type: &str, start: u32, end: u32, context: &str) -> String {
         format!(
             r#"Generate items {start} through {end} for this request: {context}
 
@@ -1279,10 +1278,8 @@ BEGIN OUTPUT:"#,
             let chunk_prompt = Self::build_chunk_prompt(item_type, current, end, &context);
 
             // Build messages for this chunk
-            let system = format!(
-                "You are a content generator. Generate exactly the items requested, numbered sequentially. \
-                 No placeholders, no shortcuts. Output real, unique content for each item."
-            );
+            let system = "You are a content generator. Generate exactly the items requested, numbered sequentially. \
+                 No placeholders, no shortcuts. Output real, unique content for each item.".to_string();
 
             let messages = vec![
                 ChatMessage::system(&system),
@@ -1914,7 +1911,7 @@ setInterval(() => {{
                         // ["bash", "-c", "actual command"] -> extract the actual command
                         arr.iter()
                             .filter_map(|v| v.as_str())
-                            .last()
+                            .next_back()
                             .unwrap_or("")
                             .to_string()
                     }
@@ -2023,7 +2020,7 @@ setInterval(() => {{
                 clean_text.to_string()
             };
 
-            return Ok(vec![Action {
+            Ok(vec![Action {
                 id: Uuid::new_v4().to_string()[..8].to_string(),
                 action_type: ActionType::Response,
                 command: String::new(),
@@ -2032,13 +2029,13 @@ setInterval(() => {{
                 reversible: false,
                 reverse_command: None,
                 question: None,
-            }]);
+            }])
         } else {
             // No JSON found - check if it's a bare URL that should be converted to MCP action
             let clean_response = response.trim();
 
             // Check if response is just a URL and MCP browser tools are available
-            if Self::is_url_response(&clean_response) && Self::has_browser_mcp() {
+            if Self::is_url_response(clean_response) && Self::has_browser_mcp() {
                 // Auto-convert bare URL to MCP navigate action
                 if std::env::var("GANESHA_DEBUG").is_ok() {
                     eprintln!("[DEBUG] Auto-converting bare URL to MCP navigate: {}", clean_response);
@@ -2295,7 +2292,7 @@ setInterval(() => {{
         }
 
         // Validate that args_json is valid JSON
-        let args: serde_json::Value = serde_json::from_str(&args_json).ok()?;
+        let _args: serde_json::Value = serde_json::from_str(&args_json).ok()?;
 
         // Ensure tool_name has server:tool format
         // If no colon, assume it's a playwright tool (most common)
@@ -2540,7 +2537,7 @@ setInterval(() => {{
     fn save_session(&self, session: &Session) -> Result<(), GaneshaError> {
         let path = self.session_dir.join(format!("{}.json", session.id));
         let json = serde_json::to_string_pretty(session)
-            .map_err(|e| GaneshaError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+            .map_err(|e| GaneshaError::IoError(std::io::Error::other(e)))?;
         std::fs::write(path, json)?;
         Ok(())
     }

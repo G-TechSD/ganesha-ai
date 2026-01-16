@@ -56,6 +56,12 @@ pub struct AppKnowledgeBase {
     apps: HashMap<String, AppKnowledge>,
 }
 
+impl Default for AppKnowledgeBase {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AppKnowledgeBase {
     pub fn new() -> Self {
         // Use XDG_CACHE_HOME or fallback to ~/.cache or /tmp

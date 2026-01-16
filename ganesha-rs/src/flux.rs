@@ -17,7 +17,7 @@ use console::style;
 use rusqlite::{Connection, params};
 use std::collections::HashMap;
 use std::fs;
-use std::io::{self, Read, Write};
+use std::io::{self, Read};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -192,7 +192,7 @@ impl FluxStatus {
     }
 
     pub fn extend(&mut self, additional: Duration) {
-        self.end_time = self.end_time + additional;
+        self.end_time += additional;
         self.extended_count += 1;
     }
 
@@ -598,7 +598,7 @@ impl FluxCanvas {
                 let truncated = truncate_str(&item, 60);
                 context.push_str(&format!("   - {}\n", truncated));
             }
-            context.push_str("\n");
+            context.push('\n');
         }
 
         // Current files
@@ -612,7 +612,7 @@ impl FluxCanvas {
             if file_count > 20 {
                 context.push_str(&format!("   ... and {} more files\n", file_count - 20));
             }
-            context.push_str("\n");
+            context.push('\n');
         }
 
         // Recent history
@@ -622,7 +622,7 @@ impl FluxCanvas {
             for entry in &history {
                 context.push_str(&format!("   {}\n", entry));
             }
-            context.push_str("\n");
+            context.push('\n');
         }
 
         // State
@@ -632,7 +632,7 @@ impl FluxCanvas {
             for (k, v) in &state {
                 context.push_str(&format!("   {}: {}\n", k, v));
             }
-            context.push_str("\n");
+            context.push('\n');
         }
 
         context.push_str("=== TO ADD FILES, use format: ===\n");
@@ -1055,9 +1055,9 @@ pub async fn run_flux_capacitor(config: FluxConfig) -> Result<FluxStatus, String
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
 
-    if let Err(_) = ctrlc::set_handler(move || {
+    if ctrlc::set_handler(move || {
         r.store(false, Ordering::SeqCst);
-    }) {
+    }).is_err() {
         eprintln!("Warning: Failed to set Ctrl+C handler");
     }
 
@@ -1262,12 +1262,11 @@ fn check_for_extend_request() -> Option<Duration> {
 
         if result > 0 {
             let mut buf = [0u8; 1];
-            if io::stdin().read(&mut buf).is_ok() {
-                if buf[0] == b'e' || buf[0] == b'E' {
+            if io::stdin().read(&mut buf).is_ok()
+                && (buf[0] == b'e' || buf[0] == b'E') {
                     // Extend by 15 minutes by default
                     return Some(Duration::minutes(15));
                 }
-            }
         }
     }
 

@@ -315,8 +315,8 @@ impl Trunk {
         }
 
         // Check for fake login forms
-        if content_lower.contains("password") && content_lower.contains("username") {
-            if !title_lower.contains("login") && !title_lower.contains("sign in") {
+        if content_lower.contains("password") && content_lower.contains("username")
+            && !title_lower.contains("login") && !title_lower.contains("sign in") {
                 // Hidden login form - suspicious
                 warnings.push(SmellWarning {
                     category: SmellCategory::Phishing,
@@ -324,7 +324,6 @@ impl Trunk {
                     evidence: "password + username fields without login page".into(),
                 });
             }
-        }
 
         // Check for excessive popups mentioned
         if content_lower.matches("popup").count() > 3 ||
@@ -386,15 +385,14 @@ impl Trunk {
 
         // Hidden links (honeypot for bots)
         for elem in hidden_elements {
-            if elem.contains("display:none") || elem.contains("visibility:hidden") {
-                if elem.contains("href") || elem.contains("click") {
+            if (elem.contains("display:none") || elem.contains("visibility:hidden"))
+                && (elem.contains("href") || elem.contains("click")) {
                     warnings.push(SmellWarning {
                         category: SmellCategory::BotTrap,
                         description: "Hidden clickable element detected (honeypot)".into(),
                         evidence: elem.chars().take(100).collect(),
                     });
                 }
-            }
         }
 
         // CAPTCHA detection
@@ -436,7 +434,7 @@ impl Trunk {
             if content_lower.contains(pattern) {
                 warnings.push(SmellWarning {
                     category: SmellCategory::PromptInjection,
-                    description: format!("Prompt injection attempt detected"),
+                    description: "Prompt injection attempt detected".to_string(),
                     evidence: pattern.clone(),
                 });
             }

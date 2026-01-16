@@ -6,13 +6,12 @@
 //! - Multi-turn conversation with tool use
 //! - Iterative verification
 
-use crate::cli::{print_banner, print_error, print_info, print_success, print_warning};
+use crate::cli::print_error;
 use crate::orchestrator::tools::{execute_tool, ToolRegistry};
 use crate::pretty;
 use console::style;
 use rustyline::error::ReadlineError;
 use rustyline::{Config, DefaultEditor, EditMode};
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -297,7 +296,7 @@ When you're done with a task, summarize what was accomplished."#,
     async fn agent_loop(&mut self) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         let mut last_response = String::new();
 
-        for turn in 0..self.max_turns {
+        for _turn in 0..self.max_turns {
             // Call LLM
             let response = self.call_llm().await?;
             last_response = response.clone();
@@ -340,15 +339,14 @@ When you're done with a task, summarize what was accomplished."#,
                 println!("{}", style(&tool_display).yellow());
 
                 // Check consent for dangerous operations
-                if !self.auto_approve && self.requires_consent(&tool_call) {
-                    if !self.get_consent(&tool_call)? {
+                if !self.auto_approve && self.requires_consent(&tool_call)
+                    && !self.get_consent(&tool_call)? {
                         self.messages.push(Message {
                             role: "user".into(),
                             content: format!("[Tool {} was DENIED by user. Try a different approach.]", tool_call.name),
                         });
                         continue;
                     }
-                }
 
                 // Execute
                 let result = execute_tool(
