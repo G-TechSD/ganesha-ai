@@ -469,6 +469,37 @@ When the task is complete, summarize what was accomplished.
             }
         }
 
+        // Handle <|channel|> format from some local models
+        // Format: <|channel|>commentary to=bash <|constrain|>json<|message|>{"command":"..."}
+        if response.contains("<|channel|>") && response.contains("<|message|>") {
+            for part in response.split("<|channel|>") {
+                if let Some(msg_start) = part.find("<|message|>") {
+                    let json_part = &part[msg_start + 11..]; // Skip "<|message|>"
+                    // Find the tool type from "to=xxx" pattern
+                    let tool_name = if part.contains("to=bash") {
+                        "bash"
+                    } else if part.contains("to=write") {
+                        "write"
+                    } else if part.contains("to=read") {
+                        "read"
+                    } else if part.contains("to=edit") {
+                        "edit"
+                    } else {
+                        continue;
+                    };
+
+                    // Try to parse the JSON
+                    if let Ok(parsed) = serde_json::from_str::<Value>(json_part.trim()) {
+                        calls.push(ToolCall {
+                            id: Uuid::new_v4().to_string(),
+                            name: tool_name.to_string(),
+                            arguments: parsed,
+                        });
+                    }
+                }
+            }
+        }
+
         calls
     }
 
