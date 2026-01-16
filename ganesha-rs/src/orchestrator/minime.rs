@@ -230,30 +230,32 @@ fn extract_tool_calls(response: &str) -> Option<Vec<ToolCall>> {
     // Look for JSON blocks with tool calls
     let mut calls = Vec::new();
 
-    // Simple regex-free extraction of JSON blocks
-    for line in response.lines() {
-        let line = line.trim();
-        if line.starts_with('{') && line.contains("\"tool\"") {
-            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(line) {
-                if let (Some(name), Some(args)) = (
-                    parsed.get("tool").and_then(|t| t.as_str()),
-                    parsed.get("args"),
-                ) {
-                    calls.push(ToolCall {
-                        name: name.to_string(),
-                        arguments: args.clone(),
-                    });
-                }
-            }
-        }
-    }
-
-    // Also check for fenced JSON blocks
+    // Check for fenced JSON blocks first (more reliable)
     if response.contains("```json") {
         for block in response.split("```json") {
             if let Some(end) = block.find("```") {
                 let json_str = &block[..end].trim();
                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json_str) {
+                    if let (Some(name), Some(args)) = (
+                        parsed.get("tool").and_then(|t| t.as_str()),
+                        parsed.get("args"),
+                    ) {
+                        calls.push(ToolCall {
+                            name: name.to_string(),
+                            arguments: args.clone(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // Only use inline extraction if no fenced blocks found
+    if calls.is_empty() {
+        for line in response.lines() {
+            let line = line.trim();
+            if line.starts_with('{') && line.contains("\"tool\"") {
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(line) {
                     if let (Some(name), Some(args)) = (
                         parsed.get("tool").and_then(|t| t.as_str()),
                         parsed.get("args"),
