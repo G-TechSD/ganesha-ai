@@ -458,16 +458,30 @@ impl<L: LlmProvider, C: ConsentHandler> GaneshaEngine<L, C> {
                     let result: Result<String, String> = match tool {
                         "web_search" => {
                             // Try multiple ways to get the query (LLMs format it differently)
+                            // Check direct args, mcp_args nested, and common aliases
                             let query = args.get("query")
                                 .and_then(|q| q.as_str())
                                 .or_else(|| args.get("q").and_then(|q| q.as_str()))
                                 .or_else(|| args.get("search").and_then(|q| q.as_str()))
+                                .or_else(|| {
+                                    // Check nested mcp_args structure
+                                    args.get("mcp_args")
+                                        .and_then(|m| m.get("query"))
+                                        .and_then(|q| q.as_str())
+                                })
                                 .unwrap_or("");
 
                             if query.is_empty() {
                                 Err(format!("Empty search query. Args received: {}", args))
                             } else {
-                                let max_results = args.get("max_results").and_then(|m| m.as_u64()).unwrap_or(10) as usize;
+                                let max_results = args.get("max_results")
+                                    .and_then(|m| m.as_u64())
+                                    .or_else(|| {
+                                        args.get("mcp_args")
+                                            .and_then(|m| m.get("max_results"))
+                                            .and_then(|r| r.as_u64())
+                                    })
+                                    .unwrap_or(10) as usize;
                                 match crate::websearch::search(query, max_results).await {
                                     Ok(response) => {
                                         let output = crate::websearch::format_results(&response);
