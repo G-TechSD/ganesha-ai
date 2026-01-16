@@ -49,6 +49,7 @@ libc = "0.2"
 # Regex for access control
 regex = "1.10"
 lazy_static = "1.4"
+once_cell = "1.19"
 
 # UUID for session IDs
 uuid = { version = "1.6", features = ["v4", "serde"] }

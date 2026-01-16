@@ -2,7 +2,7 @@
 //!
 //! Manages privilege levels, command filtering, and self-protection.
 
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -73,302 +73,320 @@ pub struct AccessCheckResult {
     pub reason: String,
 }
 
-lazy_static! {
-    // ═══════════════════════════════════════════════════════════════════════
-    // SELF-INVOCATION PROTECTION
-    // Ganesha cannot call itself with bypass flags
-    // ═══════════════════════════════════════════════════════════════════════
-    static ref SELF_INVOKE_PATTERNS: Vec<Regex> = vec![
-        Regex::new(r"(?i)ganesha\s+.*--auto").unwrap(),
-        Regex::new(r"(?i)ganesha\s+.*-A\b").unwrap(),
-        Regex::new(r"(?i)ganesha\s+.*--yes").unwrap(),
-        Regex::new(r"(?i)ganesha\s+.*-y\b").unwrap(),
-        Regex::new(r"(?i)ganesha-daemon\s+.*--level\s+full").unwrap(),
-        Regex::new(r"(?i)ganesha-config\s+.*set-level\s+full").unwrap(),
-        Regex::new(r"(?i)ganesha-config\s+.*reset").unwrap(),
-    ];
+// ═══════════════════════════════════════════════════════════════════════
+// SELF-INVOCATION PROTECTION
+// Ganesha cannot call itself with bypass flags
+// ═══════════════════════════════════════════════════════════════════════
+static SELF_INVOKE_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
+    vec![
+        Regex::new(r"(?i)ganesha\s+.*--auto").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)ganesha\s+.*-A\b").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)ganesha\s+.*--yes").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)ganesha\s+.*-y\b").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)ganesha-daemon\s+.*--level\s+full").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)ganesha-config\s+.*set-level\s+full").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)ganesha-config\s+.*reset").expect("Invalid regex pattern at compile time"),
+    ]
+});
 
-    // Config/log tampering protection
-    static ref TAMPER_PATTERNS: Vec<Regex> = vec![
-        Regex::new(r"(?i)(rm|mv|cp|cat\s*>|echo\s*>).*\.ganesha/").unwrap(),
-        Regex::new(r"(?i)(rm|mv|cp|cat\s*>|echo\s*>).*/etc/ganesha/").unwrap(),
-        Regex::new(r"(?i)(rm|mv|cp|cat\s*>|echo\s*>).*/var/log/ganesha/").unwrap(),
-    ];
+// Config/log tampering protection
+static TAMPER_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
+    vec![
+        Regex::new(r"(?i)(rm|mv|cp|cat\s*>|echo\s*>).*\.ganesha/").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)(rm|mv|cp|cat\s*>|echo\s*>).*/etc/ganesha/").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)(rm|mv|cp|cat\s*>|echo\s*>).*/var/log/ganesha/").expect("Invalid regex pattern at compile time"),
+    ]
+});
 
-    // System log protection
-    static ref LOG_CLEAR_PATTERNS: Vec<Regex> = vec![
-        Regex::new(r"(?i)(rm|truncate|cat\s*/dev/null\s*>).*(/var/log/syslog|/var/log/messages)").unwrap(),
-        Regex::new(r"(?i)journalctl\s+--vacuum").unwrap(),
+// System log protection
+static LOG_CLEAR_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
+    vec![
+        Regex::new(r"(?i)(rm|truncate|cat\s*/dev/null\s*>).*(/var/log/syslog|/var/log/messages)").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)journalctl\s+--vacuum").expect("Invalid regex pattern at compile time"),
         // Windows
-        Regex::new(r"(?i)wevtutil\s+cl").unwrap(),
-        Regex::new(r"(?i)Clear-EventLog").unwrap(),
+        Regex::new(r"(?i)wevtutil\s+cl").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)Clear-EventLog").expect("Invalid regex pattern at compile time"),
         // macOS
-        Regex::new(r"(?i)log\s+erase").unwrap(),
-    ];
+        Regex::new(r"(?i)log\s+erase").expect("Invalid regex pattern at compile time"),
+    ]
+});
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // CATASTROPHIC COMMAND PROTECTION
-    // ═══════════════════════════════════════════════════════════════════════
-    static ref CATASTROPHIC_PATTERNS: Vec<Regex> = vec![
+// ═══════════════════════════════════════════════════════════════════════
+// CATASTROPHIC COMMAND PROTECTION
+// ═══════════════════════════════════════════════════════════════════════
+static CATASTROPHIC_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
+    vec![
         // System destruction
-        Regex::new(r"(?i)rm\s+(-rf?|--recursive)\s+/\s*$").unwrap(),
-        Regex::new(r"(?i)rm\s+(-rf?|--recursive)\s+/\*").unwrap(),
-        Regex::new(r"(?i)rm\s+(-rf?|--recursive)\s+/(home|etc|var|usr)\s*$").unwrap(),
+        Regex::new(r"(?i)rm\s+(-rf?|--recursive)\s+/\s*$").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)rm\s+(-rf?|--recursive)\s+/\*").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)rm\s+(-rf?|--recursive)\s+/(home|etc|var|usr)\s*$").expect("Invalid regex pattern at compile time"),
 
         // Fork bombs
-        Regex::new(r":\(\)\s*\{\s*:\|:&\s*\}\s*;:").unwrap(),
+        Regex::new(r":\(\)\s*\{\s*:\|:&\s*\}\s*;:").expect("Invalid regex pattern at compile time"),
 
         // Disk destruction
-        Regex::new(r"(?i)dd\s+.*of=/dev/[sh]d[a-z]").unwrap(),
-        Regex::new(r"(?i)dd\s+.*of=/dev/nvme").unwrap(),
-        Regex::new(r"(?i)mkfs\s+.*\s+/dev/[sh]d[a-z]").unwrap(),
-        Regex::new(r"(?i)wipefs").unwrap(),
-        Regex::new(r"(?i)flashrom").unwrap(),
+        Regex::new(r"(?i)dd\s+.*of=/dev/[sh]d[a-z]").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)dd\s+.*of=/dev/nvme").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)mkfs\s+.*\s+/dev/[sh]d[a-z]").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)wipefs").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)flashrom").expect("Invalid regex pattern at compile time"),
 
         // Credential theft
-        Regex::new(r"(?i)(curl|wget|nc)\s+.*(/etc/shadow|/etc/passwd|\.ssh/)").unwrap(),
-        Regex::new(r"(?i)cat\s+.*\.ssh/(id_rsa|id_ed25519)\s*\|").unwrap(),
+        Regex::new(r"(?i)(curl|wget|nc)\s+.*(/etc/shadow|/etc/passwd|\.ssh/)").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)cat\s+.*\.ssh/(id_rsa|id_ed25519)\s*\|").expect("Invalid regex pattern at compile time"),
 
         // Kernel manipulation
-        Regex::new(r"(?i)insmod\s+.*\.ko").unwrap(),
-        Regex::new(r"(?i)rmmod").unwrap(),
-        Regex::new(r"(?i)echo\s+.*>\s*/proc/sys").unwrap(),
+        Regex::new(r"(?i)insmod\s+.*\.ko").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)rmmod").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)echo\s+.*>\s*/proc/sys").expect("Invalid regex pattern at compile time"),
 
         // Security disable
-        Regex::new(r"(?i)setenforce\s+0").unwrap(),
-        Regex::new(r"(?i)systemctl\s+(stop|disable)\s+.*firewall").unwrap(),
-        Regex::new(r"(?i)ufw\s+disable").unwrap(),
-        Regex::new(r"(?i)iptables\s+-F").unwrap(),
+        Regex::new(r"(?i)setenforce\s+0").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)systemctl\s+(stop|disable)\s+.*firewall").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)ufw\s+disable").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)iptables\s+-F").expect("Invalid regex pattern at compile time"),
 
         // Windows specific
-        Regex::new(r"(?i)format\s+[a-z]:").unwrap(),
-        Regex::new(r"(?i)diskpart").unwrap(),
-        Regex::new(r"(?i)bcdedit\s+/delete").unwrap(),
-    ];
+        Regex::new(r"(?i)format\s+[a-z]:").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)diskpart").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)bcdedit\s+/delete").expect("Invalid regex pattern at compile time"),
+    ]
+});
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // GUI AUTOMATION SAFEGUARDS (vision + input)
-    // ═══════════════════════════════════════════════════════════════════════
-    static ref GUI_DANGEROUS_PATTERNS: Vec<Regex> = vec![
+// ═══════════════════════════════════════════════════════════════════════
+// GUI AUTOMATION SAFEGUARDS (vision + input)
+// ═══════════════════════════════════════════════════════════════════════
+static GUI_DANGEROUS_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
+    vec![
         // Credential entry fields (don't type passwords automatically)
-        Regex::new(r"(?i)(password|passwd|secret|token|api[_-]?key)").unwrap(),
+        Regex::new(r"(?i)(password|passwd|secret|token|api[_-]?key)").expect("Invalid regex pattern at compile time"),
 
         // Banking/finance contexts
-        Regex::new(r"(?i)(bank|paypal|venmo|credit[_-]?card|payment)").unwrap(),
+        Regex::new(r"(?i)(bank|paypal|venmo|credit[_-]?card|payment)").expect("Invalid regex pattern at compile time"),
 
         // Admin/root escalation
-        Regex::new(r"(?i)(sudo|admin|root|escalate|privilege)").unwrap(),
+        Regex::new(r"(?i)(sudo|admin|root|escalate|privilege)").expect("Invalid regex pattern at compile time"),
 
         // Security-critical applications
-        Regex::new(r"(?i)(keychain|credential[_-]?manager|vault|1password|lastpass|bitwarden)").unwrap(),
+        Regex::new(r"(?i)(keychain|credential[_-]?manager|vault|1password|lastpass|bitwarden)").expect("Invalid regex pattern at compile time"),
 
         // System settings that could brick the machine
-        Regex::new(r"(?i)(bios|uefi|firmware|boot[_-]?order|secure[_-]?boot)").unwrap(),
+        Regex::new(r"(?i)(bios|uefi|firmware|boot[_-]?order|secure[_-]?boot)").expect("Invalid regex pattern at compile time"),
 
         // Destructive file dialogs
-        Regex::new(r"(?i)(format|wipe|erase|factory[_-]?reset)").unwrap(),
-    ];
+        Regex::new(r"(?i)(format|wipe|erase|factory[_-]?reset)").expect("Invalid regex pattern at compile time"),
+    ]
+});
 
-    // Safe GUI targets (applications that are typically safe to automate)
-    static ref GUI_SAFE_TARGETS: Vec<Regex> = vec![
+// Safe GUI targets (applications that are typically safe to automate)
+static GUI_SAFE_TARGETS: Lazy<Vec<Regex>> = Lazy::new(|| {
+    vec![
         // Creative software
-        Regex::new(r"(?i)(blender|gimp|inkscape|krita|audacity)").unwrap(),
-        Regex::new(r"(?i)(photoshop|illustrator|premiere|after[_-]?effects)").unwrap(),
-        Regex::new(r"(?i)(davinci|resolve|fusion|fairlight)").unwrap(),
-        Regex::new(r"(?i)(figma|sketch|canva)").unwrap(),
+        Regex::new(r"(?i)(blender|gimp|inkscape|krita|audacity)").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)(photoshop|illustrator|premiere|after[_-]?effects)").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)(davinci|resolve|fusion|fairlight)").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)(figma|sketch|canva)").expect("Invalid regex pattern at compile time"),
 
         // 3D printing / CAD
-        Regex::new(r"(?i)(prusaslicer|cura|bambu[_-]?studio|orcaslicer)").unwrap(),
-        Regex::new(r"(?i)(freecad|openscad|solidworks|fusion[_-]?360)").unwrap(),
+        Regex::new(r"(?i)(prusaslicer|cura|bambu[_-]?studio|orcaslicer)").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)(freecad|openscad|solidworks|fusion[_-]?360)").expect("Invalid regex pattern at compile time"),
 
         // Development tools
-        Regex::new(r"(?i)(vscode|code|cursor|sublime|atom|vim|nvim)").unwrap(),
-        Regex::new(r"(?i)(terminal|iterm|konsole|gnome-terminal)").unwrap(),
+        Regex::new(r"(?i)(vscode|code|cursor|sublime|atom|vim|nvim)").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)(terminal|iterm|konsole|gnome-terminal)").expect("Invalid regex pattern at compile time"),
 
         // Browsers (for web automation)
-        Regex::new(r"(?i)(firefox|chrome|chromium|brave|safari|edge)").unwrap(),
+        Regex::new(r"(?i)(firefox|chrome|chromium|brave|safari|edge)").expect("Invalid regex pattern at compile time"),
 
         // Office/productivity (non-sensitive)
-        Regex::new(r"(?i)(libreoffice|writer|calc|impress)").unwrap(),
-        Regex::new(r"(?i)(notepad|textedit|gedit|kate)").unwrap(),
-    ];
+        Regex::new(r"(?i)(libreoffice|writer|calc|impress)").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)(notepad|textedit|gedit|kate)").expect("Invalid regex pattern at compile time"),
+    ]
+});
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // MANIPULATION DETECTION
-    // ═══════════════════════════════════════════════════════════════════════
-    static ref MANIPULATION_PATTERNS: Vec<Regex> = vec![
-        Regex::new(r"(?i)ignore\s+(previous|prior|above)\s+(instructions?|rules?)").unwrap(),
-        Regex::new(r"(?i)disregard\s+(safety|security|restrictions?)").unwrap(),
-        Regex::new(r"(?i)pretend\s+(you\s+)?(are|can|have)").unwrap(),
-        Regex::new(r"(?i)bypass\s+(the\s+)?(safety|security|consent)").unwrap(),
-        Regex::new(r"(?i)override\s+(the\s+)?(safety|security|consent)").unwrap(),
-        Regex::new(r"(?i)automatically\s+(approve|accept|allow|run)").unwrap(),
-        Regex::new(r"(?i)without\s+(asking|confirmation|consent)").unwrap(),
-        Regex::new(r"(?i)skip\s+(the\s+)?(confirmation|consent|approval)").unwrap(),
-        Regex::new(r"(?i)trust\s+me").unwrap(),
-        Regex::new(r"(?i)i('m|\s+am)\s+(the\s+)?(admin|root|authorized)").unwrap(),
-        Regex::new(r"(?i)emergency\s+(override|access|mode)").unwrap(),
-    ];
+// ═══════════════════════════════════════════════════════════════════════
+// MANIPULATION DETECTION
+// ═══════════════════════════════════════════════════════════════════════
+static MANIPULATION_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
+    vec![
+        Regex::new(r"(?i)ignore\s+(previous|prior|above)\s+(instructions?|rules?)").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)disregard\s+(safety|security|restrictions?)").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)pretend\s+(you\s+)?(are|can|have)").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)bypass\s+(the\s+)?(safety|security|consent)").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)override\s+(the\s+)?(safety|security|consent)").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)automatically\s+(approve|accept|allow|run)").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)without\s+(asking|confirmation|consent)").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)skip\s+(the\s+)?(confirmation|consent|approval)").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)trust\s+me").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)i('m|\s+am)\s+(the\s+)?(admin|root|authorized)").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"(?i)emergency\s+(override|access|mode)").expect("Invalid regex pattern at compile time"),
+    ]
+});
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // PRESET ALLOWED PATTERNS
-    // ═══════════════════════════════════════════════════════════════════════
-    static ref RESTRICTED_PATTERNS: Vec<Regex> = vec![
+// ═══════════════════════════════════════════════════════════════════════
+// PRESET ALLOWED PATTERNS
+// ═══════════════════════════════════════════════════════════════════════
+static RESTRICTED_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
+    vec![
         // Read-only file operations
-        Regex::new(r"^cat\s+").unwrap(),
-        Regex::new(r"^less\s+").unwrap(),
-        Regex::new(r"^head\s+").unwrap(),
-        Regex::new(r"^tail\s+").unwrap(),
-        Regex::new(r"^ls(\s+|$)").unwrap(),
-        Regex::new(r"^find\s+").unwrap(),  // Allow find for codebase exploration
-        Regex::new(r"^tree(\s+|$)").unwrap(),  // Directory tree view
-        Regex::new(r"^wc\s+").unwrap(),  // Word/line count
-        Regex::new(r"^file\s+").unwrap(),  // File type detection
+        Regex::new(r"^cat\s+").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^less\s+").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^head\s+").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^tail\s+").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^ls(\s+|$)").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^find\s+").expect("Invalid regex pattern at compile time"),  // Allow find for codebase exploration
+        Regex::new(r"^tree(\s+|$)").expect("Invalid regex pattern at compile time"),  // Directory tree view
+        Regex::new(r"^wc\s+").expect("Invalid regex pattern at compile time"),  // Word/line count
+        Regex::new(r"^file\s+").expect("Invalid regex pattern at compile time"),  // File type detection
 
         // System info
-        Regex::new(r"^(uname|hostname|uptime|whoami|id|groups)(\s+|$)").unwrap(),
-        Regex::new(r"^(df|du|free|lscpu|lsblk)(\s+|$)").unwrap(),
-        Regex::new(r"^ps\s+").unwrap(),
-        Regex::new(r"^which\s+").unwrap(),  // Check if command exists
-        Regex::new(r"^command\s+-v\s+").unwrap(),  // Check if command exists (POSIX)
-        Regex::new(r"^type\s+").unwrap(),  // Check command type
-        Regex::new(r"^whereis\s+").unwrap(),  // Locate binary/source/man
+        Regex::new(r"^(uname|hostname|uptime|whoami|id|groups)(\s+|$)").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^(df|du|free|lscpu|lsblk)(\s+|$)").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^ps\s+").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^which\s+").expect("Invalid regex pattern at compile time"),  // Check if command exists
+        Regex::new(r"^command\s+-v\s+").expect("Invalid regex pattern at compile time"),  // Check if command exists (POSIX)
+        Regex::new(r"^type\s+").expect("Invalid regex pattern at compile time"),  // Check command type
+        Regex::new(r"^whereis\s+").expect("Invalid regex pattern at compile time"),  // Locate binary/source/man
 
         // Network info
-        Regex::new(r"^ip\s+(addr|link|route)").unwrap(),
-        Regex::new(r"^(ifconfig|netstat|ss)(\s+|$)").unwrap(),
-        Regex::new(r"^ping\s+-c\s+\d+").unwrap(),
-        Regex::new(r"^(dig|nslookup|host)\s+").unwrap(),
+        Regex::new(r"^ip\s+(addr|link|route)").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^(ifconfig|netstat|ss)(\s+|$)").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^ping\s+-c\s+\d+").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^(dig|nslookup|host)\s+").expect("Invalid regex pattern at compile time"),
 
         // Service status
-        Regex::new(r"^systemctl\s+status\s+").unwrap(),
-        Regex::new(r"^systemctl\s+is-(active|enabled)\s+").unwrap(),
-        Regex::new(r"^docker\s+(ps|images|info|version)").unwrap(),
+        Regex::new(r"^systemctl\s+status\s+").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^systemctl\s+is-(active|enabled)\s+").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^docker\s+(ps|images|info|version)").expect("Invalid regex pattern at compile time"),
 
         // Package info
-        Regex::new(r"^apt\s+(list|show|search)").unwrap(),
-        Regex::new(r"^dpkg\s+(-l|-L|-s|--list|--listfiles|--status)").unwrap(),  // Package queries
-        Regex::new(r"^rpm\s+(-q|-qa|-ql|-qi)").unwrap(),  // RPM package queries
-        Regex::new(r"^pip3?\s+(list|show|freeze)").unwrap(),
-        Regex::new(r"^npm\s+(list|ls|view)").unwrap(),
+        Regex::new(r"^apt\s+(list|show|search)").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^dpkg\s+(-l|-L|-s|--list|--listfiles|--status)").expect("Invalid regex pattern at compile time"),  // Package queries
+        Regex::new(r"^rpm\s+(-q|-qa|-ql|-qi)").expect("Invalid regex pattern at compile time"),  // RPM package queries
+        Regex::new(r"^pip3?\s+(list|show|freeze)").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^npm\s+(list|ls|view)").expect("Invalid regex pattern at compile time"),
 
         // Git info (read-only operations)
-        Regex::new(r"^git\s+(status|log|diff|branch|show|tag|remote|stash\s+list|config\s+--list|rev-parse|describe|shortlog|blame|ls-files|ls-tree|cat-file)").unwrap(),
+        Regex::new(r"^git\s+(status|log|diff|branch|show|tag|remote|stash\s+list|config\s+--list|rev-parse|describe|shortlog|blame|ls-files|ls-tree|cat-file)").expect("Invalid regex pattern at compile time"),
 
         // GitHub CLI (read-only)
-        Regex::new(r"^gh\s+(repo\s+view|issue\s+list|issue\s+view|pr\s+list|pr\s+view|pr\s+status|pr\s+checks|release\s+list|api)").unwrap(),
+        Regex::new(r"^gh\s+(repo\s+view|issue\s+list|issue\s+view|pr\s+list|pr\s+view|pr\s+status|pr\s+checks|release\s+list|api)").expect("Invalid regex pattern at compile time"),
 
         // GitLab CLI (read-only)
-        Regex::new(r"^glab\s+(repo\s+view|issue\s+list|issue\s+view|mr\s+list|mr\s+view|release\s+list|api)").unwrap(),
-    ];
+        Regex::new(r"^glab\s+(repo\s+view|issue\s+list|issue\s+view|mr\s+list|mr\s+view|release\s+list|api)").expect("Invalid regex pattern at compile time"),
+    ]
+});
 
-    static ref STANDARD_PATTERNS: Vec<Regex> = vec![
+static STANDARD_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
+    vec![
         // File operations
-        Regex::new(r"^mkdir\s+").unwrap(),
-        Regex::new(r"^touch\s+").unwrap(),
-        Regex::new(r"^cp\s+").unwrap(),
-        Regex::new(r"^mv\s+").unwrap(),
-        Regex::new(r"^rm\s+").unwrap(),  // rm allowed, but -rf / blocked in DANGEROUS
-        Regex::new(r"^chmod\s+").unwrap(),
-        Regex::new(r"^ln\s+").unwrap(),
-        Regex::new(r"^tee\s+").unwrap(),
+        Regex::new(r"^mkdir\s+").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^touch\s+").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^cp\s+").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^mv\s+").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^rm\s+").expect("Invalid regex pattern at compile time"),  // rm allowed, but -rf / blocked in DANGEROUS
+        Regex::new(r"^chmod\s+").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^ln\s+").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^tee\s+").expect("Invalid regex pattern at compile time"),
 
         // File content operations (for creating files)
-        Regex::new(r"^echo\s+").unwrap(),
-        Regex::new(r"^printf\s+").unwrap(),
-        Regex::new(r"^cat\s+").unwrap(),  // Also covers cat > file, cat << EOF
+        Regex::new(r"^echo\s+").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^printf\s+").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^cat\s+").expect("Invalid regex pattern at compile time"),  // Also covers cat > file, cat << EOF
 
         // Text processing
-        Regex::new(r"^(grep|awk|sed|sort|uniq|cut)\s+").unwrap(),
+        Regex::new(r"^(grep|awk|sed|sort|uniq|cut)\s+").expect("Invalid regex pattern at compile time"),
 
         // Archives
-        Regex::new(r"^(tar|gzip|zip|unzip)\s+").unwrap(),
+        Regex::new(r"^(tar|gzip|zip|unzip)\s+").expect("Invalid regex pattern at compile time"),
 
         // Network (sensitive paths blocked in DANGEROUS patterns)
-        Regex::new(r"^curl\s+").unwrap(),
-        Regex::new(r"^wget\s+").unwrap(),
+        Regex::new(r"^curl\s+").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^wget\s+").expect("Invalid regex pattern at compile time"),
 
         // Docker
-        Regex::new(r"^docker\s+(pull|run|stop|start|rm|exec)").unwrap(),
-        Regex::new(r"^docker-compose\s+").unwrap(),
+        Regex::new(r"^docker\s+(pull|run|stop|start|rm|exec)").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^docker-compose\s+").expect("Invalid regex pattern at compile time"),
 
         // Git - comprehensive operations
-        Regex::new(r"^git\s+(add|commit|push|pull|fetch|checkout|merge|rebase|cherry-pick)").unwrap(),
-        Regex::new(r"^git\s+(clone|init|remote|branch|tag|stash|reset|revert|clean)").unwrap(),
-        Regex::new(r"^git\s+(switch|restore|worktree|bisect|submodule|subtree)").unwrap(),
-        Regex::new(r"^git\s+(config|gc|prune|fsck|reflog|archive|bundle|apply|am)").unwrap(),
-        Regex::new(r"^git\s+(format-patch|send-email|request-pull)").unwrap(),
-        Regex::new(r"^git\s+(mv|rm|checkout-index|update-index|read-tree|write-tree)").unwrap(),
+        Regex::new(r"^git\s+(add|commit|push|pull|fetch|checkout|merge|rebase|cherry-pick)").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^git\s+(clone|init|remote|branch|tag|stash|reset|revert|clean)").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^git\s+(switch|restore|worktree|bisect|submodule|subtree)").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^git\s+(config|gc|prune|fsck|reflog|archive|bundle|apply|am)").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^git\s+(format-patch|send-email|request-pull)").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^git\s+(mv|rm|checkout-index|update-index|read-tree|write-tree)").expect("Invalid regex pattern at compile time"),
         // Git flow and common workflows
-        Regex::new(r"^git\s+flow\s+").unwrap(),
+        Regex::new(r"^git\s+flow\s+").expect("Invalid regex pattern at compile time"),
 
         // GitHub CLI (gh) - full operations
-        Regex::new(r"^gh\s+(repo|issue|pr|release|gist|workflow|run|actions|auth|config|alias|extension)").unwrap(),
-        Regex::new(r"^gh\s+api\s+").unwrap(),
+        Regex::new(r"^gh\s+(repo|issue|pr|release|gist|workflow|run|actions|auth|config|alias|extension)").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^gh\s+api\s+").expect("Invalid regex pattern at compile time"),
 
         // GitLab CLI (glab) - full operations
-        Regex::new(r"^glab\s+(repo|issue|mr|release|ci|pipeline|job|auth|config|alias)").unwrap(),
-        Regex::new(r"^glab\s+api\s+").unwrap(),
+        Regex::new(r"^glab\s+(repo|issue|mr|release|ci|pipeline|job|auth|config|alias)").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^glab\s+api\s+").expect("Invalid regex pattern at compile time"),
 
         // Gitea/Forgejo CLI
-        Regex::new(r"^tea\s+").unwrap(),
+        Regex::new(r"^tea\s+").expect("Invalid regex pattern at compile time"),
 
         // Development
-        Regex::new(r"^python3?\s+").unwrap(),
-        Regex::new(r"^node\s+").unwrap(),
-        Regex::new(r"^npm\s+(install|run|start|test|init)").unwrap(),
-        Regex::new(r"^npx\s+").unwrap(),
-        Regex::new(r"^cargo\s+").unwrap(),
-        Regex::new(r"^rustc\s+").unwrap(),
-        Regex::new(r"^go\s+").unwrap(),
+        Regex::new(r"^python3?\s+").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^node\s+").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^npm\s+(install|run|start|test|init)").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^npx\s+").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^cargo\s+").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^rustc\s+").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^go\s+").expect("Invalid regex pattern at compile time"),
 
         // Web development
-        Regex::new(r"^(yarn|pnpm|bun)\s+").unwrap(),
-        Regex::new(r"^(vite|webpack|parcel|rollup)\s+").unwrap(),
+        Regex::new(r"^(yarn|pnpm|bun)\s+").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^(vite|webpack|parcel|rollup)\s+").expect("Invalid regex pattern at compile time"),
 
         // Mobile development
-        Regex::new(r"^flutter\s+").unwrap(),
-        Regex::new(r"^dart\s+").unwrap(),
-        Regex::new(r"^pod\s+").unwrap(),  // iOS CocoaPods
-        Regex::new(r"^(gradle|gradlew)\s+").unwrap(),  // Android
-        Regex::new(r"^adb\s+").unwrap(),  // Android Debug Bridge
-        Regex::new(r"^expo\s+").unwrap(),  // React Native
+        Regex::new(r"^flutter\s+").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^dart\s+").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^pod\s+").expect("Invalid regex pattern at compile time"),  // iOS CocoaPods
+        Regex::new(r"^(gradle|gradlew)\s+").expect("Invalid regex pattern at compile time"),  // Android
+        Regex::new(r"^adb\s+").expect("Invalid regex pattern at compile time"),  // Android Debug Bridge
+        Regex::new(r"^expo\s+").expect("Invalid regex pattern at compile time"),  // React Native
 
         // Shell scripting (bash, sh for running scripts)
-        Regex::new(r"^(bash|sh|zsh)\s+").unwrap(),
-        Regex::new(r"^source\s+").unwrap(),
+        Regex::new(r"^(bash|sh|zsh)\s+").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^source\s+").expect("Invalid regex pattern at compile time"),
 
         // Common utilities
-        Regex::new(r"^(head|tail|wc|diff|comm)\s+").unwrap(),
-        Regex::new(r"^(xargs|tee|tr)\s+").unwrap(),
-        Regex::new(r"^(date|cal|sleep)").unwrap(),
-        Regex::new(r"^(true|false|test|\[)").unwrap(),
+        Regex::new(r"^(head|tail|wc|diff|comm)\s+").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^(xargs|tee|tr)\s+").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^(date|cal|sleep)").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^(true|false|test|\[)").expect("Invalid regex pattern at compile time"),
 
         // Directory operations
-        Regex::new(r"^(cd|pwd|pushd|popd)").unwrap(),
-    ];
+        Regex::new(r"^(cd|pwd|pushd|popd)").expect("Invalid regex pattern at compile time"),
+    ]
+});
 
-    static ref ELEVATED_PATTERNS: Vec<Regex> = vec![
+static ELEVATED_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
+    vec![
         // Package management
-        Regex::new(r"^apt\s+(update|upgrade|install|remove)").unwrap(),
-        Regex::new(r"^apt-get\s+").unwrap(),
-        Regex::new(r"^pip3?\s+install").unwrap(),
-        Regex::new(r"^npm\s+install\s+-g").unwrap(),
+        Regex::new(r"^apt\s+(update|upgrade|install|remove)").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^apt-get\s+").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^pip3?\s+install").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^npm\s+install\s+-g").expect("Invalid regex pattern at compile time"),
 
         // Service control
-        Regex::new(r"^systemctl\s+(start|stop|restart|enable|disable)\s+").unwrap(),
-        Regex::new(r"^service\s+\S+\s+(start|stop|restart)").unwrap(),
+        Regex::new(r"^systemctl\s+(start|stop|restart|enable|disable)\s+").expect("Invalid regex pattern at compile time"),
+        Regex::new(r"^service\s+\S+\s+(start|stop|restart)").expect("Invalid regex pattern at compile time"),
 
         // Docker privileged
-        Regex::new(r"^docker\s+(build|network|volume)").unwrap(),
+        Regex::new(r"^docker\s+(build|network|volume)").expect("Invalid regex pattern at compile time"),
 
         // User management
-        Regex::new(r"^(useradd|usermod|passwd|groupadd)\s+").unwrap(),
+        Regex::new(r"^(useradd|usermod|passwd|groupadd)\s+").expect("Invalid regex pattern at compile time"),
 
         // Firewall
-        Regex::new(r"^ufw\s+(allow|deny|status|enable)").unwrap(),
-    ];
-}
+        Regex::new(r"^ufw\s+(allow|deny|status|enable)").expect("Invalid regex pattern at compile time"),
+    ]
+});
 
 /// Access Controller
 pub struct AccessController {
