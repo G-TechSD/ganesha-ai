@@ -133,7 +133,16 @@ pub struct NetworkInterface {
 }
 
 impl SystemDossier {
-    /// Collect complete system dossier (Linux implementation)
+    /// Collect comprehensive system introspection data
+    ///
+    /// Gathers environmental context including:
+    /// - Display configuration (screens, resolution)
+    /// - Running applications and windows
+    /// - Active input devices
+    /// - System capabilities
+    ///
+    /// This data helps the AI understand the user's environment
+    /// and provide contextually appropriate responses.
     #[cfg(target_os = "linux")]
     pub fn collect() -> Result<Self, String> {
         let timestamp = SystemTime::now()

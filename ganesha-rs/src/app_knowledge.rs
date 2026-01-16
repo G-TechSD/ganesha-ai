@@ -10,6 +10,10 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
+/// Maximum length for application knowledge content to avoid context window overflow
+/// Based on typical LLM context window limits minus other system prompts
+const MAX_KNOWLEDGE_LENGTH: usize = 50000;
+
 /// Sources for official documentation (prioritized)
 const TRUSTED_DOC_SOURCES: &[&str] = &[
     "docs.blender.org",
@@ -177,8 +181,8 @@ pub fn sanitize_doc_content(content: &str) -> String {
     // Remove excessive special characters
     // Limit total length
 
-    if sanitized.len() > 50000 {
-        sanitized = sanitized[..50000].to_string();
+    if sanitized.len() > MAX_KNOWLEDGE_LENGTH {
+        sanitized = sanitized[..MAX_KNOWLEDGE_LENGTH].to_string();
     }
 
     sanitized

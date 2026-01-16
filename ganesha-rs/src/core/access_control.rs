@@ -7,6 +7,10 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// Default maximum execution time for commands (5 minutes)
+/// Prevents runaway processes from consuming system resources indefinitely
+const DEFAULT_MAX_EXECUTION_SECS: u64 = 300;
+
 /// Access level presets
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -39,7 +43,7 @@ impl Default for AccessPolicy {
             blacklist: vec![],
             require_approval_for_high_risk: true,
             audit_all_commands: true,
-            max_execution_time_secs: 300,
+            max_execution_time_secs: DEFAULT_MAX_EXECUTION_SECS,
         }
     }
 }

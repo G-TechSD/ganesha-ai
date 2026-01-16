@@ -84,6 +84,11 @@ pub struct ZoneManager {
     pub presets: HashMap<String, Vec<Zone>>,
 }
 
+/// Zone Manager for NVR-style screen region filtering
+///
+/// Implements a BIOS-configurable zone system that filters vision processing
+/// to specific screen regions, reducing false positives and improving performance.
+/// Similar to Network Video Recorder (NVR) motion detection zones.
 impl ZoneManager {
     pub fn new(screen_width: u32, screen_height: u32) -> Self {
         let mut manager = Self {
@@ -98,6 +103,12 @@ impl ZoneManager {
         manager
     }
 
+    /// Define preset zone configurations for common screen layouts
+    ///
+    /// Presets include:
+    /// - `fullscreen`: Process entire display (1920x1048)
+    /// - `main_content`: Center content area excluding UI chrome
+    /// - `ignore_taskbar`: Everything except bottom taskbar
     fn define_presets(&mut self) {
         // Linux desktop preset (GNOME-like)
         let linux_desktop = vec![

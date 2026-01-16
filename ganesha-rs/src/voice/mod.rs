@@ -47,6 +47,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+/// Default audio buffer size in bytes
+/// 4096 bytes provides good balance between latency and CPU usage for real-time audio
+const DEFAULT_AUDIO_BUFFER_SIZE: usize = 4096;
+
 /// Global kill switch for voice capabilities
 static VOICE_ENABLED: AtomicBool = AtomicBool::new(false);
 static VOICE_KILL_SWITCH: AtomicBool = AtomicBool::new(false);
@@ -73,7 +77,7 @@ impl Default for AudioConfig {
         Self {
             sample_rate: 24000,
             channels: 1,
-            buffer_size: 4096,
+            buffer_size: DEFAULT_AUDIO_BUFFER_SIZE,
             vad_sensitivity: 0.5,
             silence_duration_ms: 500,
             allow_barge_in: true,

@@ -79,7 +79,10 @@ pub struct GaneshaEngine {
 
 impl GaneshaEngine {
     pub fn new() -> Self {
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let cwd = std::env::current_dir().unwrap_or_else(|e| {
+            eprintln!("Warning: Could not get current directory ({}), using '.' as fallback", e);
+            PathBuf::from(".")
+        });
 
         // Set up providers - local first
         let providers = vec![
