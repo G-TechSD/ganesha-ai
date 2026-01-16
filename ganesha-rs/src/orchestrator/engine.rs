@@ -60,6 +60,8 @@ pub struct GaneshaEngine {
     pub files_modified: Vec<String>,
     /// Commands executed
     pub commands_executed: Vec<String>,
+    /// Failed commands with attempt count (to avoid repeating failures)
+    pub failed_commands: std::collections::HashMap<String, u32>,
     /// Provider configurations
     pub providers: Vec<ProviderConfig>,
     /// Primary provider (for main reasoning)
@@ -100,6 +102,7 @@ impl GaneshaEngine {
             session_start: Instant::now(),
             files_modified: vec![],
             commands_executed: vec![],
+            failed_commands: std::collections::HashMap::new(),
             providers,
             primary_provider,
             auto_approve: false,

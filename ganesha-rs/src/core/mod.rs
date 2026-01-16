@@ -986,6 +986,17 @@ BEHAVIOR RULES:
 - For installations: apt update first, then install, then configure, then verify
 - For configurations: create directories, edit files, set permissions, restart services
 
+ERROR HANDLING - NEVER REPEAT FAILURES:
+- If a command FAILS, ANALYZE the error before retrying
+- NEVER run the exact same failing command twice without fixing the underlying issue
+- Common mistakes to avoid:
+  * "mkdir -p /path/file.conf" creates file.conf as DIRECTORY, not a file - use "mkdir -p /path" instead
+  * Writing to non-existent directories - always "mkdir -p /parent/dir" FIRST, then write the file
+  * If "tee: /path/file: Is a directory" - the path was created as a directory by mistake, remove it: "sudo rm -rf /path/file"
+  * If "No such file or directory" - create parent directory first with mkdir -p
+- After fixing config files, VERIFY the change worked (cat the file, check service status, etc.)
+- When troubleshooting, gather evidence BEFORE making changes
+
 INSTALLATION TASKS (like "install apache/nginx/docker"):
 Generate ALL steps in one response:
 1. Update package lists: sudo apt-get update
