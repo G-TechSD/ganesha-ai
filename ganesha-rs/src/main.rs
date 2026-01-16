@@ -298,16 +298,18 @@ async fn main() {
         std::process::exit(1);
     }
 
-    // Show all available providers with primary/secondary designation
-    if available.len() == 1 {
-        print_info(&format!("Provider: {}", available[0]));
-    } else {
-        print_info(&format!("Primary: {} | Secondary: {}",
-            available[0],
-            available.get(1).map(|s| *s).unwrap_or("none")
-        ));
-        if available.len() > 2 {
-            print_info(&format!("Fallbacks: {}", available[2..].join(", ")));
+    // Show all available providers with primary/secondary designation (unless bare mode)
+    if !args.bare {
+        if available.len() == 1 {
+            print_info(&format!("Provider: {}", available[0]));
+        } else {
+            print_info(&format!("Primary: {} | Secondary: {}",
+                available[0],
+                available.get(1).map(|s| *s).unwrap_or("none")
+            ));
+            if available.len() > 2 {
+                print_info(&format!("Fallbacks: {}", available[2..].join(", ")));
+            }
         }
     }
 
