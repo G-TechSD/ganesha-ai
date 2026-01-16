@@ -241,7 +241,8 @@ pub struct FluxCanvas {
 impl Clone for FluxCanvas {
     fn clone(&self) -> Self {
         // Re-open the database connection
-        let db = Connection::open(&self.db_path).expect("Failed to reopen database");
+        let db = Connection::open(&self.db_path)
+            .unwrap_or_else(|_| Connection::open(":memory:").expect("Failed to create memory db"));
         Self {
             session_id: self.session_id.clone(),
             db_path: self.db_path.clone(),
@@ -267,10 +268,11 @@ impl FluxCanvas {
         let output_dir = Self::detect_output_dir(task);
 
         // Create database
-        let db = Connection::open(&db_path).expect("Failed to create canvas database");
+        let db = Connection::open(&db_path)
+            .unwrap_or_else(|_| Connection::open(":memory:").expect("Failed to create memory db"));
 
         // Initialize tables
-        db.execute_batch(
+        let _ = db.execute_batch(
             "CREATE TABLE IF NOT EXISTS items (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 content TEXT NOT NULL,
@@ -296,7 +298,7 @@ impl FluxCanvas {
             );
             CREATE INDEX IF NOT EXISTS idx_items_created ON items(created_at);
             "
-        ).expect("Failed to initialize canvas tables");
+        );
 
         // Store metadata
         db.execute(
@@ -367,17 +369,18 @@ impl FluxCanvas {
 
     /// Add items to the accumulator - O(n) for n new items, NOT O(total)
     pub fn add_items(&mut self, new_items: Vec<String>) {
-        let tx = self.db.transaction().expect("Failed to start transaction");
-        {
-            let mut stmt = tx.prepare_cached(
-                "INSERT INTO items (content) VALUES (?1)"
-            ).expect("Failed to prepare insert");
-
-            for item in &new_items {
-                stmt.execute(params![item]).ok();
+        if let Ok(tx) = self.db.transaction() {
+            {
+                if let Ok(mut stmt) = tx.prepare_cached(
+                    "INSERT INTO items (content) VALUES (?1)"
+                ) {
+                    for item in &new_items {
+                        let _ = stmt.execute(params![item]);
+                    }
+                }
             }
+            let _ = tx.commit();
         }
-        tx.commit().expect("Failed to commit items");
     }
 
     /// Add a single item - O(1)
@@ -399,12 +402,15 @@ impl FluxCanvas {
 
     /// Get all items (for export) - only call when needed
     pub fn get_all_items(&self) -> Vec<String> {
-        let mut stmt = self.db.prepare("SELECT content FROM items ORDER BY id").unwrap();
-        let items: Vec<String> = stmt.query_map([], |row| row.get(0))
-            .unwrap()
-            .filter_map(|r| r.ok())
-            .collect();
-        items
+        match self.db.prepare("SELECT content FROM items ORDER BY id") {
+            Ok(mut stmt) => {
+                match stmt.query_map([], |row| row.get(0)) {
+                    Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+                    Err(_) => Vec::new(),
+                }
+            },
+            Err(_) => Vec::new(),
+        }
     }
 
     /// Get last N items for context - O(1)
@@ -429,17 +435,18 @@ impl FluxCanvas {
 
     /// Add multiple files at once
     pub fn add_files(&mut self, new_files: HashMap<String, String>) {
-        let tx = self.db.transaction().expect("Failed to start transaction");
-        {
-            let mut stmt = tx.prepare_cached(
-                "INSERT OR REPLACE INTO files (path, content, updated_at) VALUES (?1, ?2, CURRENT_TIMESTAMP)"
-            ).expect("Failed to prepare insert");
-
-            for (path, content) in &new_files {
-                stmt.execute(params![path, content]).ok();
+        if let Ok(tx) = self.db.transaction() {
+            {
+                if let Ok(mut stmt) = tx.prepare_cached(
+                    "INSERT OR REPLACE INTO files (path, content, updated_at) VALUES (?1, ?2, CURRENT_TIMESTAMP)"
+                ) {
+                    for (path, content) in &new_files {
+                        let _ = stmt.execute(params![path, content]);
+                    }
+                }
             }
+            let _ = tx.commit();
         }
-        tx.commit().expect("Failed to commit files");
     }
 
     /// Get a file's content
@@ -453,14 +460,17 @@ impl FluxCanvas {
 
     /// Get all files (for export)
     pub fn get_all_files(&self) -> HashMap<String, String> {
-        let mut stmt = self.db.prepare("SELECT path, content FROM files").unwrap();
-        let files: HashMap<String, String> = stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })
-        .unwrap()
-        .filter_map(|r| r.ok())
-        .collect();
-        files
+        match self.db.prepare("SELECT path, content FROM files") {
+            Ok(mut stmt) => {
+                match stmt.query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                }) {
+                    Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+                    Err(_) => HashMap::new(),
+                }
+            },
+            Err(_) => HashMap::new(),
+        }
     }
 
     /// Get file count - O(1)
@@ -1045,9 +1055,11 @@ pub async fn run_flux_capacitor(config: FluxConfig) -> Result<FluxStatus, String
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
 
-    ctrlc::set_handler(move || {
+    if let Err(_) = ctrlc::set_handler(move || {
         r.store(false, Ordering::SeqCst);
-    }).expect("Error setting Ctrl+C handler");
+    }) {
+        eprintln!("Warning: Failed to set Ctrl+C handler");
+    }
 
     // Set up agent with configurable temperature
     let agent_config = AgentConfig {
