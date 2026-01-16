@@ -431,21 +431,67 @@ When you're done with a task, summarize what was accomplished."#,
             }
         }
 
-        // Look for <|message|>{json} format (some LLMs use this)
-        if let Some(start) = response.find("<|message|>") {
-            let after = &response[start + 11..];
-            if let Some(json_start) = after.find('{') {
-                if let Some(json_end) = after.rfind('}') {
-                    let json_str = &after[json_start..=json_end];
-                    if let Ok(parsed) = serde_json::from_str::<Value>(json_str) {
-                        if let (Some(name), args) = (
-                            parsed.get("name").and_then(|n| n.as_str()),
-                            parsed.get("args").cloned().unwrap_or(json!({})),
-                        ) {
-                            calls.push(ToolCall {
-                                name: name.to_string(),
-                                args,
-                            });
+        // Handle <|channel|> format from local models
+        // Format: <|channel|>commentary to=bash <|constrain|>json<|message|>{"command":"..."}
+        // The tool name comes from "to=xxx" and the JSON is the args directly
+        if response.contains("<|channel|>") && response.contains("<|message|>") {
+            for part in response.split("<|channel|>") {
+                if let Some(msg_start) = part.find("<|message|>") {
+                    let json_part = &part[msg_start + 11..]; // Skip "<|message|>"
+
+                    // Find the tool type from "to=xxx" pattern
+                    let tool_name = if part.contains("to=bash") {
+                        Some("bash")
+                    } else if part.contains("to=write") {
+                        Some("write")
+                    } else if part.contains("to=read") {
+                        Some("read")
+                    } else if part.contains("to=edit") {
+                        Some("edit")
+                    } else if part.contains("to=glob") {
+                        Some("glob")
+                    } else if part.contains("to=grep") {
+                        Some("grep")
+                    } else {
+                        None
+                    };
+
+                    if let Some(name) = tool_name {
+                        // Find the JSON object
+                        if let Some(json_start) = json_part.find('{') {
+                            if let Some(json_end) = json_part.rfind('}') {
+                                let json_str = &json_part[json_start..=json_end];
+                                if let Ok(parsed) = serde_json::from_str::<Value>(json_str) {
+                                    // The JSON IS the args (not wrapped in name/args)
+                                    calls.push(ToolCall {
+                                        name: name.to_string(),
+                                        args: parsed,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Look for <|message|>{json} format (some LLMs use this with name/args structure)
+        if calls.is_empty() {
+            if let Some(start) = response.find("<|message|>") {
+                let after = &response[start + 11..];
+                if let Some(json_start) = after.find('{') {
+                    if let Some(json_end) = after.rfind('}') {
+                        let json_str = &after[json_start..=json_end];
+                        if let Ok(parsed) = serde_json::from_str::<Value>(json_str) {
+                            if let (Some(name), args) = (
+                                parsed.get("name").and_then(|n| n.as_str()),
+                                parsed.get("args").cloned().unwrap_or(json!({})),
+                            ) {
+                                calls.push(ToolCall {
+                                    name: name.to_string(),
+                                    args,
+                                });
+                            }
                         }
                     }
                 }
