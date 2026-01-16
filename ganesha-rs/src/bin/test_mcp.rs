@@ -4,6 +4,9 @@
 use ganesha::orchestrator::mcp::{McpManager, connect_mcp_server, get_all_mcp_tools, call_mcp_tool};
 use serde_json::json;
 
+/// Maximum length for preview output before truncation
+const PREVIEW_TRUNCATE_LEN: usize = 300;
+
 fn main() {
     println!("╔══════════════════════════════════════════════════════════════╗");
     println!("║         MCP/Playwright Comprehensive Test Suite              ║");
@@ -60,7 +63,7 @@ fn main() {
             if text.contains("Search") || text.contains("Gmail") || text.contains("Google") {
                 println!("✅ PASS: Got accessibility snapshot with Google elements");
                 // Show some of the content
-                let preview = if text.len() > 300 { &text[..300] } else { &text };
+                let preview = if text.len() > PREVIEW_TRUNCATE_LEN { &text[..PREVIEW_TRUNCATE_LEN] } else { &text };
                 println!("   Preview: {}...", preview.replace('\n', " "));
                 passed += 1;
             } else {
