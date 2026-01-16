@@ -348,7 +348,9 @@ impl ConfigManager {
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let content = toml::to_string_pretty(config).unwrap();
+        let content = toml::to_string_pretty(config)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData,
+                format!("Failed to serialize config to TOML: {}", e)))?;
         fs::write(&self.path, content)
     }
 }
