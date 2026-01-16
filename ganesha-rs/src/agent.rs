@@ -31,6 +31,48 @@ struct ToolCall {
     args: Value,
 }
 
+/// Attempt to fix malformed JSON from local models that output raw newlines in strings
+/// This handles cases like: {"content":"line1\nline2"} where \n is a literal newline
+fn fix_malformed_json(json_str: &str) -> String {
+    let mut result = String::with_capacity(json_str.len() * 2);
+    let mut in_string = false;
+    let mut escape_next = false;
+
+    for ch in json_str.chars() {
+        if escape_next {
+            result.push(ch);
+            escape_next = false;
+            continue;
+        }
+
+        match ch {
+            '\\' if in_string => {
+                escape_next = true;
+                result.push(ch);
+            }
+            '"' => {
+                in_string = !in_string;
+                result.push(ch);
+            }
+            '\n' if in_string => {
+                // Raw newline inside string - escape it
+                result.push_str("\\n");
+            }
+            '\r' if in_string => {
+                // Raw carriage return inside string - escape it
+                result.push_str("\\r");
+            }
+            '\t' if in_string => {
+                // Raw tab inside string - escape it
+                result.push_str("\\t");
+            }
+            _ => result.push(ch),
+        }
+    }
+
+    result
+}
+
 /// The Agent Engine
 pub struct AgentEngine {
     cwd: PathBuf,
@@ -461,7 +503,14 @@ When you're done with a task, summarize what was accomplished."#,
                         if let Some(json_start) = json_part.find('{') {
                             if let Some(json_end) = json_part.rfind('}') {
                                 let json_str = &json_part[json_start..=json_end];
-                                if let Ok(parsed) = serde_json::from_str::<Value>(json_str) {
+                                // Try parsing directly, then try with fixed newlines
+                                let parsed = serde_json::from_str::<Value>(json_str)
+                                    .or_else(|_| {
+                                        let fixed = fix_malformed_json(json_str);
+                                        serde_json::from_str::<Value>(&fixed)
+                                    });
+
+                                if let Ok(parsed) = parsed {
                                     // Check if JSON has name/args structure or is args directly
                                     if let (Some(name), Some(args)) = (
                                         parsed.get("name").and_then(|n| n.as_str()),
@@ -494,7 +543,12 @@ When you're done with a task, summarize what was accomplished."#,
                 if let Some(json_start) = after.find('{') {
                     if let Some(json_end) = after.rfind('}') {
                         let json_str = &after[json_start..=json_end];
-                        if let Ok(parsed) = serde_json::from_str::<Value>(json_str) {
+                        let parsed = serde_json::from_str::<Value>(json_str)
+                            .or_else(|_| {
+                                let fixed = fix_malformed_json(json_str);
+                                serde_json::from_str::<Value>(&fixed)
+                            });
+                        if let Ok(parsed) = parsed {
                             if let (Some(name), args) = (
                                 parsed.get("name").and_then(|n| n.as_str()),
                                 parsed.get("args").cloned().unwrap_or(json!({})),
