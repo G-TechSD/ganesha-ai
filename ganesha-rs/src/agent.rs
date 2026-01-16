@@ -456,17 +456,29 @@ When you're done with a task, summarize what was accomplished."#,
                         None
                     };
 
-                    if let Some(name) = tool_name {
+                    if let Some(fallback_name) = tool_name {
                         // Find the JSON object
                         if let Some(json_start) = json_part.find('{') {
                             if let Some(json_end) = json_part.rfind('}') {
                                 let json_str = &json_part[json_start..=json_end];
                                 if let Ok(parsed) = serde_json::from_str::<Value>(json_str) {
-                                    // The JSON IS the args (not wrapped in name/args)
-                                    calls.push(ToolCall {
-                                        name: name.to_string(),
-                                        args: parsed,
-                                    });
+                                    // Check if JSON has name/args structure or is args directly
+                                    if let (Some(name), Some(args)) = (
+                                        parsed.get("name").and_then(|n| n.as_str()),
+                                        parsed.get("args"),
+                                    ) {
+                                        // Full name/args structure
+                                        calls.push(ToolCall {
+                                            name: name.to_string(),
+                                            args: args.clone(),
+                                        });
+                                    } else {
+                                        // JSON IS the args directly, use tool name from "to=xxx"
+                                        calls.push(ToolCall {
+                                            name: fallback_name.to_string(),
+                                            args: parsed,
+                                        });
+                                    }
                                 }
                             }
                         }
