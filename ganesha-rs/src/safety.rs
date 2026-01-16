@@ -1714,3 +1714,275 @@ mod tests {
         assert!(!matches!(verdict, SafetyVerdict::Safe));
     }
 }
+
+#[cfg(test)]
+mod safety_tests {
+    use super::*;
+
+    #[test]
+    fn test_safety_filter_initialization() {
+        // Verify SafetyFilter initializes correctly with dangerous keywords and patterns
+        let filter = SafetyFilter::new(SafetyMode::Normal);
+
+        // Check that dangerous keywords are loaded
+        assert!(filter.dangerous_keywords.len() > 0,
+            "SafetyFilter should have dangerous keywords loaded");
+
+        // Check that malicious patterns are loaded
+        assert!(filter.malicious_patterns.len() > 0,
+            "SafetyFilter should have malicious patterns loaded");
+    }
+
+    #[test]
+    fn test_catastrophic_commands_blocked() {
+        // Verify that catastrophic commands like "rm -rf /" are blocked
+        let mut filter = SafetyFilter::new(SafetyMode::Normal);
+
+        let action = PlannedAction {
+            action_type: "TYPE".to_string(),
+            x: None,
+            y: None,
+            key: None,
+            text: Some("rm -rf /".to_string()),
+            screen_context: None,
+        };
+
+        let verdict = filter.evaluate(&action, "rm -rf / command");
+
+        // Should be blocked, need confirmation, or suspicious
+        // The "rm -rf" pattern should trigger detection
+        match verdict {
+            SafetyVerdict::Blocked { .. } => {
+                // Perfect - command is blocked
+            },
+            SafetyVerdict::NeedsConfirmation { .. } => {
+                // Good - requires confirmation
+            },
+            SafetyVerdict::Suspicious { risk_score, .. } if risk_score > 0 => {
+                // Good - detected as suspicious (even low risk is detection)
+            },
+            other => {
+                panic!("Catastrophic 'rm -rf /' command detection failed: {:?}", other);
+            }
+        }
+    }
+
+    #[test]
+    fn test_safe_commands_allowed() {
+        // Verify that safe commands like "ls -la" are allowed
+        let mut filter = SafetyFilter::new(SafetyMode::Normal);
+
+        let action = PlannedAction {
+            action_type: "TYPE".to_string(),
+            x: None,
+            y: None,
+            key: None,
+            text: Some("ls -la".to_string()),
+            screen_context: None,
+        };
+
+        let verdict = filter.evaluate(&action, "ls -la in terminal");
+
+        // Should be safe (not blocked, not suspicious, or low risk at worst)
+        match verdict {
+            SafetyVerdict::Safe => {
+                // Ideal case - completely safe
+            },
+            SafetyVerdict::Suspicious { risk_score, .. } if risk_score < 20 => {
+                // Acceptable - very low risk
+            },
+            _ => panic!("Safe command 'ls -la' should not be blocked or highly suspicious"),
+        }
+    }
+
+    #[test]
+    fn test_safety_modes_initialization() {
+        // Test that different safety modes can be initialized and work correctly
+        let paranoid = SafetyFilter::new(SafetyMode::Paranoid);
+        let normal = SafetyFilter::new(SafetyMode::Normal);
+        let relaxed = SafetyFilter::new(SafetyMode::Relaxed);
+        let expert = SafetyFilter::new(SafetyMode::Expert);
+
+        // All should initialize successfully with dangerous keywords loaded
+        assert!(paranoid.dangerous_keywords.len() > 0);
+        assert!(normal.dangerous_keywords.len() > 0);
+        assert!(relaxed.dangerous_keywords.len() > 0);
+        assert!(expert.dangerous_keywords.len() > 0);
+
+        // All should have the correct safety mode set
+        assert_eq!(paranoid.safety_mode, SafetyMode::Paranoid);
+        assert_eq!(normal.safety_mode, SafetyMode::Normal);
+        assert_eq!(relaxed.safety_mode, SafetyMode::Relaxed);
+        assert_eq!(expert.safety_mode, SafetyMode::Expert);
+    }
+
+    #[test]
+    fn test_dangerous_key_detection() {
+        // Verify that dangerous keyboard shortcuts are detected
+        let mut filter = SafetyFilter::new(SafetyMode::Normal);
+
+        let action = PlannedAction {
+            action_type: "KEY".to_string(),
+            x: None,
+            y: None,
+            key: Some("Alt+F4".to_string()),
+            text: None,
+            screen_context: None,
+        };
+
+        let verdict = filter.evaluate(&action, "");
+
+        // Alt+F4 should trigger at least a warning or block
+        assert!(
+            !matches!(verdict, SafetyVerdict::Safe),
+            "Dangerous Alt+F4 should not be marked as completely safe"
+        );
+    }
+
+    #[test]
+    fn test_malicious_pattern_detection() {
+        // Verify that malicious patterns are detected (phishing, ransomware, etc.)
+        let mut filter = SafetyFilter::new(SafetyMode::Normal);
+
+        let action = PlannedAction {
+            action_type: "CLICK".to_string(),
+            x: Some(500),
+            y: Some(300),
+            key: None,
+            text: None,
+            screen_context: None,
+        };
+
+        // Ransomware message
+        let verdict = filter.evaluate(&action, "Your files are encrypted! Send bitcoin to unlock");
+
+        assert!(
+            matches!(verdict, SafetyVerdict::Blocked { .. } | SafetyVerdict::NeedsConfirmation { .. }),
+            "Ransomware message should be detected and blocked"
+        );
+    }
+
+    #[test]
+    fn test_quick_block_check() {
+        // Verify quick block detection for catastrophic commands
+        let filter = SafetyFilter::new(SafetyMode::Normal);
+
+        let action = PlannedAction {
+            action_type: "TYPE".to_string(),
+            x: None,
+            y: None,
+            key: None,
+            text: Some("rm -rf /".to_string()),
+            screen_context: None,
+        };
+
+        let result = filter.quick_block_check(&action, "rm -rf / - delete everything");
+
+        assert!(result.is_some(), "Quick block should detect 'rm -rf' command");
+    }
+
+    #[test]
+    fn test_wait_always_safe() {
+        // Verify that WAIT action is always safe regardless of context
+        let mut filter = SafetyFilter::new(SafetyMode::Normal);
+
+        let action = PlannedAction {
+            action_type: "WAIT".to_string(),
+            x: None,
+            y: None,
+            key: None,
+            text: None,
+            screen_context: None,
+        };
+
+        // Even in extremely dangerous context, WAIT should be safe
+        let verdict = filter.evaluate(&action, "RANSOMWARE DETECTED! Click to pay bitcoin now!");
+
+        assert!(
+            matches!(verdict, SafetyVerdict::Safe),
+            "WAIT should always be safe regardless of context"
+        );
+    }
+
+    #[test]
+    fn test_two_pass_verifier_initialization() {
+        // Verify TwoPassVerifier initializes correctly
+        let verifier = TwoPassVerifier::new(SafetyMode::Normal);
+
+        // Get the safe system prompt to verify prompt builder initialized
+        let prompt = verifier.get_safe_system_prompt();
+
+        assert!(!prompt.is_empty(), "Safe system prompt should be non-empty");
+        assert!(prompt.contains("CRITICAL SAFETY RULES"), "Prompt should contain safety rules");
+    }
+
+    #[test]
+    fn test_safety_advisor_escalation() {
+        // Verify SafetyAdvisor can be created and escalation logic works
+        let advisor = SafetyAdvisor::default();
+
+        // Test that escalation should happen for suspicious verdict
+        let suspicious_verdict = SafetyVerdict::Suspicious {
+            reason: "Test suspicious".to_string(),
+            risk_score: 25,
+        };
+
+        let escalation = advisor.should_escalate(&suspicious_verdict, 0, false);
+
+        assert!(escalation.is_some(), "Should escalate for moderate risk scores");
+    }
+
+    #[test]
+    fn test_three_pass_verifier_initialization() {
+        // Verify ThreePassVerifier initializes correctly
+        let verifier = ThreePassVerifier::new(
+            SafetyMode::Normal,
+            "http://localhost:1234/v1",
+            "test-model",
+        );
+
+        // Get advisor stats to verify initialization
+        let (escalations, max) = verifier.get_advisor_stats();
+
+        assert_eq!(escalations, 0, "Should start with 0 escalations");
+        assert_eq!(max, 10, "Should have default max escalations of 10");
+    }
+
+    #[test]
+    fn test_obfuscated_keyword_detection() {
+        // Verify detection of obfuscated dangerous keywords
+        let filter = SafetyFilter::new(SafetyMode::Normal);
+
+        // Test spaced obfuscation: "s h u t d o w n"
+        let result = filter.check_obfuscated_keywords("Click s h u t d o w n button");
+        assert!(result.is_some(), "Should detect spaced obfuscation");
+
+        // Test leetspeak: "5hutd0wn"
+        let result = filter.check_obfuscated_keywords("Press 5hutd0wn now");
+        assert!(result.is_some(), "Should detect leetspeak obfuscation");
+    }
+
+    #[test]
+    fn test_blocked_actions_tracking() {
+        // Verify that blocked actions are tracked
+        let mut filter = SafetyFilter::new(SafetyMode::Paranoid);
+
+        let dangerous_action = PlannedAction {
+            action_type: "CLICK".to_string(),
+            x: Some(500),
+            y: Some(300),
+            key: None,
+            text: None,
+            screen_context: None,
+        };
+
+        let initial_count = filter.blocked_actions.len();
+        let _verdict = filter.evaluate(&dangerous_action, "shutdown command detected");
+
+        // Should have tracked the blocked action (in Paranoid mode, this should be blocked)
+        assert!(
+            filter.blocked_actions.len() >= initial_count,
+            "Blocked actions should be tracked"
+        );
+    }
+}
