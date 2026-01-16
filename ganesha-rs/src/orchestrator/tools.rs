@@ -442,6 +442,110 @@ fn exec_write(args: &Value, cwd: &str) -> ToolExecResult {
     }
 }
 
+/// Smart pre-processing for bash commands to fix common mistakes
+fn preprocess_bash_command(command: &str) -> String {
+    let mut result = command.to_string();
+
+    // Pattern 1: Detect "mkdir -p /path/to/file.conf" where the path looks like a file
+    // (has extension like .conf, .txt, .json, etc.)
+    if let Some(caps) = regex::Regex::new(r"mkdir\s+-p\s+([^\s&|;]+\.\w{1,5})(?:\s|$)")
+        .ok()
+        .and_then(|re| re.captures(&result))
+    {
+        if let Some(file_path) = caps.get(1) {
+            let path = file_path.as_str();
+            if let Some(parent) = std::path::Path::new(path).parent() {
+                let parent_str = parent.to_string_lossy();
+                if !parent_str.is_empty() && parent_str != "/" {
+                    // Replace "mkdir -p /path/file.conf" with "mkdir -p /path"
+                    let old_pattern = format!("mkdir -p {}", path);
+                    let new_pattern = format!("mkdir -p {}", parent_str);
+                    result = result.replace(&old_pattern, &new_pattern);
+                    eprintln!("[Ganesha] Auto-fixed: mkdir target was a file path, using parent directory instead");
+                }
+            }
+        }
+    }
+
+    // Pattern 2: Detect "tee /path/to/file" and ensure parent directory exists
+    // Only if it's writing to an absolute path that might not exist
+    if result.contains("tee ") && !result.contains("mkdir -p") {
+        if let Some(caps) = regex::Regex::new(r"\|\s*(?:sudo\s+)?tee\s+(/[^\s&|;>]+)")
+            .ok()
+            .and_then(|re| re.captures(&result))
+        {
+            if let Some(file_path) = caps.get(1) {
+                let path = file_path.as_str();
+                // Check if the path exists as a directory (common mistake)
+                if std::path::Path::new(path).is_dir() {
+                    return format!(
+                        "echo 'ERROR: {} is a directory. Remove with: sudo rm -rf {}' && false",
+                        path, path
+                    );
+                }
+                // Ensure parent directory exists
+                if let Some(parent) = std::path::Path::new(path).parent() {
+                    if !parent.exists() {
+                        let parent_str = parent.to_string_lossy();
+                        result = format!("sudo mkdir -p {} && {}", parent_str, result);
+                        eprintln!("[Ganesha] Auto-fixed: Added mkdir -p for parent directory before tee");
+                    }
+                }
+            }
+        }
+    }
+
+    // Pattern 3: Detect "cat > /path/to/file" and ensure parent exists
+    if (result.contains("cat >") || result.contains("cat>")) && !result.contains("mkdir -p") {
+        if let Some(caps) = regex::Regex::new(r"cat\s*>\s*(/[^\s&|;>]+)")
+            .ok()
+            .and_then(|re| re.captures(&result))
+        {
+            if let Some(file_path) = caps.get(1) {
+                let path = file_path.as_str();
+                // Check if the path exists as a directory (common mistake)
+                if std::path::Path::new(path).is_dir() {
+                    return format!(
+                        "echo 'ERROR: {} is a directory. Remove with: sudo rm -rf {}' && false",
+                        path, path
+                    );
+                }
+                // Ensure parent directory exists
+                if let Some(parent) = std::path::Path::new(path).parent() {
+                    if !parent.exists() {
+                        let parent_str = parent.to_string_lossy();
+                        result = format!("sudo mkdir -p {} && {}", parent_str, result);
+                        eprintln!("[Ganesha] Auto-fixed: Added mkdir -p for parent directory before cat");
+                    }
+                }
+            }
+        }
+    }
+
+    // Pattern 4: Detect writing to a path that is actually a directory
+    for pattern in &["tee ", "cat >", "> "] {
+        if result.contains(pattern) {
+            // Extract file paths and check if any are directories
+            let re = regex::Regex::new(r"(?:tee\s+|cat\s*>\s*|>\s*)(/[^\s&|;>]+)").ok();
+            if let Some(re) = re {
+                for caps in re.captures_iter(&result) {
+                    if let Some(m) = caps.get(1) {
+                        let path = m.as_str();
+                        if std::path::Path::new(path).is_dir() {
+                            return format!(
+                                "echo 'ERROR: Cannot write to {} - it is a directory.' && false",
+                                path
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    result
+}
+
 async fn exec_bash(args: &Value, cwd: &str) -> ToolExecResult {
     let command = args["command"].as_str().unwrap_or("");
     let timeout_secs = args["timeout"].as_u64().unwrap_or(60);
@@ -468,6 +572,9 @@ async fn exec_bash(args: &Value, cwd: &str) -> ToolExecResult {
             };
         }
     }
+
+    // Smart pre-processing: Fix common command mistakes
+    let command = preprocess_bash_command(command);
 
     let output = Command::new("bash")
         .arg("-c")

@@ -277,8 +277,8 @@ async fn main() {
         }
     }
 
-    // Print banner unless quiet
-    if !args.quiet {
+    // Print banner unless quiet or bare mode
+    if !args.quiet && !args.bare {
         print_banner();
     }
 
@@ -693,6 +693,7 @@ async fn run_repl<C: core::ConsentHandler>(
                     println!("  /eval          Switch to Evaluation mode");
                     println!("  /sysadmin      Switch to SysAdmin mode (system tasks)");
                     println!("  /high          Toggle high reasoning mode (detailed analysis)");
+                    println!("  /flux          Start Flux Capacitor loop (continuous improvement)");
 
                     println!("\n{}", style("MEMORY & SESSION:").yellow().bold());
                     println!("  /recall        Show conversation history");
@@ -1015,6 +1016,195 @@ with real GitLab repositories and documentation.
                         println!("{} High reasoning mode {} - normal mode",
                             style("🧠").cyan(), style("OFF").yellow());
                     }
+                    continue;
+                }
+
+                // Flux Capacitor continuous improvement mode
+                if input == "/flux" || input.starts_with("/flux ") {
+                    println!("\n{}", style("⚡ FLUX CAPACITOR - Continuous Improvement Loop ⚡").cyan().bold());
+                    println!("{}", style("━".repeat(60)).dim());
+                    println!("{}", style("This mode runs continuous improvement until a specified time.").dim());
+                    println!("{}", style("Press ESC to stop with confirmation, Ctrl+C to end immediately.").dim());
+                    println!();
+
+                    // Get task description
+                    print!("{} ", style("What should I work on?").yellow().bold());
+                    let _ = std::io::Write::flush(&mut std::io::stdout());
+                    let mut flux_task = String::new();
+                    if std::io::stdin().read_line(&mut flux_task).is_err() || flux_task.trim().is_empty() {
+                        println!("{} Flux loop cancelled", style("✗").red());
+                        continue;
+                    }
+                    let flux_task = flux_task.trim().to_string();
+
+                    // Get end time
+                    println!();
+                    print!("{} ", style("End time (e.g., '9:30 PM' or duration like '30m'):").yellow().bold());
+                    let _ = std::io::Write::flush(&mut std::io::stdout());
+                    let mut end_time_input = String::new();
+                    if std::io::stdin().read_line(&mut end_time_input).is_err() || end_time_input.trim().is_empty() {
+                        println!("{} Flux loop cancelled", style("✗").red());
+                        continue;
+                    }
+                    let end_time_str = end_time_input.trim();
+
+                    // Parse end time
+                    let end_time = if end_time_str.ends_with('m') || end_time_str.ends_with('h') {
+                        // Duration format: 30m, 1h, etc.
+                        let (num_str, unit) = end_time_str.split_at(end_time_str.len() - 1);
+                        if let Ok(num) = num_str.parse::<i64>() {
+                            let duration = if unit == "h" {
+                                chrono::Duration::hours(num)
+                            } else {
+                                chrono::Duration::minutes(num)
+                            };
+                            Local::now() + duration
+                        } else {
+                            println!("{} Invalid duration format", style("✗").red());
+                            continue;
+                        }
+                    } else {
+                        // Time format: 9:30 PM, 21:30, etc.
+                        let today = Local::now().date_naive();
+                        let time_formats = ["%I:%M %p", "%I:%M%p", "%H:%M", "%I %p", "%I%p"];
+                        let mut parsed_time = None;
+                        for fmt in &time_formats {
+                            if let Ok(t) = chrono::NaiveTime::parse_from_str(end_time_str, fmt) {
+                                parsed_time = Some(t);
+                                break;
+                            }
+                        }
+                        if let Some(time) = parsed_time {
+                            let naive_dt = today.and_time(time);
+                            if let Some(local_dt) = naive_dt.and_local_timezone(Local).single() {
+                                local_dt
+                            } else {
+                                println!("{} Could not parse time", style("✗").red());
+                                continue;
+                            }
+                        } else {
+                            println!("{} Could not parse time format. Try '9:30 PM' or '30m'", style("✗").red());
+                            continue;
+                        }
+                    };
+
+                    println!();
+                    println!("{} Flux loop started!", style("⚡").yellow());
+                    println!("{} Task: {}", style("📋").cyan(), flux_task);
+                    println!("{} End time: {}", style("🕐").cyan(), end_time.format("%I:%M %p"));
+                    println!("{}", style("━".repeat(60)).dim());
+
+                    // Switch to development mode for flux loop
+                    let _ = workflow.transition(GaneshaMode::Development);
+
+                    // Set up Ctrl+C handler for flux loop
+                    let flux_interrupted = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                    let flux_interrupted_clone = flux_interrupted.clone();
+
+                    // Spawn a task to listen for Ctrl+C during flux loop
+                    let ctrl_c_task = tokio::spawn(async move {
+                        if tokio::signal::ctrl_c().await.is_ok() {
+                            flux_interrupted_clone.store(true, std::sync::atomic::Ordering::SeqCst);
+                        }
+                    });
+
+                    // Flux loop iterations
+                    let mut iteration = 0;
+                    let mut flux_exit_reason = "completed";
+
+                    'flux_loop: while Local::now() < end_time {
+                        // Check for Ctrl+C interrupt
+                        if flux_interrupted.load(std::sync::atomic::Ordering::SeqCst) {
+                            flux_exit_reason = "interrupted (Ctrl+C)";
+                            break 'flux_loop;
+                        }
+
+                        // Check for ESC key (non-blocking)
+                        if crossterm::event::poll(std::time::Duration::from_millis(50)).unwrap_or(false) {
+                            if let Ok(crossterm::event::Event::Key(key)) = crossterm::event::read() {
+                                if key.code == crossterm::event::KeyCode::Esc {
+                                    // ESC pressed - ask for confirmation
+                                    println!("\n{}", style("━".repeat(60)).yellow());
+                                    print!("{} Stop flux loop? [y/N]: ", style("⚠ ESC pressed.").yellow().bold());
+                                    let _ = std::io::Write::flush(&mut std::io::stdout());
+
+                                    let mut confirm = String::new();
+                                    if std::io::stdin().read_line(&mut confirm).is_ok() {
+                                        if confirm.trim().to_lowercase() == "y" || confirm.trim().to_lowercase() == "yes" {
+                                            flux_exit_reason = "stopped by user (ESC)";
+                                            break 'flux_loop;
+                                        }
+                                    }
+                                    println!("{} Continuing flux loop...", style("→").cyan());
+                                    println!("{}", style("━".repeat(60)).dim());
+                                }
+                            }
+                        }
+
+                        iteration += 1;
+                        let remaining = end_time.signed_duration_since(Local::now());
+                        let mins_remaining = remaining.num_minutes();
+
+                        println!("\n{} {} {} | {} remaining {}",
+                            style(format!("━━━ FLUX ITERATION {} ━━━", iteration)).cyan().bold(),
+                            style("🕐").dim(),
+                            Local::now().format("%H:%M:%S"),
+                            style(format!("{}m", mins_remaining)).yellow(),
+                            style("(ESC to stop, Ctrl+C to end)").dim()
+                        );
+
+                        // Create the flux prompt
+                        let flux_prompt = format!(
+                            "FLUX CAPACITOR MODE - Iteration {}\n\
+                            Task: {}\n\
+                            Time remaining: {} minutes\n\
+                            Current time: {}\n\
+                            End time: {}\n\n\
+                            Continue working on this task. Analyze, improve, test, fix issues.\n\
+                            When you think you're done, you're NOT done - keep improving.\n\
+                            Report what you did and what's next.",
+                            iteration,
+                            flux_task,
+                            mins_remaining,
+                            Local::now().format("%I:%M %p"),
+                            end_time.format("%I:%M %p")
+                        );
+
+                        // Run the task
+                        let vision_cfg = if workflow.vision_config.is_available() {
+                            workflow.vision_config.cloud_vision_provider.as_ref()
+                                .zip(workflow.vision_config.cloud_vision_model.as_ref())
+                                .map(|(p, m)| (p.as_str(), m.as_str()))
+                        } else {
+                            None
+                        };
+                        let output = run_task_with_log(engine, &flux_prompt, code_mode, vision_cfg, true).await;
+                        session_log.push(format!("[{}] FLUX {}: {}", Local::now().format("%H:%M:%S"), iteration, output));
+
+                        // Brief pause between iterations (also allows interrupt check)
+                        for _ in 0..20 {
+                            if flux_interrupted.load(std::sync::atomic::Ordering::SeqCst) {
+                                flux_exit_reason = "interrupted (Ctrl+C)";
+                                break 'flux_loop;
+                            }
+                            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                        }
+                    }
+
+                    // Clean up Ctrl+C handler
+                    ctrl_c_task.abort();
+
+                    println!("\n{}", style("━".repeat(60)).cyan());
+                    println!("{} Flux loop {} after {} iterations",
+                        style("⚡").green().bold(),
+                        flux_exit_reason,
+                        iteration
+                    );
+                    println!("{} Ended at: {}", style("🕐").cyan(), Local::now().format("%I:%M %p"));
+                    println!("{}", style("━".repeat(60)).cyan());
+
+                    // Return to chat mode after flux
+                    let _ = workflow.transition(GaneshaMode::Chat);
                     continue;
                 }
 
