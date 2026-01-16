@@ -1,0 +1,1249 @@
+EDGE CASES - Ganesha 3.14.0 (250 Test Cases)
+===========================================
+
+MALFORMED INPUTS (25 cases)
+--------------------------
+
+TEST_251: [Malformed Inputs] Empty command
+Command: ganesha ""
+Expected: Error: Empty input message, show usage
+
+TEST_252: [Malformed Inputs] Null input
+Command: ganesha "null"
+Expected: Error: Invalid input, expected command
+
+TEST_253: [Malformed Inputs] Invalid JSON
+Command: ganesha "parse this malformed JSON: {invalid: json"
+Expected: Error: Invalid JSON syntax
+
+TEST_254: [Malformed Inputs] Special characters only
+Command: ganesha "!@#$%^&*()"
+Expected: Error: Invalid command format
+
+TEST_255: [Malformed Inputs] Extremely long input
+Command: ganesha "[500KB of random text]"
+Expected: Error: Input exceeds maximum length
+
+TEST_256: [Malformed Inputs] Binary data in input
+Command: ganesha "[binary data: \x00\x01\x02]"
+Expected: Error: Cannot process binary data
+
+TEST_257: [Malformed Inputs] Mixed encoding
+Command: ganesha "Hello مرحبا 你好 🎉 [incomplete UTF-8: \xF0\x28]"
+Expected: Error: Invalid character encoding
+
+TEST_258: [Malformed Inputs] Path traversal attempt
+Command: ganesha "read ../../../../etc/passwd"
+Expected: Error: Access denied or sanitized path
+
+TEST_259: [Malformed Inputs] Incomplete command
+Command: ganesha "create file"
+Expected: Error: Incomplete command, missing required parameters
+
+TEST_260: [Malformed Inputs] Command injection attempt
+Command: ganesha "read file; rm -rf /"
+Expected: Error: Invalid command, injection detected
+
+TEST_261: [Malformed Inputs] Syntax error in command
+Command: ganesha "find all files where type=python and status=="
+Expected: Error: Syntax error in query
+
+TEST_262: [Malformed Inputs] Invalid file path
+Command: ganesha "read /this/path/does/not/exist/file.txt"
+Expected: Error: File not found
+
+TEST_263: [Malformed Inputs] Circular reference
+Command: ganesha "create symlink a pointing to b, and b pointing to a"
+Expected: Error: Circular reference detected
+
+TEST_264: [Malformed Inputs] Conflicting parameters
+Command: ganesha "create file with mode read and mode write"
+Expected: Error: Conflicting parameters
+
+TEST_265: [Malformed Inputs] Unknown parameter
+Command: ganesha "read file.txt with unknown_param=true"
+Expected: Error: Unknown parameter
+
+TEST_266: [Malformed Inputs] Invalid regex pattern
+Command: ganesha "search for regex pattern [invalid("
+Expected: Error: Invalid regular expression
+
+TEST_267: [Malformed Inputs] Missing required argument
+Command: ganesha "copy file"
+Expected: Error: Missing destination argument
+
+TEST_268: [Malformed Inputs] Type mismatch
+Command: ganesha "wait for 'not a number' seconds"
+Expected: Error: Type mismatch, expected numeric value
+
+TEST_269: [Malformed Inputs] Deprecated syntax
+Command: ganesha "using old_deprecated_command"
+Expected: Error: Command deprecated, use new_command instead
+
+TEST_270: [Malformed Inputs] Ambiguous command
+Command: ganesha "list"
+Expected: Error: Ambiguous command, could mean list_files or list_processes
+
+TEST_271: [Malformed Inputs] Invalid escape sequence
+Command: ganesha "read file with name 'file\\invalid'"
+Expected: Error: Invalid escape sequence
+
+TEST_272: [Malformed Inputs] Too many arguments
+Command: ganesha "read arg1 arg2 arg3 arg4 arg5 arg6"
+Expected: Error: Too many arguments provided
+
+TEST_273: [Malformed Inputs] Wrong data type
+Command: ganesha "set port to 'not-a-port'"
+Expected: Error: Expected integer for port
+
+TEST_274: [Malformed Inputs] Missing quotes
+Command: ganesha "echo hello world with spaces"
+Expected: Error: Ambiguous arguments, missing quotes
+
+TEST_275: [Malformed Inputs] Invalid operator
+Command: ganesha "find where size >== 1000"
+Expected: Error: Invalid operator
+
+RESOURCE LIMITS (25 cases)
+-------------------------
+
+TEST_276: [Resource Limits] Disk full
+Command: ganesha "write 10GB file to disk when only 2GB free"
+Expected: Error: Insufficient disk space
+
+TEST_277: [Resource Limits] Memory exhaustion
+Command: ganesha "allocate 1000GB of memory"
+Expected: Error: Cannot allocate memory
+
+TEST_278: [Resource Limits] Open file limit
+Command: ganesha "open 10000 files simultaneously"
+Expected: Error: Too many open files
+
+TEST_279: [Resource Limits] CPU exhaustion
+Command: ganesha "run infinite loop"
+Expected: Timeout or system interrupt
+
+TEST_280: [Resource Limits] Network timeout
+Command: ganesha "connect to unreachable server at 192.0.2.1 with 1 second timeout"
+Expected: Error: Connection timeout
+
+TEST_281: [Resource Limits] Bandwidth limit
+Command: ganesha "download 100GB file on metered connection"
+Expected: Error or warning about excessive bandwidth usage
+
+TEST_282: [Resource Limits] Process limit
+Command: ganesha "spawn 10000 child processes"
+Expected: Error: Process limit exceeded
+
+TEST_283: [Resource Limits] Stack overflow
+Command: ganesha "recursive function depth 1000000"
+Expected: Error: Stack overflow
+
+TEST_284: [Resource Limits] Maximum query results
+Command: ganesha "search with pattern matching returning 1 million results"
+Expected: Truncated results or pagination
+
+TEST_285: [Resource Limits] File descriptor limit
+Command: ganesha "create pipes for 5000 processes"
+Expected: Error: File descriptor limit exceeded
+
+TEST_286: [Resource Limits] Extremely large file
+Command: ganesha "read a 500GB file"
+Expected: Warning about size, possible streaming or error
+
+TEST_287: [Resource Limits] Deep directory nesting
+Command: ganesha "create nested directories 1000 levels deep"
+Expected: Error: Path too long or nesting limit
+
+TEST_288: [Resource Limits] Maximum array size
+Command: ganesha "create array with 2 billion elements"
+Expected: Error: Requested array size exceeds maximum
+
+TEST_289: [Resource Limits] Database connection pool exhausted
+Command: ganesha "execute 500 concurrent database queries with 10 connection limit"
+Expected: Queued or error about connection limit
+
+TEST_290: [Resource Limits] Cache overflow
+Command: ganesha "store 100GB in cache with 1GB limit"
+Expected: Error: Cache full, eviction policy applied
+
+TEST_291: [Resource Limits] Rate limit exceeded
+Command: ganesha "make 10000 API requests per second"
+Expected: Error: Rate limit exceeded
+
+TEST_292: [Resource Limits] Quota exceeded
+Command: ganesha "store 2TB of data with 100GB user quota"
+Expected: Error: Quota exceeded
+
+TEST_293: [Resource Limits] Session timeout
+Command: ganesha "maintain session for 100 hours"
+Expected: Session timeout and automatic logout
+
+TEST_294: [Resource Limits] Thread limit
+Command: ganesha "create 100000 concurrent threads"
+Expected: Error: Thread limit exceeded
+
+TEST_295: [Resource Limits] Shared memory limit
+Command: ganesha "allocate 100GB of shared memory"
+Expected: Error: Shared memory limit exceeded
+
+TEST_296: [Resource Limits] Inode limit
+Command: ganesha "create 50 million files"
+Expected: Error: Inode limit reached
+
+TEST_297: [Resource Limits] Message queue overflow
+Command: ganesha "queue 1 billion messages"
+Expected: Error: Queue full
+
+TEST_298: [Resource Limits] Buffer overflow attack
+Command: ganesha "send payload exceeding buffer size"
+Expected: Error: Buffer overflow detected
+
+TEST_299: [Resource Limits] Temp file limit
+Command: ganesha "create 100000 temporary files"
+Expected: Warning or error about temp file usage
+
+TEST_300: [Resource Limits] Symbol table overflow
+Command: ganesha "import code with 1 million symbols"
+Expected: Error: Symbol table full
+
+RACE CONDITIONS (25 cases)
+------------------------
+
+TEST_301: [Race Conditions] Simultaneous file write
+Command: ganesha "write to same file from 10 parallel processes"
+Expected: Data corruption detected or atomic write applied
+
+TEST_302: [Race Conditions] Read-write race
+Command: ganesha "read file while it's being written"
+Expected: Incomplete or partial data, possible inconsistency
+
+TEST_303: [Race Conditions] Directory deletion during traversal
+Command: ganesha "traverse directory while it's being deleted"
+Expected: Error: Directory not found or race condition
+
+TEST_304: [Race Conditions] Symlink race
+Command: ganesha "follow symlink that's being modified"
+Expected: Follows old or new target unpredictably
+
+TEST_305: [Race Conditions] File lock contention
+Command: ganesha "acquire exclusive lock from 100 threads simultaneously"
+Expected: Deadlock or serialized access
+
+TEST_306: [Race Conditions] Table modification during query
+Command: ganesha "query database while table is being altered"
+Expected: Query error or inconsistent results
+
+TEST_307: [Race Conditions] Index corruption
+Command: ganesha "modify indexed field while index is being rebuilt"
+Expected: Index inconsistency detected
+
+TEST_308: [Race Conditions] Concurrent git commits
+Command: ganesha "commit from two branches to same file simultaneously"
+Expected: Merge conflict or race condition
+
+TEST_309: [Race Conditions] Version conflict
+Command: ganesha "update resource while another process updates it"
+Expected: Conflict or inconsistent version
+
+TEST_310: [Race Conditions] Cache invalidation race
+Command: ganesha "invalidate cache while worker thread is reading it"
+Expected: Stale or inconsistent data
+
+TEST_311: [Race Conditions] Signal handling race
+Command: ganesha "send signals while application is in critical section"
+Expected: Interrupted syscall or corrupted state
+
+TEST_312: [Race Conditions] Memory allocation race
+Command: ganesha "allocate memory from 1000 threads without synchronization"
+Expected: Memory corruption or allocation failure
+
+TEST_313: [Race Conditions] Event listener race
+Command: ganesha "remove event listener while event is being dispatched"
+Expected: Listener still called or race condition
+
+TEST_314: [Race Conditions] Transaction rollback race
+Command: ganesha "rollback transaction while commit is in progress"
+Expected: Inconsistent state or error
+
+TEST_315: [Race Conditions] Configuration reload race
+Command: ganesha "reload configuration while application is using it"
+Expected: Using old or new config unpredictably
+
+TEST_316: [Race Conditions] Cleanup race
+Command: ganesha "cleanup resources while another thread is accessing them"
+Expected: Use after free or null pointer
+
+TEST_317: [Race Conditions] Connection pool race
+Command: ganesha "return connection to pool while it's being drained"
+Expected: Connection lost or pool inconsistency
+
+TEST_318: [Race Conditions] Log file rotation
+Command: ganesha "rotate log file while being written to"
+Expected: Log loss or corruption possible
+
+TEST_319: [Race Conditions] Backup during write
+Command: ganesha "backup file while it's being actively written"
+Expected: Incomplete backup or corrupted backup
+
+TEST_320: [Race Conditions] Permission change race
+Command: ganesha "change file permissions while being accessed"
+Expected: Access denied or permission bypass
+
+TEST_321: [Race Conditions] Subscription race
+Command: ganesha "unsubscribe from event while notification is being sent"
+Expected: Notification dropped or null reference
+
+TEST_322: [Race Conditions] Job queue race
+Command: ganesha "dequeue and process job while queue is being modified"
+Expected: Duplicate processing or lost job
+
+TEST_323: [Race Conditions] Timer race
+Command: ganesha "cancel timer while callback is executing"
+Expected: Callback executes anyway or cancelled
+
+TEST_324: [Race Conditions] Reference counting race
+Command: ganesha "release reference while increment is in progress"
+Expected: Use after free or leak
+
+TEST_325: [Race Conditions] Double free attempt
+Command: ganesha "free same memory pointer from two threads"
+Expected: Crash or corruption detected
+
+PERMISSION ISSUES (20 cases)
+---------------------------
+
+TEST_326: [Permission Issues] Read-only file write
+Command: ganesha "write to file with read-only permissions"
+Expected: Error: Permission denied
+
+TEST_327: [Permission Issues] Execute non-executable
+Command: ganesha "execute file without execute permission"
+Expected: Error: Permission denied
+
+TEST_328: [Permission Issues] Delete protected file
+Command: ganesha "delete system file with immutable flag set"
+Expected: Error: Operation not permitted
+
+TEST_329: [Permission Issues] Directory access denied
+Command: ganesha "access directory without read permission"
+Expected: Error: Permission denied
+
+TEST_330: [Permission Issues] Write to privileged directory
+Command: ganesha "create file in /root without sudo"
+Expected: Error: Permission denied
+
+TEST_331: [Permission Issues] Change file ownership
+Command: ganesha "change file owner to another user without permission"
+Expected: Error: Operation not permitted
+
+TEST_332: [Permission Issues] Modify system configuration
+Command: ganesha "modify /etc/config without admin privileges"
+Expected: Error: Permission denied
+
+TEST_333: [Permission Issues] Install system package
+Command: ganesha "install package without root privileges"
+Expected: Error: Need higher privileges
+
+TEST_334: [Permission Issues] Access device file
+Command: ganesha "read /dev/sda without permission"
+Expected: Error: Permission denied
+
+TEST_335: [Permission Issues] Kill process from other user
+Command: ganesha "kill process owned by another user"
+Expected: Error: Operation not permitted
+
+TEST_336: [Permission Issues] View restricted file
+Command: ganesha "read /var/log/auth.log without permission"
+Expected: Error: Permission denied
+
+TEST_337: [Permission Issues] Modify group file
+Command: ganesha "edit /etc/group without admin rights"
+Expected: Error: Permission denied
+
+TEST_338: [Permission Issues] Access shadow password file
+Command: ganesha "read /etc/shadow without root"
+Expected: Error: Permission denied
+
+TEST_339: [Permission Issues] Change process uid
+Command: ganesha "change process UID to root without privilege"
+Expected: Error: Operation not permitted
+
+TEST_340: [Permission Issues] Mount filesystem
+Command: ganesha "mount filesystem without permission"
+Expected: Error: Operation not permitted
+
+TEST_341: [Permission Issues] SELinux violation
+Command: ganesha "access file with conflicting SELinux context"
+Expected: Error: Permission denied (SELinux)
+
+TEST_342: [Permission Issues] AppArmor violation
+Command: ganesha "execute operation blocked by AppArmor profile"
+Expected: Error: Permission denied (AppArmor)
+
+TEST_343: [Permission Issues] Sudo requirement
+Command: ganesha "perform action requiring elevated privileges"
+Expected: Error: This operation requires sudo
+
+TEST_344: [Permission Issues] Sudo password
+Command: ganesha "use sudo with incorrect password"
+Expected: Error: Incorrect password
+
+TEST_345: [Permission Issues] Privileged port access
+Command: ganesha "bind to port 80 without root"
+Expected: Error: Permission denied
+
+NETWORK FAILURES (20 cases)
+--------------------------
+
+TEST_346: [Network Failures] Connection refused
+Command: ganesha "connect to localhost:9999 when nothing is listening"
+Expected: Error: Connection refused
+
+TEST_347: [Network Failures] Network unreachable
+Command: ganesha "connect to unreachable network 192.0.2.1"
+Expected: Error: Network is unreachable
+
+TEST_348: [Network Failures] Host unreachable
+Command: ganesha "ping 192.0.2.1"
+Expected: Error: No route to host
+
+TEST_349: [Network Failures] DNS resolution failure
+Command: ganesha "resolve nonexistent.invalid domain"
+Expected: Error: Name or service not known
+
+TEST_350: [Network Failures] Timeout on connection
+Command: ganesha "connect to 192.0.2.1:80 with 1 second timeout"
+Expected: Error: Connection timed out
+
+TEST_351: [Network Failures] Timeout on read
+Command: ganesha "read from slow server that doesn't respond"
+Expected: Error: Read timeout
+
+TEST_352: [Network Failures] Timeout on write
+Command: ganesha "write to server that stops accepting data"
+Expected: Error: Write timeout
+
+TEST_353: [Network Failures] Connection reset
+Command: ganesha "connect when server forcefully closes connection"
+Expected: Error: Connection reset by peer
+
+TEST_354: [Network Failures] Broken pipe
+Command: ganesha "write to closed socket"
+Expected: Error: Broken pipe
+
+TEST_355: [Network Failures] SSL handshake failure
+Command: ganesha "connect to server with invalid SSL certificate"
+Expected: Error: SSL certificate verification failed
+
+TEST_356: [Network Failures] SSL version mismatch
+Command: ganesha "connect with mismatched TLS version"
+Expected: Error: Unsupported protocol
+
+TEST_357: [Network Failures] Partial data received
+Command: ganesha "receive truncated response from server"
+Expected: Error: Unexpected end of data
+
+TEST_358: [Network Failures] Packet loss
+Command: ganesha "communicate over network with 50% packet loss"
+Expected: Retransmission and potential timeout
+
+TEST_359: [Network Failures] Bandwidth limitation
+Command: ganesha "transfer data with artificially limited bandwidth"
+Expected: Transfer takes longer or times out
+
+TEST_360: [Network Failures] DNS timeout
+Command: ganesha "resolve domain when DNS server doesn't respond"
+Expected: Error: DNS query timed out
+
+TEST_361: [Network Failures] Proxy failure
+Command: ganesha "connect through failing proxy"
+Expected: Error: Proxy error
+
+TEST_362: [Network Failures] Firewall blocking
+Command: ganesha "connect to port blocked by firewall"
+Expected: Error: Connection refused or timeout
+
+TEST_363: [Network Failures] Rate limiting
+Command: ganesha "exceed server rate limit"
+Expected: Error: Too many requests
+
+TEST_364: [Network Failures] Protocol error
+Command: ganesha "send malformed HTTP request"
+Expected: Error: Protocol error
+
+TEST_365: [Network Failures] DNS poisoning
+Command: ganesha "resolve domain with incorrect DNS cache"
+Expected: Wrong IP address returned
+
+LARGE DATA HANDLING (20 cases)
+----------------------------
+
+TEST_366: [Large Data] Process 1GB file
+Command: ganesha "process a 1GB CSV file and aggregate data"
+Expected: Processing completes with results or memory warning
+
+TEST_367: [Large Data] Load 500MB JSON
+Command: ganesha "load and parse 500MB JSON file"
+Expected: Data loaded or memory error
+
+TEST_368: [Large Data] Search in large file
+Command: ganesha "search for pattern in 10GB log file"
+Expected: Search results or timeout
+
+TEST_369: [Large Data] Sort large dataset
+Command: ganesha "sort 100 million records"
+Expected: Sorted data or memory error
+
+TEST_370: [Large Data] Join large tables
+Command: ganesha "join two 50GB tables"
+Expected: Result set or memory/time limit exceeded
+
+TEST_371: [Large Data] Group by large cardinality
+Command: ganesha "group 1 billion records by 100 million unique keys"
+Expected: Groups created or memory error
+
+TEST_372: [Large Data] Create large index
+Command: ganesha "create index on 1 billion record table"
+Expected: Index created or time limit exceeded
+
+TEST_373: [Large Data] Backup large database
+Command: ganesha "backup 500GB database"
+Expected: Backup completes or times out
+
+TEST_374: [Large Data] Restore large backup
+Command: ganesha "restore 500GB backup file"
+Expected: Restore completes or times out
+
+TEST_375: [Large Data] Large number of files
+Command: ganesha "process directory with 10 million files"
+Expected: Processing completes or memory issue
+
+TEST_376: [Large Data] Deep recursion
+Command: ganesha "traverse directory tree with 1000 levels"
+Expected: Traversal completes or stack overflow
+
+TEST_377: [Large Data] Large graph traversal
+Command: ganesha "analyze graph with 1 billion nodes"
+Expected: Traversal completes or memory error
+
+TEST_378: [Large Data] Memory-intensive operation
+Command: ganesha "duplicate 5GB dataset in memory"
+Expected: Operation completes or out of memory error
+
+TEST_379: [Large Data] Large network transfer
+Command: ganesha "download 50GB file"
+Expected: Transfer completes or timeout
+
+TEST_380: [Large Data] Large database query
+Command: ganesha "query that returns 1 billion rows"
+Expected: Results paginated or truncated
+
+TEST_381: [Large Data] Many concurrent connections
+Command: ganesha "handle 100000 concurrent connections"
+Expected: Connections accepted or connection limit error
+
+TEST_382: [Large Data] Large state machine
+Command: ganesha "process state machine with 1 billion states"
+Expected: Processing completes or memory error
+
+TEST_383: [Large Data] Cache with many keys
+Command: ganesha "cache 100 million key-value pairs"
+Expected: Cache stores or eviction occurs
+
+TEST_384: [Large Data] Parse very large XML
+Command: ganesha "parse 2GB XML file"
+Expected: Parsed or memory error
+
+TEST_385: [Large Data] Generate large report
+Command: ganesha "generate report with 10 million rows"
+Expected: Report generated or memory warning
+
+SPECIAL CHARACTERS (20 cases)
+----------------------------
+
+TEST_386: [Special Characters] Unicode in filename
+Command: ganesha "create file named 'test_你好_مرحبا_🎉.txt'"
+Expected: File created with unicode name
+
+TEST_387: [Special Characters] Null bytes in string
+Command: ganesha "process string containing null bytes"
+Expected: Error or string truncated at null
+
+TEST_388: [Special Characters] Control characters
+Command: ganesha "process string with control characters (\\x00-\\x1f)"
+Expected: Characters stripped or error
+
+TEST_389: [Special Characters] Quotes in string
+Command: ganesha "process string containing both 'single' and \"double\" quotes"
+Expected: String processed correctly
+
+TEST_390: [Special Characters] Backslashes
+Command: ganesha "process path with backslashes on Unix"
+Expected: Path processed or error
+
+TEST_391: [Special Characters] Newlines in data
+Command: ganesha "process CSV with newlines in quoted fields"
+Expected: Newlines handled correctly
+
+TEST_392: [Special Characters] Tab and space confusion
+Command: ganesha "parse file with mixed tabs and spaces"
+Expected: Parsed correctly or whitespace error
+
+TEST_393: [Special Characters] BOM marker
+Command: ganesha "process UTF-8 file with BOM"
+Expected: BOM handled or appears as character
+
+TEST_394: [Special Characters] Right-to-left text
+Command: ganesha "process Arabic and Hebrew text"
+Expected: Text displayed or processed correctly
+
+TEST_395: [Special Characters] Combining characters
+Command: ganesha "process text with combining diacriticals"
+Expected: Characters combined or separate
+
+TEST_396: [Special Characters] Emoji and variants
+Command: ganesha "process emoji with skin tone variants"
+Expected: Emoji processed correctly
+
+TEST_397: [Special Characters] Zero-width characters
+Command: ganesha "detect zero-width spaces in text"
+Expected: Spaces detected or ignored
+
+TEST_398: [Special Characters] Homograph attack
+Command: ganesha "distinguish between 'O' and '0' and 'ο' (Cyrillic)"
+Expected: Characters distinguished correctly
+
+TEST_399: [Special Characters] Invalid UTF-8 sequence
+Command: ganesha "process string with invalid UTF-8: \\xFF\\xFE"
+Expected: Error or replacement character
+
+TEST_400: [Special Characters] Surrogate pairs
+Command: ganesha "process UTF-16 surrogate pairs"
+Expected: Characters processed correctly
+
+TEST_401: [Special Characters] RTLM override
+Command: ganesha "process text with right-to-left override"
+Expected: Override handled safely
+
+TEST_402: [Special Characters] Reserved filenames
+Command: ganesha "create files named CON, PRN, AUX on Windows"
+Expected: Files created or error
+
+TEST_403: [Special Characters] Path separators
+Command: ganesha "create path with mixed / and \\\\ separators"
+Expected: Path normalized or error
+
+TEST_404: [Special Characters] Whitespace-only strings
+Command: ganesha "process string of spaces, tabs, and newlines"
+Expected: Trimmed or treated as empty
+
+TEST_405: [Special Characters] ASCII control sequences
+Command: ganesha "process ANSI escape sequences in output"
+Expected: Sequences interpreted or escaped
+
+CONCURRENT OPERATIONS (20 cases)
+-------------------------------
+
+TEST_406: [Concurrent Operations] Simultaneous reads
+Command: ganesha "read same file from 100 concurrent threads"
+Expected: All reads succeed with same content
+
+TEST_407: [Concurrent Operations] Concurrent writes to different files
+Command: ganesha "write to 50 different files concurrently"
+Expected: All files written successfully
+
+TEST_408: [Concurrent Operations] Mixed read-write
+Command: ganesha "50 threads reading while 50 threads writing"
+Expected: Some reads may see partial data
+
+TEST_409: [Concurrent Operations] Concurrent process spawning
+Command: ganesha "spawn 1000 processes simultaneously"
+Expected: Processes created or limit reached
+
+TEST_410: [Concurrent Operations] Concurrent network requests
+Command: ganesha "make 1000 HTTP requests concurrently"
+Expected: Requests complete or connection limit
+
+TEST_411: [Concurrent Operations] Concurrent database operations
+Command: ganesha "execute 500 concurrent database queries"
+Expected: Queries complete or connection pool maxed
+
+TEST_412: [Concurrent Operations] Concurrent file deletions
+Command: ganesha "delete 100 files concurrently"
+Expected: Files deleted successfully
+
+TEST_413: [Concurrent Operations] Concurrent directory creation
+Command: ganesha "create same directory from 10 threads"
+Expected: Directory created once or error
+
+TEST_414: [Concurrent Operations] Concurrent cache updates
+Command: ganesha "update same cache key from 100 threads"
+Expected: Last write wins or synchronization error
+
+TEST_415: [Concurrent Operations] Concurrent logging
+Command: ganesha "write to same log file from 1000 threads"
+Expected: Logs written or entries corrupted
+
+TEST_416: [Concurrent Operations] Concurrent git operations
+Command: ganesha "push and pull simultaneously on same branch"
+Expected: Conflict detected or one blocked
+
+TEST_417: [Concurrent Operations] Concurrent configuration reload
+Command: ganesha "read config while it's being reloaded"
+Expected: Old or new config read
+
+TEST_418: [Concurrent Operations] Concurrent resource acquisition
+Command: ganesha "acquire same resource from 100 threads"
+Expected: Mutual exclusion enforced or deadlock
+
+TEST_419: [Concurrent Operations] Concurrent list modifications
+Command: ganesha "add and remove from list concurrently"
+Expected: List corruption or synchronization error
+
+TEST_420: [Concurrent Operations] Concurrent event dispatch
+Command: ganesha "dispatch events while listeners are modifying list"
+Expected: Listener missed or access violation
+
+TEST_421: [Concurrent Operations] Concurrent cleanup
+Command: ganesha "cleanup resources while threads are using them"
+Expected: Use after free or blocked cleanup
+
+TEST_422: [Concurrent Operations] Concurrent variable modification
+Command: ganesha "increment counter from 1000 threads without lock"
+Expected: Final count incorrect (less than 1000)
+
+TEST_423: [Concurrent Operations] Concurrent sleep operations
+Command: ganesha "sleep in 100 threads with different durations"
+Expected: Threads wake up at correct times
+
+TEST_424: [Concurrent Operations] Concurrent queue operations
+Command: ganesha "enqueue and dequeue from same queue concurrently"
+Expected: Queue remains consistent or items lost
+
+TEST_425: [Concurrent Operations] Concurrent context switching
+Command: ganesha "rapidly switch contexts between 100 threads"
+Expected: Context switches succeed or timeout
+
+ERROR RECOVERY (20 cases)
+------------------------
+
+TEST_426: [Error Recovery] Retry failed operation
+Command: ganesha "retry failed network request 3 times"
+Expected: Operation succeeds on retry
+
+TEST_427: [Error Recovery] Fallback option
+Command: ganesha "use fallback server when primary is unavailable"
+Expected: Falls back to secondary server
+
+TEST_428: [Error Recovery] Circuit breaker
+Command: ganesha "circuit breaker stops calling failing service"
+Expected: Service calls blocked after threshold
+
+TEST_429: [Error Recovery] Timeout and retry
+Command: ganesha "timeout after 5 seconds and retry"
+Expected: Retries on timeout
+
+TEST_430: [Error Recovery] Exponential backoff
+Command: ganesha "retry with exponential backoff (1s, 2s, 4s, 8s)"
+Expected: Retries with increasing delays
+
+TEST_431: [Error Recovery] Partial failure handling
+Command: ganesha "handle partial failure in batch operation"
+Expected: Some items succeed, some fail
+
+TEST_432: [Error Recovery] Deadlock detection
+Command: ganesha "detect and recover from deadlock"
+Expected: Deadlock broken, operation retried
+
+TEST_433: [Error Recovery] Resource leak recovery
+Command: ganesha "cleanup leaked resources on error"
+Expected: Resources cleaned up
+
+TEST_434: [Error Recovery] Transaction rollback
+Command: ganesha "rollback transaction on error"
+Expected: Transaction rolled back
+
+TEST_435: [Error Recovery] Rollback cascading changes
+Command: ganesha "cascade rollback through dependent operations"
+Expected: All changes rolled back
+
+TEST_436: [Error Recovery] Crash recovery
+Command: ganesha "recover from application crash"
+Expected: Application restarts in consistent state
+
+TEST_437: [Error Recovery] Corruption recovery
+Command: ganesha "detect and recover from data corruption"
+Expected: Corruption fixed or warning issued
+
+TEST_438: [Error Recovery] Version mismatch recovery
+Command: ganesha "handle version mismatch between components"
+Expected: Components upgraded or downgraded
+
+TEST_439: [Error Recovery] Interrupt handling
+Command: ganesha "handle Ctrl+C gracefully during operation"
+Expected: Operation interrupted cleanly
+
+TEST_440: [Error Recovery] Signal handling
+Command: ganesha "handle SIGTERM while processing"
+Expected: Process exits gracefully
+
+TEST_441: [Error Recovery] Stack trace generation
+Command: ganesha "capture and display stack trace on error"
+Expected: Stack trace shown for debugging
+
+TEST_442: [Error Recovery] Error context preservation
+Command: ganesha "preserve error context through stack"
+Expected: Root cause error shown
+
+TEST_443: [Error Recovery] Automatic restart
+Command: ganesha "automatically restart failed service"
+Expected: Service restarted successfully
+
+TEST_444: [Error Recovery] Checkpoint and restore
+Command: ganesha "checkpoint process state and restore on error"
+Expected: Process restored from checkpoint
+
+TEST_445: [Error Recovery] Quorum recovery
+Command: ganesha "recover from minority node failure in quorum"
+Expected: Cluster continues with remaining nodes
+
+SECURITY BOUNDARIES (25 cases)
+-----------------------------
+
+TEST_446: [Security Boundaries] SQL injection attempt
+Command: ganesha "query where user_id = 1' OR '1'='1"
+Expected: Error or injection prevented
+
+TEST_447: [Security Boundaries] Command injection
+Command: ganesha "execute file; rm -rf /"
+Expected: Injection detected and prevented
+
+TEST_448: [Security Boundaries] Path traversal attack
+Command: ganesha "read ../../../../etc/passwd"
+Expected: Path sanitized or access denied
+
+TEST_449: [Security Boundaries] Directory traversal
+Command: ganesha "access directory /storage/../../../private"
+Expected: Traversal prevented or sanitized
+
+TEST_450: [Security Boundaries] Prototype pollution
+Command: ganesha "set __proto__.admin = true"
+Expected: Pollution prevented
+
+TEST_451: [Security Boundaries] Regex DoS
+Command: ganesha "match string with catastrophic backtracking regex"
+Expected: Regex timeout or protection applied
+
+TEST_452: [Security Boundaries] XXE attack
+Command: ganesha "XML with external entity: <!ENTITY xxe SYSTEM \"file:///etc/passwd\">"
+Expected: XXE prevented
+
+TEST_453: [Security Boundaries] SSRF attack
+Command: ganesha "fetch file:///etc/passwd through file fetch"
+Expected: SSRF prevented
+
+TEST_454: [Security Boundaries] Insecure deserialization
+Command: ganesha "deserialize untrusted pickle data"
+Expected: Deserialization blocked or unsafe
+
+TEST_455: [Security Boundaries] Privilege escalation
+Command: ganesha "escalate to admin without privilege"
+Expected: Escalation prevented
+
+TEST_456: [Security Boundaries] Weak cryptography
+Command: ganesha "use MD5 for password hashing"
+Expected: Warning or refusal to use weak hash
+
+TEST_457: [Security Boundaries] Hardcoded secrets
+Command: ganesha "read hardcoded password from code"
+Expected: Secret detected and flagged
+
+TEST_458: [Security Boundaries] Insecure transmission
+Command: ganesha "send password over unencrypted HTTP"
+Expected: Warning or enforcement of HTTPS
+
+TEST_459: [Security Boundaries] CORS bypass
+Command: ganesha "access cross-origin resource without permission"
+Expected: CORS policy enforced
+
+TEST_460: [Security Boundaries] CSRF attack
+Command: ganesha "execute action without CSRF token"
+Expected: CSRF token required or action blocked
+
+TEST_461: [Security Boundaries] Session fixation
+Command: ganesha "hijack session with fixed session ID"
+Expected: Session fixation prevented
+
+TEST_462: [Security Boundaries] Timing attack
+Command: ganesha "compare password with timing attack"
+Expected: Constant-time comparison used
+
+TEST_463: [Security Boundaries] Information disclosure
+Command: ganesha "leak debug information in production"
+Expected: Debug info suppressed in production
+
+TEST_464: [Security Boundaries] Error-based attack
+Command: ganesha "extract information from error messages"
+Expected: Generic error messages shown
+
+TEST_465: [Security Boundaries] Race condition exploit
+Command: ganesha "exploit TOCTOU vulnerability"
+Expected: Race condition prevented
+
+TEST_466: [Security Boundaries] Memory corruption
+Command: ganesha "trigger buffer overflow"
+Expected: Overflow prevented or detected
+
+TEST_467: [Security Boundaries] Use-after-free
+Command: ganesha "use freed memory"
+Expected: Use-after-free prevented
+
+TEST_468: [Security Boundaries] Null pointer dereference
+Command: ganesha "dereference null pointer"
+Expected: Null check prevents crash
+
+TEST_469: [Security Boundaries] Unrestricted file upload
+Command: ganesha "upload executable file to web directory"
+Expected: File upload restricted
+
+TEST_470: [Security Boundaries] Insecure dependency
+Command: ganesha "use vulnerable dependency version"
+Expected: Vulnerable version detected and warned
+
+AUTHENTICATION AND ACCESS CONTROL (20 cases)
+-------------------------------------------
+
+TEST_471: [Auth & Access] Invalid credentials
+Command: ganesha "login with wrong password"
+Expected: Error: Invalid credentials
+
+TEST_472: [Auth & Access] Expired token
+Command: ganesha "access with expired authentication token"
+Expected: Error: Token expired
+
+TEST_473: [Auth & Access] Missing token
+Command: ganesha "access without authentication token"
+Expected: Error: Unauthorized
+
+TEST_474: [Auth & Access] Invalid token format
+Command: ganesha "access with malformed token"
+Expected: Error: Invalid token format
+
+TEST_475: [Auth & Access] Token tampering
+Command: ganesha "modify token and use tampered version"
+Expected: Error: Invalid signature
+
+TEST_476: [Auth & Access] Insufficient permissions
+Command: ganesha "access resource without read permission"
+Expected: Error: Forbidden
+
+TEST_477: [Auth & Access] Account locked
+Command: ganesha "login to locked account"
+Expected: Error: Account locked
+
+TEST_478: [Auth & Access] Disabled user
+Command: ganesha "login as disabled user"
+Expected: Error: User disabled
+
+TEST_479: [Auth & Access] MFA missing
+Command: ganesha "login without multi-factor authentication"
+Expected: Error: MFA required
+
+TEST_480: [Auth & Access] Invalid MFA code
+Command: ganesha "login with wrong MFA code"
+Expected: Error: Invalid MFA code
+
+TEST_481: [Auth & Access] Expired session
+Command: ganesha "use expired session after timeout"
+Expected: Error: Session expired
+
+TEST_482: [Auth & Access] Session revoked
+Command: ganesha "use revoked session"
+Expected: Error: Session invalid
+
+TEST_483: [Auth & Access] Admin required
+Command: ganesha "perform admin operation without admin role"
+Expected: Error: Admin required
+
+TEST_484: [Auth & Access] Role not found
+Command: ganesha "use non-existent role"
+Expected: Error: Role not found
+
+TEST_485: [Auth & Access] Scope violation
+Command: ganesha "access resource outside token scope"
+Expected: Error: Insufficient scope
+
+TEST_486: [Auth & Access] Cross-tenant access
+Command: ganesha "access another tenant's data"
+Expected: Error: Access denied
+
+TEST_487: [Auth & Access] API key invalid
+Command: ganesha "authenticate with wrong API key"
+Expected: Error: Invalid API key
+
+TEST_488: [Auth & Access] OAuth token invalid
+Command: ganesha "use invalid OAuth token"
+Expected: Error: Invalid token
+
+TEST_489: [Auth & Access] Certificate expired
+Command: ganesha "use client certificate that expired"
+Expected: Error: Certificate expired
+
+TEST_490: [Auth & Access] Certificate not trusted
+Command: ganesha "use untrusted client certificate"
+Expected: Error: Certificate not trusted
+
+PERFORMANCE DEGRADATION (20 cases)
+-------------------------------
+
+TEST_491: [Performance Degradation] High latency
+Command: ganesha "operate with 5000ms network latency"
+Expected: Operations slow but complete
+
+TEST_492: [Performance Degradation] High CPU usage
+Command: ganesha "operate when system CPU is at 95%"
+Expected: Operations slow due to CPU contention
+
+TEST_493: [Performance Degradation] High memory pressure
+Command: ganesha "operate when memory is 95% full"
+Expected: Operations slow, possible swapping
+
+TEST_494: [Performance Degradation] Disk I/O bottleneck
+Command: ganesha "operate when disk I/O is saturated"
+Expected: Operations wait for I/O
+
+TEST_495: [Performance Degradation] Network congestion
+Command: ganesha "operate with congested network"
+Expected: Timeouts or retries
+
+TEST_496: [Performance Degradation] Database slow
+Command: ganesha "operate when database is slow to respond"
+Expected: Queries timeout or complete slowly
+
+TEST_497: [Performance Degradation] Cache miss
+Command: ganesha "operate when all cache misses"
+Expected: Fallback to slow path
+
+TEST_498: [Performance Degradation] GC pause
+Command: ganesha "operate during garbage collection pause"
+Expected: Brief pause in operation
+
+TEST_499: [Performance Degradation] Thread starvation
+Command: ganesha "operate when thread pool is exhausted"
+Expected: Tasks queued and delayed
+
+TEST_500: [Performance Degradation] Lock contention
+Command: ganesha "operate with heavy lock contention"
+Expected: Threads wait for locks
+
+TEST_501: [Performance Degradation] Network jitter
+Command: ganesha "operate with variable network latency"
+Expected: Completion time variable
+
+TEST_502: [Performance Degradation] Thermal throttling
+Command: ganesha "operate when CPU throttles due to heat"
+Expected: CPU frequency reduced, slower execution
+
+TEST_503: [Performance Degradation] Swapping
+Command: ganesha "operate when system is swapping to disk"
+Expected: Significant slowdown
+
+TEST_504: [Performance Degradation] Context switch overhead
+Command: ganesha "operate with excessive context switches"
+Expected: Performance degradation
+
+TEST_505: [Performance Degradation] Cache pollution
+Command: ganesha "pollute cache with irrelevant data"
+Expected: Cache effectiveness reduced
+
+TEST_506: [Performance Degradation] Branch misprediction
+Command: ganesha "code with poor branch prediction"
+Expected: CPU pipeline flushes, slower execution
+
+TEST_507: [Performance Degradation] Cache coherency traffic
+Command: ganesha "multi-core code with heavy cache coherency"
+Expected: Memory bus saturated
+
+TEST_508: [Performance Degradation] NUMA penalty
+Command: ganesha "access remote NUMA node memory"
+Expected: Increased latency
+
+TEST_509: [Performance Degradation] Power saving mode
+Command: ganesha "operate in power saving CPU mode"
+Expected: Lower frequency, slower execution
+
+TEST_510: [Performance Degradation] Disk fragmentation
+Command: ganesha "access highly fragmented file"
+Expected: Slower disk access
+
+RESOURCE EXHAUSTION RECOVERY (20 cases)
+-------------------------------------
+
+TEST_511: [Recovery] Recover from OOM
+Command: ganesha "recover from out of memory error"
+Expected: Memory freed and operation retried
+
+TEST_512: [Recovery] Recover from OOM killer
+Command: ganesha "recover after being killed by OOM killer"
+Expected: Process restarted or data recovered
+
+TEST_513: [Recovery] Recover from disk full
+Command: ganesha "continue after disk full error"
+Expected: Cleanup space and retry
+
+TEST_514: [Recovery] Recover from open file limit
+Command: ganesha "recover from too many open files"
+Expected: Close some files and retry
+
+TEST_515: [Recovery] Recover from process limit
+Command: ganesha "recover from process limit exceeded"
+Expected: Wait for processes to finish
+
+TEST_516: [Recovery] Recover from connection limit
+Command: ganesha "recover from connection pool exhaustion"
+Expected: Wait for connection to free
+
+TEST_517: [Recovery] Recover from stack overflow
+Command: ganesha "recover from stack overflow gracefully"
+Expected: Stack unwound, error caught
+
+TEST_518: [Recovery] Recover from infinite loop
+Command: ganesha "detect and break from infinite loop"
+Expected: Loop broken via watchdog timer
+
+TEST_519: [Recovery] Recover from deadlock
+Command: ganesha "detect and recover from deadlock"
+Expected: Deadlock broken via timeout
+
+TEST_520: [Recovery] Recover from crash
+Command: ganesha "recover application from crash"
+Expected: Application restarted in consistent state
+
+TEST_521: [Recovery] Recover from corruption
+Command: ganesha "detect and recover from data corruption"
+Expected: Data recovered or repaired
+
+TEST_522: [Recovery] Recover from incomplete transaction
+Command: ganesha "rollback incomplete transaction on crash"
+Expected: Transaction rolled back, DB consistent
+
+TEST_523: [Recovery] Recover from interrupted write
+Command: ganesha "recover from interrupted file write"
+Expected: File recovered or cleared
+
+TEST_524: [Recovery] Recover from lost connection
+Command: ganesha "reconnect after connection loss"
+Expected: Connection reestablished
+
+TEST_525: [Recovery] Recover from service dependency failure
+Command: ganesha "continue operation when dependency unavailable"
+Expected: Uses fallback or cached data
+
+TEST_526: [Recovery] Recover from configuration error
+Command: ganesha "recover from invalid configuration"
+Expected: Uses default config and alerts
+
+TEST_527: [Recovery] Recover from licensing issue
+Command: ganesha "continue with reduced features if license invalid"
+Expected: Graceful degradation
+
+TEST_528: [Recovery] Recover from backend failure
+Command: ganesha "failover to backup backend"
+Expected: Requests handled by backup
+
+TEST_529: [Recovery] Recover from plugin load failure
+Command: ganesha "continue without plugin if load fails"
+Expected: Core functionality works
+
+TEST_530: [Recovery] Recover from scheduled task failure
+Command: ganesha "retry failed scheduled task"
+Expected: Task retried with backoff
+
+COMPREHENSIVE INTEGRATION EDGE CASES (20 cases)
+---------------------------------------------
+
+TEST_531: [Integration] Multiple failures simultaneously
+Command: ganesha "handle network failure, disk full, and memory pressure"
+Expected: All failures handled gracefully
+
+TEST_532: [Integration] Cascading failures
+Command: ganesha "handle failure that causes secondary failure"
+Expected: All failures caught and handled
+
+TEST_533: [Integration] Rapid state changes
+Command: ganesha "handle rapid configuration and state changes"
+Expected: State remains consistent
+
+TEST_534: [Integration] Mixed success and failure
+Command: ganesha "batch operation with some items failing"
+Expected: Successful items processed, failures reported
+
+TEST_535: [Integration] Interleaved operations
+Command: ganesha "interleave conflicting operations"
+Expected: Operations serialized or conflict detected
+
+TEST_536: [Integration] Chain of dependencies
+Command: ganesha "handle failure in middle of dependency chain"
+Expected: Cascade handled appropriately
+
+TEST_537: [Integration] Circular dependencies
+Command: ganesha "detect and handle circular dependencies"
+Expected: Circular dependency detected
+
+TEST_538: [Integration] Module reloading
+Command: ganesha "reload module while in use"
+Expected: Graceful reload or error
+
+TEST_539: [Integration] Version compatibility
+Command: ganesha "mix incompatible versions of components"
+Expected: Compatibility error or fallback
+
+TEST_540: [Integration] Plugin conflict
+Command: ganesha "handle conflicting plugins"
+Expected: Conflict detected and resolved
+
+TEST_541: [Integration] Database connection pool
+Command: ganesha "exhaust and recover connection pool"
+Expected: Pool managed correctly
+
+TEST_542: [Integration] Worker thread pool
+Command: ganesha "exhaust and recover thread pool"
+Expected: Thread pool managed correctly
+
+TEST_543: [Integration] Message queue overflow
+Command: ganesha "overflow and drain message queue"
+Expected: Queue managed correctly
+
+TEST_544: [Integration] Cache invalidation
+Command: ganesha "update value and ensure cache invalidated"
+Expected: All cache entries updated
+
+TEST_545: [Integration] Event ordering
+Command: ganesha "ensure events processed in correct order"
+Expected: Event order preserved
+
+TEST_546: [Integration] State machine transitions
+Command: ganesha "execute invalid state transitions"
+Expected: Invalid transitions rejected
+
+TEST_547: [Integration] Rollback with side effects
+Command: ganesha "rollback transaction with external side effects"
+Expected: Best-effort rollback, side effects logged
+
+TEST_548: [Integration] Eventual consistency
+Command: ganesha "handle eventual consistency delays"
+Expected: Convergence achieved
+
+TEST_549: [Integration] Split brain scenario
+Command: ganesha "handle split brain in distributed system"
+Expected: Split brain detected and resolved
+
+TEST_550: [Integration] Byzantine failure
+Command: ganesha "handle Byzantine failure in quorum"
+Expected: Quorum continues correctly
+
+END OF EDGE CASES
+=================
+
+Total: 250 unique edge case tests covering error conditions, resource limits, security, and failure scenarios.
