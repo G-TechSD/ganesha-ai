@@ -85,7 +85,7 @@ impl ActivityOverlay {
             return Err("yad not found. Install with: sudo apt install yad".into());
         }
 
-        *self.running.write().unwrap() = true;
+        *self.running.write().expect("Running state lock poisoned - unable to start overlay") = true;
 
         // Start the overlay process
         let state = self.state.clone();
@@ -116,8 +116,8 @@ impl ActivityOverlay {
         let mut last_text = String::new();
         let mut process: Option<Child> = None;
 
-        while *running.read().unwrap() {
-            let state = state.read().unwrap();
+        while *running.read().expect("Running state lock poisoned - unable to check overlay status") {
+            let state = state.read().expect("Overlay state lock poisoned - unable to read state");
             let elapsed = state.last_action_time.elapsed();
 
             // Format elapsed time
@@ -201,7 +201,7 @@ impl ActivityOverlay {
 
     /// Update the overlay state
     pub fn update(&self, action: &str, status: &str, progress: u8) {
-        let mut state = self.state.write().unwrap();
+        let mut state = self.state.write().expect("Overlay state lock poisoned - unable to update state");
         state.current_action = action.to_string();
         state.status = status.to_string();
         state.progress = progress;
@@ -209,7 +209,7 @@ impl ActivityOverlay {
 
     /// Mark an action as just completed (resets timer)
     pub fn action_completed(&self, action: &str) {
-        let mut state = self.state.write().unwrap();
+        let mut state = self.state.write().expect("Overlay state lock poisoned - unable to mark action completed");
         state.last_action_time = Instant::now();
         state.current_action = action.to_string();
         state.status = "working".into();
@@ -217,19 +217,19 @@ impl ActivityOverlay {
 
     /// Set the current goal
     pub fn set_goal(&self, goal: &str) {
-        let mut state = self.state.write().unwrap();
+        let mut state = self.state.write().expect("Overlay state lock poisoned - unable to set goal");
         state.goal = goal.to_string();
     }
 
     /// Set AI control status
     pub fn set_ai_control(&self, in_control: bool) {
-        let mut state = self.state.write().unwrap();
+        let mut state = self.state.write().expect("Overlay state lock poisoned - unable to set AI control status");
         state.ai_in_control = in_control;
     }
 
     /// Get time since last action
     pub fn time_since_action(&self) -> Duration {
-        self.state.read().unwrap().last_action_time.elapsed()
+        self.state.read().expect("Overlay state lock poisoned - unable to get time since action").last_action_time.elapsed()
     }
 
     /// Check if possibly stuck (no action for too long)
@@ -239,7 +239,7 @@ impl ActivityOverlay {
 
     /// Stop the overlay
     pub fn stop(&mut self) {
-        *self.running.write().unwrap() = false;
+        *self.running.write().expect("Running state lock poisoned - unable to stop overlay") = false;
         if let Some(handle) = self.update_thread.take() {
             let _ = handle.join();
         }
@@ -270,7 +270,7 @@ impl NotifyOverlay {
 
     /// Show current status via notification
     pub fn show_status(&self) {
-        let state = self.state.read().unwrap();
+        let state = self.state.read().expect("Overlay state lock poisoned - unable to show status");
         let elapsed = state.last_action_time.elapsed();
 
         let urgency = if elapsed.as_secs() < 10 {
@@ -299,14 +299,14 @@ impl NotifyOverlay {
 
     /// Update state
     pub fn update(&self, action: &str, status: &str) {
-        let mut state = self.state.write().unwrap();
+        let mut state = self.state.write().expect("Overlay state lock poisoned - unable to update notify state");
         state.current_action = action.to_string();
         state.status = status.to_string();
     }
 
     /// Reset timer
     pub fn action_completed(&self) {
-        let mut state = self.state.write().unwrap();
+        let mut state = self.state.write().expect("Overlay state lock poisoned - unable to mark notify action completed");
         state.last_action_time = Instant::now();
     }
 }

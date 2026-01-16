@@ -167,7 +167,7 @@ impl GlobalMemory {
 
     /// Get the base directory for memory storage
     fn get_base_dir() -> PathBuf {
-        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+        let home = dirs::home_dir().expect("Unable to determine home directory for memory storage");
         let base = home.join(".ganesha").join("memory");
         fs::create_dir_all(&base).ok();
         base

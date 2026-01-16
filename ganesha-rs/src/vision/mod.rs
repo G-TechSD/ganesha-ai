@@ -94,7 +94,7 @@ impl VisionController {
         {
             VISION_ENABLED.store(true, Ordering::SeqCst);
             self.enabled.store(true, Ordering::SeqCst);
-            *self.last_activity.lock().unwrap() = Instant::now();
+            *self.last_activity.lock().expect("Last activity lock poisoned - unable to update vision timestamp") = Instant::now();
             Ok(())
         }
     }
@@ -127,13 +127,13 @@ impl VisionController {
 
     /// Check if inactive timeout has expired
     fn is_inactive_timeout(&self) -> bool {
-        let last = self.last_activity.lock().unwrap();
+        let last = self.last_activity.lock().expect("Last activity lock poisoned - unable to check vision timeout");
         last.elapsed() > self.inactivity_timeout
     }
 
     /// Update activity timestamp
     fn touch(&self) {
-        *self.last_activity.lock().unwrap() = Instant::now();
+        *self.last_activity.lock().expect("Last activity lock poisoned - unable to update vision activity timestamp") = Instant::now();
     }
 
     /// Check rate limit

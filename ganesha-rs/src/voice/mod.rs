@@ -209,8 +209,8 @@ impl VoiceController {
 
             VOICE_ENABLED.store(true, Ordering::SeqCst);
             self.enabled.store(true, Ordering::SeqCst);
-            *self.last_activity.lock().unwrap() = Instant::now();
-            *self.state.lock().unwrap() = VoiceState::Idle;
+            *self.last_activity.lock().expect("Last activity lock poisoned - unable to update voice timestamp") = Instant::now();
+            *self.state.lock().expect("Voice state lock poisoned - unable to set voice state") = VoiceState::Idle;
             Ok(())
         }
     }
@@ -220,7 +220,7 @@ impl VoiceController {
         VOICE_ENABLED.store(false, Ordering::SeqCst);
         self.enabled.store(false, Ordering::SeqCst);
         self.shutdown.store(true, Ordering::SeqCst);
-        *self.state.lock().unwrap() = VoiceState::Idle;
+        *self.state.lock().expect("Voice state lock poisoned - unable to set voice state") = VoiceState::Idle;
     }
 
     /// Activate emergency kill switch
@@ -245,23 +245,23 @@ impl VoiceController {
 
     /// Check if inactive timeout has expired
     fn is_inactive_timeout(&self) -> bool {
-        let last = self.last_activity.lock().unwrap();
+        let last = self.last_activity.lock().expect("Last activity lock poisoned - unable to check voice timeout");
         last.elapsed() > self.inactivity_timeout
     }
 
     /// Update activity timestamp
     fn touch(&self) {
-        *self.last_activity.lock().unwrap() = Instant::now();
+        *self.last_activity.lock().expect("Last activity lock poisoned - unable to update voice activity timestamp") = Instant::now();
     }
 
     /// Get current state
     pub fn get_state(&self) -> VoiceState {
-        *self.state.lock().unwrap()
+        *self.state.lock().expect("Voice state lock poisoned - unable to get voice state")
     }
 
     /// Set state
     fn set_state(&self, state: VoiceState) {
-        *self.state.lock().unwrap() = state;
+        *self.state.lock().expect("Voice state lock poisoned - unable to set voice state") = state;
     }
 
     /// Get current status
