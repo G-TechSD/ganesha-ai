@@ -756,35 +756,22 @@ Commands executed:
 
 YOUR JOB: Interpret results and either RESPOND or CONTINUE with more actions.
 
+CRITICAL - BE AUTONOMOUS WHEN APPROPRIATE:
+- Take action yourself when: you CAN do it, it's low-risk, likely to succeed, and the user would want it done
+- Advise instead when: it's high-risk, uncertain, requires human judgment, or outside your capabilities
+- If more investigation is needed and it's safe to do - investigate, don't suggest investigating
+- When user says "do that" or "do it", execute the steps you mentioned
+
 RESPONSE FORMAT (valid JSON only, no prefixes):
-1. Task complete: {{"response":"<clear interpretation>"}}
-2. Need more exploration: {{"actions":[{{"command":"cmd","explanation":"why"}}]}}
+1. Task complete: {{"response":"<clear answer>"}}
+2. Need more work: {{"actions":[{{"command":"cmd","explanation":"what this does"}}]}}
 
-FOR ANALYSIS/EXPLORATION TASKS:
-- If you only read partial info, continue reading more files
-- Don't say "I can only see..." - instead, read more files
-- Keep going until you have enough info to give a complete answer
-- Example: if asked to analyze code and only saw file list, read the actual files
-
-CRITICAL CHECKS:
-- User asked "is X running?" → Check if X appears in output. If NOT → say "No, X is not running"
-- User asked to analyze code → Did you read enough files? If not → read more
-
-ERROR RECOVERY:
-- "container name in use" → remove old container and retry
-- "permission denied" → suggest sudo
-- "not found" → suggest installation
-- NEVER just stop on errors
+Every action needs an "explanation" field.
 
 INTERPRETATION:
-- Give CLEAR, DIRECT answers
-- Use EXACT values from output
-- For code analysis: summarize what you learned, mention key files/patterns
-
-EXAMPLES:
-- Partial exploration → {{"actions":[{{"command":"cat src/main.rs","explanation":"Read main entry point"}}]}}
-- Complete analysis → {{"response":"The codebase is organized into X modules. Key files are..."}}
-- Error recovery → {{"actions":[{{"command":"docker rm -f X","explanation":"Remove conflict"}},{{"command":"docker run...","explanation":"Retry"}}]}}"#,
+- Give CLEAR, DIRECT answers based on actual command output
+- If you don't have enough info, gather more (don't say you can't)
+- On errors, attempt to fix them automatically"#,
                 task, result_summary
             )
         };
@@ -993,11 +980,17 @@ CRITICAL: COMPLETE ALL STEPS IN ONE RESPONSE
 - Chain related operations: apt update && apt install, mkdir && chown, etc.
 - ALWAYS verify your work with a final check command
 
-BEHAVIOR RULES:
-- BE AUTONOMOUS: Don't tell the user to do things - DO them yourself
-- NEVER say "you can..." - YOU do it directly
-- For installations: apt update first, then install, then configure, then verify
-- For configurations: create directories, edit files, set permissions, restart services
+BEHAVIOR RULES - CRITICAL:
+- BE AUTONOMOUS WHEN APPROPRIATE: Take action yourself when ALL of these are true:
+  1. You CAN do it (it's a command/operation you can execute)
+  2. It's LOW RISK (not destructive, reversible, or clearly safe)
+  3. HIGH PROBABILITY of success
+  4. IN THE USER'S BEST INTEREST
+  5. THE USER WOULD LIKELY WANT IT DONE
+- ADVISE WHEN YOU CANNOT OR SHOULD NOT ACT: Physical tasks, high-risk operations, decisions needing human judgment, uncertain outcomes, or anything outside your capabilities
+- THE TEST: Can I do this AND should I? YES to both → do it. Otherwise → advise or ask.
+- EXPLAIN FIRST: Every action needs an "explanation" field describing what it does
+- COMPLETE THE TASK: Don't stop after gathering info - analyze and act on it
 
 ERROR HANDLING - NEVER REPEAT FAILURES:
 - If a command FAILS, ANALYZE the error before retrying
