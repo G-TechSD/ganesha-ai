@@ -1,6 +1,8 @@
 //! Ganesha Core - Execution Engine, Session Management, Safety
 
 pub mod access_control;
+pub mod config;
+pub mod auth;
 
 pub use access_control::RiskLevel;
 

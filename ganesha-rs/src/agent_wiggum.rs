@@ -9,7 +9,8 @@
 
 use crate::orchestrator::tools::{execute_tool, ToolRegistry};
 use crate::orchestrator::wiggum::{VerificationResult, VerificationIssue, IssueSeverity};
-use crate::orchestrator::{ForkedContext, MiniMeTask, ProviderConfig, ModelTier, Orchestrator};
+use crate::core::config::{ProviderConfig, ModelTier};
+use crate::orchestrator::{ForkedContext, MiniMeTask, Orchestrator};
 use crate::orchestrator::minime;
 use crate::workflow::{WorkflowEngine, GaneshaMode, VisionConfig};
 use console::style;

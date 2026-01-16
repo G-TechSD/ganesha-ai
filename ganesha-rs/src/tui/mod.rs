@@ -22,6 +22,10 @@ use std::io::{self, Write};
 use std::time::{Duration, Instant};
 use chrono::Local;
 
+mod settings;
+
+use settings::SettingsView;
+
 /// A message in the chat history
 #[derive(Clone)]
 pub struct ChatMessage {
@@ -36,6 +40,13 @@ pub enum MessageRole {
     Ganesha,
     System,
     Error,
+}
+
+#[derive(PartialEq)]
+pub enum TuiMode {
+    Chat,
+    Settings,
+    Voice,
 }
 
 /// Status bar state
@@ -90,6 +101,9 @@ pub struct TuiApp {
     pub status: StatusBar,
     pub session_log: Vec<String>,
     pub should_quit: bool,
+    pub mode: TuiMode,
+    pub settings: SettingsView,
+    pub voice_level: f32, // 0.0 - 1.0
 }
 
 impl TuiApp {
@@ -102,6 +116,9 @@ impl TuiApp {
             status: StatusBar::new(),
             session_log: vec![format!("Session started: {}", Local::now().format("%Y-%m-%d %H:%M:%S"))],
             should_quit: false,
+            mode: TuiMode::Chat,
+            settings: SettingsView::new(),
+            voice_level: 0.0,
         }
     }
 
@@ -151,6 +168,28 @@ impl TuiApp {
 
     /// Handle keyboard input
     pub fn handle_key(&mut self, code: KeyCode, modifiers: KeyModifiers) -> Option<String> {
+        if self.mode == TuiMode::Settings {
+            match code {
+                KeyCode::Esc | KeyCode::F(1) => {
+                    self.mode = TuiMode::Chat;
+                }
+                _ => {
+                    self.settings.handle_key(event::KeyEvent::new(code, modifiers));
+                }
+            }
+            return None;
+        }
+
+        if self.mode == TuiMode::Voice {
+            match code {
+                KeyCode::Esc | KeyCode::F(1) | KeyCode::Enter => {
+                    self.mode = TuiMode::Chat;
+                }
+                _ => {}
+            }
+            return None;
+        }
+
         match code {
             KeyCode::Enter => {
                 if !self.input.is_empty() {
@@ -159,6 +198,9 @@ impl TuiApp {
                     self.input_cursor = 0;
                     return Some(input);
                 }
+            }
+            KeyCode::F(1) => {
+                self.mode = TuiMode::Settings;
             }
             KeyCode::Char(c) => {
                 if modifiers.contains(KeyModifiers::CONTROL) && c == 'c' {
@@ -215,15 +257,58 @@ pub fn render(frame: &mut Frame, app: &mut TuiApp) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(3),      // Chat area (flexible)
+            Constraint::Min(3),      // Content area
             Constraint::Length(3),   // Input area
             Constraint::Length(1),   // Status bar
         ])
         .split(frame.area());
 
-    render_chat(frame, app, chunks[0]);
-    render_input(frame, app, chunks[1]);
+    match app.mode {
+        TuiMode::Chat => {
+            render_chat(frame, app, chunks[0]);
+            render_input(frame, app, chunks[1]);
+        }
+        TuiMode::Settings => {
+            app.settings.render(frame, chunks[0]);
+            render_settings_help(frame, chunks[1]);
+        }
+        TuiMode::Voice => {
+            render_chat(frame, app, chunks[0]);
+            render_voice_visualizer(frame, app, chunks[1]);
+        }
+    }
     render_status(frame, app, chunks[2]);
+}
+
+fn render_voice_visualizer(frame: &mut Frame, app: &TuiApp, area: Rect) {
+    let level = app.voice_level; // 0.0 to 1.0
+    // Amplify level for visualization
+    let visual_level = (level * 5.0).min(1.0);
+    
+    let width = area.width.saturating_sub(4) as usize;
+    let filled = (visual_level * width as f32) as usize;
+    let bar: String = std::iter::repeat("█").take(filled).collect();
+    
+    let is_active = level > 0.01;
+    let color = if is_active { Color::Red } else { Color::DarkGray };
+    let title_text = if is_active { " 🔴 LISTENING " } else { " 🎙️ Voice Standby " };
+    
+    let widget = Paragraph::new(bar)
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(color))
+            .title(Span::styled(title_text, Style::default().fg(color).add_modifier(Modifier::BOLD))));
+            
+    frame.render_widget(widget, area);
+}
+
+fn render_settings_help(frame: &mut Frame, area: Rect) {
+    let help = Paragraph::new(" ↑/↓: Navigate │ Enter: Edit │ Esc/F1: Back to Chat ")
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Yellow))
+            .title(Span::styled(" Settings Help ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))));
+    frame.render_widget(help, area);
 }
 
 fn render_chat(frame: &mut Frame, app: &mut TuiApp, area: Rect) {
@@ -312,10 +397,13 @@ fn render_status(frame: &mut Frame, app: &TuiApp, area: Rect) {
 }
 
 /// Callback type for processing input
-pub type ProcessInputFn = Box<dyn FnMut(String, &mut TuiApp) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send>;
+pub type ProcessInputFn = Box<dyn FnMut(String) -> std::pin::Pin<Box<dyn std::future::Future<Output = String> + Send>> + Send>;
 
 /// Run the TUI application
-pub async fn run_tui(mut process_input: ProcessInputFn) -> io::Result<()> {
+pub async fn run_tui(
+    mut process_input: ProcessInputFn,
+    voice_poller: Option<Box<dyn Fn() -> f32 + Send>>,
+) -> io::Result<()> {
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -331,6 +419,11 @@ pub async fn run_tui(mut process_input: ProcessInputFn) -> io::Result<()> {
     let mut last_tick = Instant::now();
 
     loop {
+        // Poll voice level if available
+        if let Some(ref poller) = voice_poller {
+            app.voice_level = poller();
+        }
+
         terminal.draw(|f| render(f, &mut app))?;
 
         let timeout = tick_rate.saturating_sub(last_tick.elapsed());
@@ -345,7 +438,11 @@ pub async fn run_tui(mut process_input: ProcessInputFn) -> io::Result<()> {
                         app.should_quit = true;
                     } else if input_lower == "/help" || input_lower == "help" {
                         app.add_message(MessageRole::System,
-                            "Commands:\n  /1: <task> - Fast tier\n  /2: <task> - Balanced tier\n  /3: <task> - Premium tier\n  /log [file] - Save session\n  /config - Provider settings\n  exit - Quit Ganesha");
+                            "Commands:\n  /1: <task> - Fast tier\n  /2: <task> - Balanced tier\n  /3: <task> - Premium tier\n  /log [file] - Save session\n  /settings - Provider settings\n  /voice - Toggle voice mode\n  exit - Quit Ganesha");
+                    } else if input_lower == "/settings" || input_lower == "/config" {
+                        app.mode = TuiMode::Settings;
+                    } else if input_lower == "/voice" {
+                        app.mode = TuiMode::Voice;
                     } else if input_lower.starts_with("/log") {
                         let path = input.strip_prefix("/log").map(|s| s.trim()).filter(|s| !s.is_empty());
                         match app.save_log(path) {
@@ -356,10 +453,14 @@ pub async fn run_tui(mut process_input: ProcessInputFn) -> io::Result<()> {
                         // Add user message and process
                         app.add_message(MessageRole::User, &input);
                         app.status.set_busy("Processing...");
+                        
+                        // Force draw to show "Processing" state
+                        terminal.draw(|f| render(f, &mut app))?;
 
                         // Process the input
-                        process_input(input, &mut app).await;
-
+                        let response = process_input(input).await;
+                        
+                        app.add_message(MessageRole::Ganesha, &response);
                         app.status.set_ready("Ready");
                     }
                 }
