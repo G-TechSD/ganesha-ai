@@ -345,6 +345,110 @@ impl<L: LlmProvider, C: ConsentHandler> GaneshaEngine<L, C> {
             }
         }
 
+        // Post-processing: Override response-only actions for SSH tasks
+        // If LLM says "I can't SSH" but we have credentials, generate proper commands
+        let is_ssh = Self::is_ssh_task(task);
+        if is_ssh {
+            let has_response_only = plan.actions.iter().all(|a| matches!(a.action_type, ActionType::Response));
+            let response_refuses_ssh = plan.actions.iter().any(|a| {
+                if !matches!(a.action_type, ActionType::Response) {
+                    return false;
+                }
+                let lower = a.explanation.to_lowercase().replace('\u{2019}', "'");
+                lower.contains("unable to ssh") ||
+                lower.contains("unable to perform") ||
+                lower.contains("unable to directly") ||
+                lower.contains("cannot ssh") ||
+                lower.contains("cannot perform") ||
+                lower.contains("can't ssh") ||
+                lower.contains("can't perform") ||
+                lower.contains("don't have direct") ||
+                lower.contains("please connect") ||
+                lower.contains("please ssh") ||
+                lower.contains("please run") ||
+                lower.contains("run the following") ||
+                lower.contains("here's a step-by-step") ||
+                lower.contains("here are the steps") ||
+                lower.contains("would you like me to provide") ||
+                (lower.contains("ssh") && lower.contains("please") && !lower.contains("sshpass"))
+            });
+
+            if has_response_only || response_refuses_ssh {
+                if let Some((user, host, password)) = Self::extract_ssh_credentials(task) {
+                    // Generate diagnostic commands for the remote system
+                    let ssh_prefix = format!(
+                        "sshpass -p '{}' ssh -o StrictHostKeyChecking=no {}@{}",
+                        password, user, host
+                    );
+
+                    // Determine what kind of task this is
+                    let is_display_issue = task.to_lowercase().contains("display") ||
+                                           task.to_lowercase().contains("black screen") ||
+                                           task.to_lowercase().contains("x cursor") ||
+                                           task.to_lowercase().contains("splashtop");
+
+                    plan.actions = if is_display_issue {
+                        vec![
+                            Action {
+                                id: uuid::Uuid::new_v4().to_string()[..8].to_string(),
+                                action_type: ActionType::Shell,
+                                command: format!("{} 'grep -i \"EE\\|error\\|denied\" /var/log/Xorg.0.log 2>/dev/null | head -20 || journalctl -b | grep -i \"EE\\|fb0\\|denied\" | head -20'", ssh_prefix),
+                                explanation: "Check X11 logs for errors".to_string(),
+                                risk_level: RiskLevel::Low,
+                                reversible: false,
+                                reverse_command: None,
+                                question: None,
+                            },
+                            Action {
+                                id: uuid::Uuid::new_v4().to_string()[..8].to_string(),
+                                action_type: ActionType::Shell,
+                                command: format!("{} 'groups'", ssh_prefix),
+                                explanation: "Check user groups".to_string(),
+                                risk_level: RiskLevel::Low,
+                                reversible: false,
+                                reverse_command: None,
+                                question: None,
+                            },
+                            Action {
+                                id: uuid::Uuid::new_v4().to_string()[..8].to_string(),
+                                action_type: ActionType::Shell,
+                                command: format!("{} 'sudo usermod -aG video $USER'", ssh_prefix),
+                                explanation: "Add user to video group (common fix for display issues)".to_string(),
+                                risk_level: RiskLevel::Medium,
+                                reversible: true,
+                                reverse_command: Some(format!("{} 'sudo deluser $USER video'", ssh_prefix)),
+                                question: None,
+                            },
+                        ]
+                    } else {
+                        // Generic SSH diagnostic
+                        vec![
+                            Action {
+                                id: uuid::Uuid::new_v4().to_string()[..8].to_string(),
+                                action_type: ActionType::Shell,
+                                command: format!("{} 'uname -a && uptime'", ssh_prefix),
+                                explanation: "Check system status".to_string(),
+                                risk_level: RiskLevel::Low,
+                                reversible: false,
+                                reverse_command: None,
+                                question: None,
+                            },
+                            Action {
+                                id: uuid::Uuid::new_v4().to_string()[..8].to_string(),
+                                action_type: ActionType::Shell,
+                                command: format!("{} 'journalctl -p err -n 20'", ssh_prefix),
+                                explanation: "Check recent errors".to_string(),
+                                risk_level: RiskLevel::Low,
+                                reversible: false,
+                                reverse_command: None,
+                                question: None,
+                            },
+                        ]
+                    };
+                }
+            }
+        }
+
         // Validate each action against access control (skip Response and McpTool actions)
         for action in &mut plan.actions {
             // Response actions don't need access control - they're just text
@@ -771,7 +875,22 @@ Every action needs an "explanation" field.
 INTERPRETATION:
 - Give CLEAR, DIRECT answers based on actual command output
 - If you don't have enough info, gather more (don't say you can't)
-- On errors, attempt to fix them automatically"#,
+- On errors, attempt to fix them automatically
+
+TROUBLESHOOTING - CRITICAL:
+- LOOK FOR ERRORS IN OUTPUT: Search for "error", "denied", "failed", "EE" in what you just ran
+- INVESTIGATE ERRORS YOU FIND: If you see "permission denied on /dev/fb0" → check its permissions, check user groups
+- FOLLOW THE CHAIN: Each error leads to the next diagnostic step until you find the root cause
+- FIX ROOT CAUSES: Don't just restart things - find WHY and fix THAT
+
+QUICK FIX PATTERNS:
+- Display/black screen/X cursor: Check Xorg.0.log for errors, usually video group issue → sudo usermod -aG video username && reboot
+- Permission denied: Check ls -la and groups, add user to correct group
+- Service won't start: Check journalctl -u servicename for why
+
+REMOTE SYSTEMS - YOU CAN SSH:
+If working on remote systems, use: sshpass -p 'password' ssh -o StrictHostKeyChecking=no user@host 'command'
+DO NOT tell users to SSH themselves - YOU do it!"#,
                 task, result_summary
             )
         };
@@ -940,7 +1059,7 @@ INTERPRETATION:
 
     fn build_planning_prompt(&self) -> String {
         let auto_mode = if self.auto_approve {
-            "\nAUTO MODE ENABLED: User wants actions, not explanations. Run commands to find answers."
+            "\nAUTO MODE ENABLED: DO NOT ask permission or tell user to do things. Execute commands directly. SSH into remote systems yourself using sshpass. Complete the entire task autonomously."
         } else {
             ""
         };
@@ -980,15 +1099,18 @@ CRITICAL: COMPLETE ALL STEPS IN ONE RESPONSE
 - Chain related operations: apt update && apt install, mkdir && chown, etc.
 - ALWAYS verify your work with a final check command
 
+QUICK DIAGNOSTIC PATTERNS - CHECK THESE FIRST:
+"display issues" / "black screen" / "X cursor" / "Splashtop" → IMMEDIATELY check /var/log/Xorg.0.log for (EE) errors → 99% of the time it's user not in video group → fix with: sudo usermod -aG video username && sudo reboot
+"permission denied" → check ls -la on the file/device, then groups username → add user to correct group
+"service won't start" → journalctl -u servicename -n 50 for recent logs → fix what the log says
+"connection refused" → systemctl status servicename → start/enable if not running
+
 BEHAVIOR RULES - CRITICAL:
-- BE AUTONOMOUS WHEN APPROPRIATE: Take action yourself when ALL of these are true:
-  1. You CAN do it (it's a command/operation you can execute)
-  2. It's LOW RISK (not destructive, reversible, or clearly safe)
-  3. HIGH PROBABILITY of success
-  4. IN THE USER'S BEST INTEREST
-  5. THE USER WOULD LIKELY WANT IT DONE
-- ADVISE WHEN YOU CANNOT OR SHOULD NOT ACT: Physical tasks, high-risk operations, decisions needing human judgment, uncertain outcomes, or anything outside your capabilities
-- THE TEST: Can I do this AND should I? YES to both → do it. Otherwise → advise or ask.
+- DO IT YOURSELF: If user asks you to do something and you CAN execute it as a command → DO IT. Don't say "you should" or "please run" - just execute the command!
+- YOU CAN: Run shell commands, SSH into remote systems, install packages, edit configs, restart services, check logs
+- BE AUTONOMOUS: Take action when: you CAN do it, it's LOW RISK, HIGH probability of success, IN USER'S BEST INTEREST
+- ADVISE ONLY WHEN YOU TRULY CANNOT: Physical tasks (press power button), purchases, or decisions requiring human judgment
+- NEVER say "I cannot SSH" or "please connect yourself" - you CAN SSH using sshpass/ssh commands!
 - EXPLAIN FIRST: Every action needs an "explanation" field describing what it does
 - COMPLETE THE TASK: Don't stop after gathering info - analyze and act on it
 
@@ -1023,6 +1145,33 @@ CODE ANALYSIS TASKS:
 - Read multiple files to get full picture
 - Use: cat, find, head, grep to explore
 - Keep exploring until you have enough context
+
+TROUBLESHOOTING - FOLLOW THE EVIDENCE:
+1. CHECK LOGS FOR ACTUAL ERRORS: grep -i "error\|failed\|denied\|EE" in relevant logs
+2. INVESTIGATE EACH ERROR YOU FIND: Don't just list errors - dig into each one
+3. FOLLOW THE CHAIN: Error says "permission denied on /dev/X" → check permissions → check user groups → fix
+4. COMMON DIAGNOSTIC PATTERNS:
+   - "Permission denied" → check file/device permissions (ls -la), check user groups (groups username)
+   - "Not found" → check if package installed (which X, dpkg -l | grep X)
+   - "Connection refused" → check if service running (systemctl status X)
+   - Display/X11 issues → check /var/log/Xorg.0.log for (EE) errors, check video group membership
+5. FIX ROOT CAUSES: Don't just restart services - find WHY it failed and fix that
+6. VERIFY YOUR FIX: After fixing, re-run the diagnostic to confirm the error is gone
+
+REMOTE SYSTEMS - YOU CAN SSH:
+When asked to work on remote systems, you CAN and SHOULD connect via SSH:
+- WITH PASSWORD: sshpass -p 'password' ssh -o StrictHostKeyChecking=no user@host 'command'
+- WITH KEY: ssh user@host 'command'
+- MULTIPLE COMMANDS: sshpass -p 'pass' ssh user@host 'cmd1 && cmd2 && cmd3'
+- INTERACTIVE FIX: sshpass -p 'pass' ssh user@host 'sudo usermod -aG video username'
+Example - fix remote display issue:
+{{"actions":[
+  {{"command":"sshpass -p 'password' ssh -o StrictHostKeyChecking=no user@host 'grep -i \"EE\\|error\\|denied\" /var/log/Xorg.0.log | head -20'","explanation":"Check X11 logs for errors"}},
+  {{"command":"sshpass -p 'password' ssh -o StrictHostKeyChecking=no user@host 'groups'","explanation":"Check current user groups"}},
+  {{"command":"sshpass -p 'password' ssh -o StrictHostKeyChecking=no user@host 'sudo usermod -aG video $USER'","explanation":"Add user to video group"}},
+  {{"command":"sshpass -p 'password' ssh -o StrictHostKeyChecking=no user@host 'sudo reboot'","explanation":"Reboot to apply changes"}}
+]}}
+DO NOT tell users to SSH themselves - YOU do it!
 
 WEB SEARCH - USE SELECTIVELY:
 
@@ -2439,6 +2588,71 @@ setInterval(() => {{
             }
         }
         String::new()
+    }
+
+    /// Check if task involves SSH to a remote system
+    fn is_ssh_task(task: &str) -> bool {
+        let lower = task.to_lowercase();
+        // Check for SSH-related keywords
+        (lower.contains("ssh") || lower.contains("remote")) &&
+        // And has credentials pattern user@host or "password"
+        (task.contains("@") || lower.contains("password"))
+    }
+
+    /// Extract SSH credentials from task description
+    /// Returns (user, host, password) if found
+    fn extract_ssh_credentials(task: &str) -> Option<(String, String, String)> {
+        // Look for patterns like: user@host, password X
+        // Common formats:
+        // - "user@host, password pwd"
+        // - "user:pwd@host"
+        // - "SSH to user@host with password pwd"
+
+        let words: Vec<&str> = task.split_whitespace().collect();
+
+        // Find user@host pattern
+        let mut user = String::new();
+        let mut host = String::new();
+        let mut password = String::new();
+
+        for (i, word) in words.iter().enumerate() {
+            // Check for user:password@host format
+            if word.contains("@") && word.contains(":") {
+                if let Some(at_pos) = word.find('@') {
+                    let before_at = &word[..at_pos];
+                    let after_at = &word[at_pos+1..];
+                    if let Some(colon_pos) = before_at.find(':') {
+                        user = before_at[..colon_pos].to_string();
+                        password = before_at[colon_pos+1..].trim_end_matches(|c: char| !c.is_alphanumeric() && c != '!').to_string();
+                        host = after_at.trim_matches(|c: char| !c.is_alphanumeric() && c != '-' && c != '.').to_string();
+                    }
+                }
+            }
+            // Check for user@host format
+            else if word.contains("@") {
+                let parts: Vec<&str> = word.split('@').collect();
+                if parts.len() == 2 {
+                    user = parts[0].trim_matches(|c: char| !c.is_alphanumeric() && c != '-').to_string();
+                    host = parts[1].trim_matches(|c: char| !c.is_alphanumeric() && c != '-' && c != '.').to_string();
+                }
+            }
+            // Check for "password X" pattern
+            else if word.to_lowercase() == "password" {
+                if let Some(next) = words.get(i + 1) {
+                    // Remove trailing punctuation
+                    password = next.trim_matches(|c: char| !c.is_alphanumeric() && c != '!').to_string();
+                }
+            }
+        }
+
+        // If we found user and host, return them (password may be empty)
+        if !user.is_empty() && !host.is_empty() {
+            // If no password found but we have user@host, still return with empty password
+            // The caller can decide what to do
+            Some((user, host, password))
+        } else {
+            None
+        }
     }
 
     /// Extract the best JSON object from response (one containing "actions" or "response")
