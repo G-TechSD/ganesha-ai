@@ -294,7 +294,35 @@ Output tool calls in JSON format. When done, summarize what was accomplished."#,
             };
 
             // Extract tool calls
-            let tool_calls = self.extract_tool_calls(&response);
+            let mut tool_calls = self.extract_tool_calls(&response);
+
+            // SSH OVERRIDE: If LLM refuses SSH but we have credentials, inject proper commands
+            if tool_calls.is_empty() && Self::is_ssh_refusal(&response) {
+                if let Some((user, host, password)) = Self::extract_ssh_credentials(task) {
+                    let is_display_issue = task.to_lowercase().contains("display") ||
+                                           task.to_lowercase().contains("black screen") ||
+                                           task.to_lowercase().contains("x cursor");
+
+                    let ssh_prefix = format!("sshpass -p '{}' ssh -o StrictHostKeyChecking=no {}@{}", password, user, host);
+
+                    if is_display_issue {
+                        tool_calls = vec![
+                            ToolCall { name: "bash".into(), args: json!({"command": format!("{} 'grep -i \"EE\\|error\\|denied\" /var/log/Xorg.0.log 2>/dev/null | head -20 || journalctl -b | grep -i \"fb0\\|denied\" | head -20'", ssh_prefix)}) },
+                            ToolCall { name: "bash".into(), args: json!({"command": format!("{} 'groups'", ssh_prefix)}) },
+                            ToolCall { name: "bash".into(), args: json!({"command": format!("{} 'sudo usermod -aG video $USER'", ssh_prefix)}) },
+                        ];
+                    } else {
+                        tool_calls = vec![
+                            ToolCall { name: "bash".into(), args: json!({"command": format!("{} 'uname -a && uptime'", ssh_prefix)}) },
+                            ToolCall { name: "bash".into(), args: json!({"command": format!("{} 'journalctl -p err -n 20'", ssh_prefix)}) },
+                        ];
+                    }
+
+                    if self.config.verbose {
+                        println!("{}", style("  [SSH Override: LLM refused SSH, injecting proper commands]").yellow());
+                    }
+                }
+            }
 
             if tool_calls.is_empty() {
                 // No tools - final response
@@ -870,6 +898,73 @@ Output tool calls in JSON format. When done, summarize what was accomplished."#,
     /// Get all Mini-Me results
     pub fn get_minime_results(&self) -> &[MiniMeResult] {
         &self.minime_results
+    }
+
+    /// Check if LLM response refuses to SSH
+    fn is_ssh_refusal(response: &str) -> bool {
+        let lower = response.to_lowercase();
+        // Handle both regular and smart apostrophes (U+2019)
+        let normalized = lower.replace('\u{2019}', "'");
+        normalized.contains("unable to ssh") ||
+        normalized.contains("cannot ssh") ||
+        normalized.contains("can't ssh") ||
+        normalized.contains("unable to directly") ||
+        normalized.contains("unable to perform") ||
+        normalized.contains("don't have direct") ||
+        normalized.contains("don't have network") ||
+        normalized.contains("can't log into") ||
+        normalized.contains("cannot log into") ||
+        normalized.contains("please connect") ||
+        normalized.contains("please ssh") ||
+        normalized.contains("here's a step-by-step") ||
+        normalized.contains("here are the steps") ||
+        normalized.contains("run the following") ||
+        normalized.contains("you can run") ||
+        // Check if it's giving instructions instead of doing
+        (normalized.contains("ssh") && normalized.contains("please") && !normalized.contains("sshpass"))
+    }
+
+    /// Extract SSH credentials from task description
+    fn extract_ssh_credentials(task: &str) -> Option<(String, String, String)> {
+        let words: Vec<&str> = task.split_whitespace().collect();
+        let mut user = String::new();
+        let mut host = String::new();
+        let mut password = String::new();
+
+        for (i, word) in words.iter().enumerate() {
+            // user:password@host format
+            if word.contains("@") && word.contains(":") {
+                if let Some(at_pos) = word.find('@') {
+                    let before_at = &word[..at_pos];
+                    let after_at = &word[at_pos+1..];
+                    if let Some(colon_pos) = before_at.find(':') {
+                        user = before_at[..colon_pos].trim_matches(|c: char| !c.is_alphanumeric() && c != '-').to_string();
+                        password = before_at[colon_pos+1..].trim_end_matches(|c: char| !c.is_alphanumeric() && c != '!').to_string();
+                        host = after_at.trim_matches(|c: char| !c.is_alphanumeric() && c != '-' && c != '.').to_string();
+                    }
+                }
+            }
+            // user@host format
+            else if word.contains("@") {
+                let parts: Vec<&str> = word.split('@').collect();
+                if parts.len() == 2 {
+                    user = parts[0].trim_matches(|c: char| !c.is_alphanumeric() && c != '-').to_string();
+                    host = parts[1].trim_matches(|c: char| !c.is_alphanumeric() && c != '-' && c != '.').to_string();
+                }
+            }
+            // "password X" pattern
+            else if word.to_lowercase() == "password" {
+                if let Some(next) = words.get(i + 1) {
+                    password = next.trim_matches(|c: char| !c.is_alphanumeric() && c != '!').to_string();
+                }
+            }
+        }
+
+        if !user.is_empty() && !host.is_empty() {
+            Some((user, host, password))
+        } else {
+            None
+        }
     }
 }
 
