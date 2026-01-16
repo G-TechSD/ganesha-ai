@@ -114,12 +114,12 @@ pub fn show_menu_with_prompt(title: &str, options: &[MenuOption], allow_custom: 
     println!();
 
     if allow_custom {
-        println!("  {} {}", style("[C]").yellow(), "Custom input...");
+        println!("  {} Custom input...", style("[C]").yellow());
     }
     if allow_back {
-        println!("  {} {}", style("[B]").yellow(), "Back");
+        println!("  {} Back", style("[B]").yellow());
     }
-    println!("  {} {}", style("[Q]").yellow(), "Quit");
+    println!("  {} Quit", style("[Q]").yellow());
 
     println!("\n{}", style("─".repeat(60)).dim());
     println!("{}", style("(Press Escape to go back)").dim());
@@ -200,11 +200,11 @@ pub fn show_multi_select(title: &str, options: &[MenuOption], allow_custom: bool
 
         println!();
         if allow_custom {
-            println!("  {} {}", style("[C]").yellow(), "Add custom...");
+            println!("  {} Add custom...", style("[C]").yellow());
         }
-        println!("  {} {}", style("[A]").yellow(), "Select all");
-        println!("  {} {}", style("[N]").yellow(), "Select none");
-        println!("  {} {}", style("[Enter]").yellow(), "Done");
+        println!("  {} Select all", style("[A]").yellow());
+        println!("  {} Select none", style("[N]").yellow());
+        println!("  {} Done", style("[Enter]").yellow());
 
         println!("\n{}", style("─".repeat(60)).dim());
         print!("{} ", style("Toggle option:").cyan());
@@ -223,16 +223,12 @@ pub fn show_multi_select(title: &str, options: &[MenuOption], allow_custom: bool
         }
 
         if input == "a" || input == "all" {
-            for s in &mut selected {
-                *s = true;
-            }
+            selected.fill(true);
             continue;
         }
 
         if input == "n" || input == "none" {
-            for s in &mut selected {
-                *s = false;
-            }
+            selected.fill(false);
             continue;
         }
 
@@ -415,7 +411,7 @@ fn show_inline_select(options: &[MenuOption], allow_custom: bool) -> Option<Stri
     }
 
     if allow_custom {
-        println!("  {} {}", style("[C]").yellow(), "Custom input...");
+        println!("  {} Custom input...", style("[C]").yellow());
     }
 
     println!();
@@ -559,7 +555,7 @@ pub fn init_providers_from_env() {
             ("lmstudio", "http://localhost:1234", "LM Studio (Local)"),
         ];
 
-        for (name, endpoint, display_name) in &lm_studio_servers {
+        for (name, endpoint, _display_name) in &lm_studio_servers {
             // Quick connectivity check
             let check_url = format!("{}/v1/models", endpoint);
             let is_online = reqwest::blocking::Client::builder()
@@ -1370,37 +1366,34 @@ pub fn show_mcp_settings() {
                         if available.is_empty() {
                             println!("  {} All servers are already running or not installed.", style("ℹ").cyan());
                         } else {
-                            match show_menu("Select Server", &available, false, true) {
-                                MenuResult::Selected(name) => {
-                                    println!("\n  {} Connecting to {}...", style("⌛").yellow(), name);
+                            if let MenuResult::Selected(name) = show_menu("Select Server", &available, false, true) {
+                                println!("\n  {} Connecting to {}...", style("⌛").yellow(), name);
 
-                                    // First check if installed
-                                    if let Some(server) = manager.get_server(&name) {
-                                        if server.status == ServerStatus::NotInstalled {
-                                            println!("  {} Installing first...", style("📦").cyan());
-                                            match manager.install_server(&name) {
-                                                Ok(_) => println!("  {} Installed successfully", style("✓").green()),
-                                                Err(e) => {
-                                                    println!("  {} Install failed: {}", style("✗").red(), e);
-                                                    continue;
-                                                }
+                                // First check if installed
+                                if let Some(server) = manager.get_server(&name) {
+                                    if server.status == ServerStatus::NotInstalled {
+                                        println!("  {} Installing first...", style("📦").cyan());
+                                        match manager.install_server(&name) {
+                                            Ok(_) => println!("  {} Installed successfully", style("✓").green()),
+                                            Err(e) => {
+                                                println!("  {} Install failed: {}", style("✗").red(), e);
+                                                continue;
                                             }
                                         }
+                                    }
 
-                                        // Get fresh server ref after potential install
-                                        if let Some(server) = manager.get_server(&name) {
-                                            match connect_mcp_server(server) {
-                                                Ok(_) => {
-                                                    println!("\n  {} Connected to {}", style("✓").green(), name);
-                                                }
-                                                Err(e) => {
-                                                    println!("  {} Connection failed: {}", style("✗").red(), e);
-                                                }
+                                    // Get fresh server ref after potential install
+                                    if let Some(server) = manager.get_server(&name) {
+                                        match connect_mcp_server(server) {
+                                            Ok(_) => {
+                                                println!("\n  {} Connected to {}", style("✓").green(), name);
+                                            }
+                                            Err(e) => {
+                                                println!("  {} Connection failed: {}", style("✗").red(), e);
                                             }
                                         }
                                     }
                                 }
-                                _ => {}
                             }
                         }
                         println!("\n{}", style("Press Enter to continue...").dim());
@@ -1469,14 +1462,11 @@ pub fn show_permissions_settings() {
     println!("{}", style("Current access level determines which commands Ganesha can execute.").dim());
     println!();
 
-    match show_menu("Access Level", &options, false, true) {
-        MenuResult::Selected(v) => {
-            println!("\n{} Access level set to: {}", style("✓").green(), v);
-            println!("{}", style("(Note: Persistent config coming soon)").dim());
-            println!("\n{}", style("Press Enter to continue...").dim());
-            let _ = io::stdin().read_line(&mut String::new());
-        }
-        _ => {}
+    if let MenuResult::Selected(v) = show_menu("Access Level", &options, false, true) {
+        println!("\n{} Access level set to: {}", style("✓").green(), v);
+        println!("{}", style("(Note: Persistent config coming soon)").dim());
+        println!("\n{}", style("Press Enter to continue...").dim());
+        let _ = io::stdin().read_line(&mut String::new());
     }
 }
 
@@ -1493,34 +1483,31 @@ pub fn show_session_history() {
         MenuOption::with_description("Clear History", "Delete all session history", "clear"),
     ];
 
-    match show_menu("Session History", &options, false, true) {
-        MenuResult::Selected(v) => {
-            match v.as_str() {
-                "recent" => {
-                    println!("\n{}", style("Recent Sessions:").cyan().bold());
-                    // TODO: Load from session_dir
-                    println!("  {} No sessions found.", style("ℹ").dim());
-                }
-                "search" => {
-                    if let Some(query) = text_input("Search query", None) {
-                        println!("\n{} Searching for: '{}'", style("🔍").cyan(), query);
-                        println!("  {} No matching sessions.", style("ℹ").dim());
-                    }
-                }
-                "export" => {
-                    println!("\n{} Use /log command in chat to export current session.", style("ℹ").cyan());
-                }
-                "clear" => {
-                    if confirm("Are you sure you want to clear all session history?", false) {
-                        println!("\n{} Session history cleared.", style("✓").green());
-                    }
-                }
-                _ => {}
+    if let MenuResult::Selected(v) = show_menu("Session History", &options, false, true) {
+        match v.as_str() {
+            "recent" => {
+                println!("\n{}", style("Recent Sessions:").cyan().bold());
+                // TODO: Load from session_dir
+                println!("  {} No sessions found.", style("ℹ").dim());
             }
-            println!("\n{}", style("Press Enter to continue...").dim());
-            let _ = io::stdin().read_line(&mut String::new());
+            "search" => {
+                if let Some(query) = text_input("Search query", None) {
+                    println!("\n{} Searching for: '{}'", style("🔍").cyan(), query);
+                    println!("  {} No matching sessions.", style("ℹ").dim());
+                }
+            }
+            "export" => {
+                println!("\n{} Use /log command in chat to export current session.", style("ℹ").cyan());
+            }
+            "clear" => {
+                if confirm("Are you sure you want to clear all session history?", false) {
+                    println!("\n{} Session history cleared.", style("✓").green());
+                }
+            }
+            _ => {}
         }
-        _ => {}
+        println!("\n{}", style("Press Enter to continue...").dim());
+        let _ = io::stdin().read_line(&mut String::new());
     }
 }
 

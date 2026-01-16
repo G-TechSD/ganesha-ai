@@ -588,7 +588,7 @@ impl McpClient {
             }
         });
 
-        let result = self.send_request("initialize", Some(params))?;
+        let _result = self.send_request("initialize", Some(params))?;
 
         // Send initialized notification
         let notification = serde_json::json!({

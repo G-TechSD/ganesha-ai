@@ -15,6 +15,12 @@ pub struct AuthManager {
     service_name: String,
 }
 
+impl Default for AuthManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AuthManager {
     pub fn new() -> Self {
         Self {

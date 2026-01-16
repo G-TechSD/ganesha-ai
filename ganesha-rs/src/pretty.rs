@@ -56,11 +56,7 @@ pub fn print_box(title: &str, content: &str) {
 
     let title_len = title.len() + 2; // spaces around title
     let top_width = inner_width + 2; // Match bottom border width
-    let remaining = if title_len < top_width {
-        top_width - title_len
-    } else {
-        0
-    };
+    let remaining = top_width.saturating_sub(title_len);
     let left_pad = remaining / 2;
     let right_pad = remaining - left_pad;
 
@@ -86,11 +82,7 @@ pub fn print_box(title: &str, content: &str) {
 
         // Calculate padding needed (based on visible width, not string length)
         let display_vis_width = visible_width(&display_line);
-        let padding = if display_vis_width < inner_width {
-            inner_width - display_vis_width
-        } else {
-            0
-        };
+        let padding = inner_width.saturating_sub(display_vis_width);
 
         println!(
             "{} {}{} {}",
@@ -121,7 +113,7 @@ pub fn print_response(content: &str) {
 pub fn render_markdown(text: &str, max_width: usize) -> String {
     let mut output = String::new();
     let mut in_code_block = false;
-    let mut list_depth = 0;
+    let list_depth = 0;
 
     for line in text.lines() {
         let trimmed = line.trim();
@@ -143,18 +135,15 @@ pub fn render_markdown(text: &str, max_width: usize) -> String {
         }
 
         // Headers
-        if trimmed.starts_with("### ") {
-            let header = &trimmed[4..];
+        if let Some(header) = trimmed.strip_prefix("### ") {
             output.push_str(&format!("\n   {} {}\n", style("▸").cyan(), style(header).bold()));
             continue;
         }
-        if trimmed.starts_with("## ") {
-            let header = &trimmed[3..];
+        if let Some(header) = trimmed.strip_prefix("## ") {
             output.push_str(&format!("\n  {} {}\n", style("◆").cyan().bold(), style(header).cyan().bold()));
             continue;
         }
-        if trimmed.starts_with("# ") {
-            let header = &trimmed[2..];
+        if let Some(header) = trimmed.strip_prefix("# ") {
             output.push_str(&format!("\n {} {}\n", style("★").yellow().bold(), style(header).yellow().bold()));
             continue;
         }
@@ -268,7 +257,7 @@ fn parse_numbered_list(text: &str) -> Option<(u32, &str)> {
     match (chars.next(), chars.next()) {
         (Some('.'), Some(' ')) | (Some(')'), Some(' ')) => {
             let num: u32 = num_str.parse().ok()?;
-            let rest: String = chars.collect();
+            let _rest: String = chars.collect();
             // This is a bit hacky but we need to return a reference
             // For now, just return the parsed number and use text manipulation
             let content_start = num_str.len() + 2;
@@ -467,11 +456,7 @@ pub fn print_box_with_timestamp(title: &str, content: &str, timestamp: &str) {
         };
 
         let display_vis_width = visible_width(&display_line);
-        let padding = if display_vis_width < inner_width {
-            inner_width - display_vis_width
-        } else {
-            0
-        };
+        let padding = inner_width.saturating_sub(display_vis_width);
 
         println!(
             "{} {}{} {}",
@@ -496,7 +481,7 @@ pub fn print_typing(text: &str, delay_ms: u64) {
     use std::thread::sleep;
     use std::time::Duration;
 
-    let term = Term::stdout();
+    let _term = Term::stdout();
     for c in text.chars() {
         print!("{}", c);
         let _ = std::io::stdout().flush();

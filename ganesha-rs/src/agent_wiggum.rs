@@ -10,15 +10,13 @@
 use crate::orchestrator::tools::{execute_tool, ToolRegistry};
 use crate::orchestrator::wiggum::{VerificationResult, VerificationIssue, IssueSeverity};
 use crate::core::config::{ProviderConfig, ModelTier};
-use crate::orchestrator::{ForkedContext, MiniMeTask, Orchestrator};
+use crate::orchestrator::{ForkedContext, MiniMeTask};
 use crate::orchestrator::minime;
-use crate::workflow::{WorkflowEngine, GaneshaMode, VisionConfig};
 use console::style;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
@@ -1031,7 +1029,7 @@ impl TestHarness {
                 "file_ops", "Create simple text file",
                 "create a file called hello.txt with the text 'Hello World'",
                 "File hello.txt exists with correct content",
-                |s, a| s.files_created.iter().any(|f| f.contains("hello"))
+                |s, _a| s.files_created.iter().any(|f| f.contains("hello"))
             ),
             TestCase::new(
                 "file_ops", "Create file with special characters",
@@ -1067,7 +1065,7 @@ impl TestHarness {
                 "file_ops", "Create multiple files",
                 "create three files: a.txt with 'A', b.txt with 'B', c.txt with 'C'",
                 "All three files created",
-                |s, _| s.files_created.len() >= 1
+                |s, _| !s.files_created.is_empty()
             ),
             TestCase::new(
                 "file_ops", "Overwrite existing file",
@@ -1083,7 +1081,7 @@ impl TestHarness {
                 "edit_ops", "Simple edit",
                 "create a file called edit.txt with 'Hello World', then change 'World' to 'Ganesha'",
                 "Text replaced correctly",
-                |s, _| s.files_created.len() > 0 || s.files_modified.len() > 0
+                |s, _| !s.files_created.is_empty() || !s.files_modified.is_empty()
             ),
             TestCase::new(
                 "edit_ops", "Edit with context",
@@ -1169,7 +1167,7 @@ impl TestHarness {
                 "bash_cmd", "Simple echo",
                 "run echo 'Hello from bash'",
                 "Echo command executed",
-                |s, _| s.commands_executed.len() > 0
+                |s, _| !s.commands_executed.is_empty()
             ),
             TestCase::new(
                 "bash_cmd", "List directory",
@@ -1193,7 +1191,7 @@ impl TestHarness {
                 "bash_cmd", "Environment variable",
                 "print the HOME environment variable",
                 "Env var printed",
-                |s, _| s.commands_executed.len() > 0
+                |s, _| !s.commands_executed.is_empty()
             ),
             TestCase::new(
                 "bash_cmd", "Date command",
@@ -1237,13 +1235,13 @@ impl TestHarness {
                 "edge", "Empty task",
                 "",
                 "Handles empty input gracefully",
-                |s, _| true // Just shouldn't crash
+                |_s, _| true // Just shouldn't crash
             ),
             TestCase::new(
                 "edge", "Very long filename",
                 "create a file called this_is_a_very_long_filename_that_tests_path_limits.txt",
                 "Long filename handled",
-                |s, _| s.success || s.actions.len() > 0
+                |s, _| s.success || !s.actions.is_empty()
             ),
             TestCase::new(
                 "edge", "Special path characters",
@@ -1261,19 +1259,19 @@ impl TestHarness {
                 "edge", "Large content",
                 "create a file with 1000 lines of 'Hello World'",
                 "Large file created",
-                |s, _| s.files_created.len() > 0
+                |s, _| !s.files_created.is_empty()
             ),
             TestCase::new(
                 "edge", "Binary-like content",
                 "create a file with bytes: 0x00 0x01 0x02",
                 "Handles binary-like content",
-                |s, _| s.success || s.actions.len() > 0
+                |s, _| s.success || !s.actions.is_empty()
             ),
             TestCase::new(
                 "edge", "Concurrent-like operations",
                 "create a.txt, b.txt, c.txt, d.txt, e.txt all with different content",
                 "Multiple files created",
-                |s, _| s.files_created.len() >= 1
+                |s, _| !s.files_created.is_empty()
             ),
         ]);
 
@@ -1302,7 +1300,7 @@ impl TestHarness {
                 "multi_step", "Build project structure",
                 "create a simple project with src/main.py and README.md",
                 "Project structure created",
-                |s, _| s.files_created.len() >= 1
+                |s, _| !s.files_created.is_empty()
             ),
         ]);
 
@@ -1312,19 +1310,19 @@ impl TestHarness {
                 "errors", "Invalid tool gracefully",
                 "try to use a tool called 'invalid_tool'",
                 "Invalid tool handled gracefully",
-                |s, _| true
+                |_s, _| true
             ),
             TestCase::new(
                 "errors", "Missing arguments",
                 "write a file (missing content)",
                 "Missing args handled",
-                |s, _| true
+                |_s, _| true
             ),
             TestCase::new(
                 "errors", "Permission denied simulation",
                 "try to write to /root/test.txt",
                 "Permission error handled",
-                |s, _| true // Sandbox should block this
+                |_s, _| true // Sandbox should block this
             ),
         ]);
 
@@ -1334,19 +1332,19 @@ impl TestHarness {
                 "conversation", "Simple question",
                 "what is 2 + 2?",
                 "Question answered without tools",
-                |s, _| s.final_response.len() > 0
+                |s, _| !s.final_response.is_empty()
             ),
             TestCase::new(
                 "conversation", "Explain concept",
                 "explain what a variable is in programming",
                 "Concept explained",
-                |s, _| s.final_response.len() > 0
+                |s, _| !s.final_response.is_empty()
             ),
             TestCase::new(
                 "conversation", "Mixed task and question",
                 "create hello.py and explain what it does",
                 "Both task and explanation",
-                |s, _| s.final_response.len() > 0
+                |s, _| !s.final_response.is_empty()
             ),
         ]);
 
@@ -1362,7 +1360,7 @@ impl TestHarness {
                 "verification", "Recover from failure",
                 "try to edit a nonexistent file, then create and edit it",
                 "Recovery from failure",
-                |s, _| s.actions.len() >= 1
+                |s, _| !s.actions.is_empty()
             ),
         ]);
 
@@ -1373,19 +1371,19 @@ impl TestHarness {
                 &format!("Generated test case {}", i + 1),
                 &format!("create generated_{}.txt with 'Generated content {}'", i, i),
                 "Generated file created",
-                |s, _| s.files_created.len() > 0 || s.success
+                |s, _| !s.files_created.is_empty() || s.success
             ));
         }
 
         // More code generation variants
         let languages = ["py", "js", "ts", "go", "java", "rb", "php"];
-        for (i, lang) in languages.iter().enumerate() {
+        for (_i, lang) in languages.iter().enumerate() {
             cases.push(TestCase::new(
                 "code_gen_extended",
                 &format!("Generate {} hello world", lang),
                 &format!("create a {} file that prints hello", lang),
                 &format!("{} file created", lang),
-                |s, _| s.files_created.len() > 0 || s.success
+                |s, _| !s.files_created.is_empty() || s.success
             ));
         }
 
@@ -1396,7 +1394,7 @@ impl TestHarness {
                 &format!("Workflow test {}", i + 1),
                 &format!("create file_{}.txt, read it, then create file_{}_copy.txt with the same content", i, i),
                 "Workflow completed",
-                |s, _| s.actions.len() >= 1
+                |s, _| !s.actions.is_empty()
             ));
         }
 

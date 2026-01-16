@@ -357,6 +357,12 @@ pub struct ConfigManager {
     path: PathBuf,
 }
 
+impl Default for ConfigManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ConfigManager {
     pub fn new() -> Self {
         let path = dirs::config_dir()

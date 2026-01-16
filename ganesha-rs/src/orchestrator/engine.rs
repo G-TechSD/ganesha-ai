@@ -311,8 +311,8 @@ When the task is complete, summarize what was accomplished.
                 }
 
                 // Check for consent if needed
-                if !self.auto_approve && self.requires_consent(&tool_call.name, &tool_call.arguments) {
-                    if !self.get_consent(&tool_call.name, &tool_call.arguments)? {
+                if !self.auto_approve && self.requires_consent(&tool_call.name, &tool_call.arguments)
+                    && !self.get_consent(&tool_call.name, &tool_call.arguments)? {
                         self.messages.push(Message {
                             role: "user".into(),
                             content: format!("[Tool {} was denied by user]", tool_call.name),
@@ -321,7 +321,6 @@ When the task is complete, summarize what was accomplished.
                         });
                         continue;
                     }
-                }
 
                 // Execute the tool
                 let result = execute_tool(

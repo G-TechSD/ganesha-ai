@@ -27,7 +27,7 @@ mod workflow;
 use clap::{Parser, Subcommand};
 use cli::{print_banner, print_error, print_info, print_warning, print_action_summary, print_success, AutoConsent, CliConsent};
 use console::style;
-use core::access_control::{load_policy, AccessLevel};
+use core::access_control::load_policy;
 use core::GaneshaEngine;
 use providers::ProviderChain;
 use orchestrator::providers::ProviderManager;
@@ -305,7 +305,7 @@ async fn main() {
         } else {
             print_info(&format!("Primary: {} | Secondary: {}",
                 available[0],
-                available.get(1).map(|s| *s).unwrap_or("none")
+                available.get(1).copied().unwrap_or("none")
             ));
             if available.len() > 2 {
                 print_info(&format!("Fallbacks: {}", available[2..].join(", ")));
@@ -590,7 +590,7 @@ async fn run_repl<C: core::ConsentHandler>(
                     Ok(c) => c,
                     Err(_) => return false,
                 };
-            match client.get(&format!("{}/v1/models", url)).send().await {
+            match client.get(format!("{}/v1/models", url)).send().await {
                 Ok(r) => r.status().is_success(),
                 Err(_) => false,
             }
@@ -920,7 +920,7 @@ with real GitLab repositories and documentation.
                         // Save locally if can't send
                         let feedback_file = format!("ganesha-feedback-{}.json",
                             chrono::Local::now().format("%Y%m%d-%H%M%S"));
-                        if let Ok(_) = std::fs::write(&feedback_file, feedback_data.to_string()) {
+                        if std::fs::write(&feedback_file, feedback_data.to_string()).is_ok() {
                             println!("{} Could not connect to server.", style("⚠").yellow());
                             println!("  Feedback saved to: {}", feedback_file);
                             println!("  Please email to: feedback@gtechsd.com");
@@ -1131,12 +1131,11 @@ with real GitLab repositories and documentation.
                                     let _ = std::io::Write::flush(&mut std::io::stdout());
 
                                     let mut confirm = String::new();
-                                    if std::io::stdin().read_line(&mut confirm).is_ok() {
-                                        if confirm.trim().to_lowercase() == "y" || confirm.trim().to_lowercase() == "yes" {
+                                    if std::io::stdin().read_line(&mut confirm).is_ok()
+                                        && (confirm.trim().to_lowercase() == "y" || confirm.trim().to_lowercase() == "yes") {
                                             flux_exit_reason = "stopped by user (ESC)";
                                             break 'flux_loop;
                                         }
-                                    }
                                     println!("{} Continuing flux loop...", style("→").cyan());
                                     println!("{}", style("━".repeat(60)).dim());
                                 }
@@ -1212,15 +1211,14 @@ with real GitLab repositories and documentation.
 
                 // Auto-detect and switch mode from input
                 if let Some(detected_mode) = workflow.detect_mode(input) {
-                    if detected_mode != workflow.current_mode {
-                        if workflow.auto_transition(detected_mode) {
+                    if detected_mode != workflow.current_mode
+                        && workflow.auto_transition(detected_mode) {
                             println!("{} {} Auto-switched to {} mode",
                                 detected_mode.emoji(),
                                 style("→").dim(),
                                 style(detected_mode.display_name()).cyan().bold()
                             );
                         }
-                    }
                 }
 
                 // Handle conversation memory commands
@@ -1249,7 +1247,8 @@ with real GitLab repositories and documentation.
                         dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/"))
                     } else {
                         // Handle ~ expansion
-                        let expanded = if path_str.starts_with("~/") {
+                        
+                        if path_str.starts_with("~/") {
                             dirs::home_dir()
                                 .unwrap_or_else(|| std::path::PathBuf::from("/"))
                                 .join(&path_str[2..])
@@ -1260,8 +1259,7 @@ with real GitLab repositories and documentation.
                         } else {
                             // Relative path
                             engine.working_directory.join(path_str)
-                        };
-                        expanded
+                        }
                     };
 
                     // Canonicalize to resolve .. and .
@@ -1444,7 +1442,7 @@ fn is_installed() -> bool {
 }
 
 /// Install ganesha to system (cross-platform)
-fn install_ganesha(interactive: bool) {
+fn install_ganesha(_interactive: bool) {
     use std::env;
     use std::fs;
     use std::path::PathBuf;
@@ -1492,7 +1490,7 @@ fn install_ganesha(interactive: bool) {
             let install_dir = install_path.parent().unwrap();
             let path_env = env::var("PATH").unwrap_or_default();
             let in_path = path_env.split(if cfg!(windows) { ';' } else { ':' })
-                .any(|p| PathBuf::from(p) == install_dir);
+                .any(|p| p == install_dir);
 
             if !in_path {
                 println!();
@@ -2711,12 +2709,11 @@ async fn handle_login(provider: &str) {
 }
 
 /// Handle voice command
-async fn handle_voice(action: &str) {
+async fn handle_voice(_action: &str) {
     #[cfg(not(feature = "voice"))]
     {
         print_error("Voice feature not compiled.");
         println!("Reinstall with: ./install.sh --voice");
-        return;
     }
 
     #[cfg(feature = "voice")]

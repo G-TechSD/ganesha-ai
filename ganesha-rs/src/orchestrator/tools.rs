@@ -548,7 +548,7 @@ fn preprocess_bash_command(command: &str) -> String {
 
 async fn exec_bash(args: &Value, cwd: &str) -> ToolExecResult {
     let command = args["command"].as_str().unwrap_or("");
-    let timeout_secs = args["timeout"].as_u64().unwrap_or(60);
+    let _timeout_secs = args["timeout"].as_u64().unwrap_or(60);
 
     // Safety checks
     let dangerous_patterns = [
@@ -756,7 +756,7 @@ async fn exec_web_search(args: &Value) -> ToolExecResult {
 
 async fn exec_web_fetch(args: &Value) -> ToolExecResult {
     let url = args["url"].as_str().unwrap_or("");
-    let prompt = args["prompt"].as_str().unwrap_or("Extract the main content");
+    let _prompt = args["prompt"].as_str().unwrap_or("Extract the main content");
 
     if url.is_empty() {
         return ToolExecResult {

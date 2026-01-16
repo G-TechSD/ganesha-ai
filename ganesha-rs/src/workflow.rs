@@ -26,8 +26,7 @@
 
 use console::style;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use uuid::Uuid;
 
 /// Ganesha operational modes
@@ -234,6 +233,7 @@ pub enum EvalVerdict {
 
 /// Vision model availability
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct VisionConfig {
     pub enabled: bool,
     pub primary_has_vision: bool,
@@ -242,17 +242,6 @@ pub struct VisionConfig {
     pub cloud_vision_model: Option<String>,
 }
 
-impl Default for VisionConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            primary_has_vision: false,
-            cloud_vision_available: false,
-            cloud_vision_provider: None,
-            cloud_vision_model: None,
-        }
-    }
-}
 
 impl VisionConfig {
     /// Check if vision is available (either primary or cloud fallback)
@@ -408,7 +397,7 @@ Respond naturally and helpfully."#,
     }
 
     fn planning_prompt(&self) -> String {
-        format!(r#"MODE: PLANNING 📋
+        r#"MODE: PLANNING 📋
 
 You are Ganesha in careful planning mode. Before ANY development:
 
@@ -461,7 +450,7 @@ OUTPUT FORMAT:
 ```
 
 Do NOT write code in planning mode. Focus on understanding and planning.
-When plan is complete, ask user to approve before transitioning to DEVELOPMENT mode."#)
+When plan is complete, ask user to approve before transitioning to DEVELOPMENT mode."#.to_string()
     }
 
     fn development_prompt(&self) -> String {
@@ -503,7 +492,7 @@ Focus on quality over speed. Verify everything."#,
     }
 
     fn testing_prompt(&self) -> String {
-        format!(r#"MODE: TESTING 🧪
+        r#"MODE: TESTING 🧪
 
 You are Ganesha in testing mode. Thoroughly validate the work.
 
@@ -546,7 +535,7 @@ OUTPUT FORMAT:
 ```
 
 If tests PASS → transition to EVALUATION
-If tests FAIL → transition to FIX/REFINE"#)
+If tests FAIL → transition to FIX/REFINE"#.to_string()
     }
 
     fn fix_refine_prompt(&self) -> String {
@@ -556,7 +545,7 @@ If tests FAIL → transition to FIX/REFINE"#)
             self.max_fix_iterations
         );
 
-        let issues = if let Some(ref results) = self.test_results.last() {
+        let issues = if let Some(results) = self.test_results.last() {
             results.test_suites.iter()
                 .flat_map(|s| &s.failures)
                 .map(|f| format!("- {}: {}", f.test_name, f.error))

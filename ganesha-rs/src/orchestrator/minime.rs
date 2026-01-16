@@ -68,13 +68,12 @@ pub async fn execute_task(
             for tool_call in tool_calls {
                 let result = execute_tool(&tool_call, &task.context).await;
 
-                if result.success {
-                    if tool_call.name == "write_file" {
+                if result.success
+                    && tool_call.name == "write_file" {
                         if let Some(path) = tool_call.arguments.get("path").and_then(|p| p.as_str()) {
                             files_modified.push(path.to_string());
                         }
                     }
-                }
 
                 // Add tool result to conversation
                 conversation.push(json!({
@@ -96,11 +95,10 @@ pub async fn execute_task(
             conversation.push(json!({"role": "assistant", "content": response}));
 
             // Check if stuck
-            if response.contains("I need help") || response.contains("I cannot") {
-                if task.allow_escalation {
+            if (response.contains("I need help") || response.contains("I cannot"))
+                && task.allow_escalation {
                     return Err("ESCALATE: Mini-Me needs more capable model".into());
                 }
-            }
 
             // Prompt for next action
             conversation.push(json!({

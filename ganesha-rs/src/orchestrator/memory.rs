@@ -310,7 +310,7 @@ impl GlobalMemory {
                     md.push_str(&format!("  - {}\n", learning));
                 }
             }
-            md.push_str("\n");
+            md.push('\n');
         }
 
         fs::write(dir.join("sessions.md"), md)?;
@@ -330,7 +330,7 @@ impl GlobalMemory {
                 let status = if milestone.completed { "[x]" } else { "[ ]" };
                 md.push_str(&format!("  - {} {}\n", status, milestone.description));
             }
-            md.push_str("\n");
+            md.push('\n');
         }
 
         md.push_str("## Completed Goals\n\n");
@@ -371,7 +371,7 @@ impl GlobalMemory {
                     if let Some(ref anti) = pattern.anti_pattern {
                         md.push_str(&format!("- **Don't**: {}\n", anti));
                     }
-                    md.push_str("\n");
+                    md.push('\n');
                 }
             }
         }
@@ -441,7 +441,7 @@ impl SessionContext {
             for goal in &self.active_goals {
                 prompt.push_str(&format!("- {}\n", goal));
             }
-            prompt.push_str("\n");
+            prompt.push('\n');
         }
 
         if !self.relevant_patterns.is_empty() {
@@ -449,7 +449,7 @@ impl SessionContext {
             for pattern in &self.relevant_patterns {
                 prompt.push_str(&format!("- {}\n", pattern));
             }
-            prompt.push_str("\n");
+            prompt.push('\n');
         }
 
         prompt

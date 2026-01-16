@@ -351,7 +351,7 @@ impl Default for VisionAnalyzer {
 }
 
 /// Quick screen check without full analysis
-pub async fn quick_check(query: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+pub async fn quick_check(_query: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     #[cfg(feature = "vision")]
     {
         use crate::vision::VisionController;
