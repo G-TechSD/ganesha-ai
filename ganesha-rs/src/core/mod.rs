@@ -11,7 +11,6 @@ use crate::providers::{LlmProvider, ChatMessage};
 use access_control::{AccessController, AccessPolicy};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::path::PathBuf;
 use thiserror::Error;
 use uuid::Uuid;

@@ -11,7 +11,6 @@
 
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use base64_lib::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
 /// Screen analysis result - strict JSON format from vision model
 #[derive(Debug, Clone, Serialize, Deserialize)]

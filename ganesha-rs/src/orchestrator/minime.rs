@@ -8,11 +8,10 @@
 //!
 //! The name comes from Austin Powers - they're smaller versions of the main agent.
 
-use super::{ForkedContext, MiniMeTask, ProviderConfig, ModelTier};
+use super::{ForkedContext, MiniMeTask, ProviderConfig};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::time::Duration;
 
 /// Tool call from Mini-Me
 #[derive(Debug, Clone, Serialize, Deserialize)]
