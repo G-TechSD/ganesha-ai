@@ -449,20 +449,22 @@ When the task is complete, summarize what was accomplished.
             }
         }
 
-        // Also look for inline JSON tool calls
-        for line in response.lines() {
-            let line = line.trim();
-            if line.starts_with('{') && line.contains("\"name\"") {
-                if let Ok(parsed) = serde_json::from_str::<Value>(line) {
-                    if let (Some(name), Some(args)) = (
-                        parsed.get("name").and_then(|n| n.as_str()),
-                        parsed.get("args"),
-                    ) {
-                        calls.push(ToolCall {
-                            id: Uuid::new_v4().to_string(),
-                            name: name.to_string(),
-                            arguments: args.clone(),
-                        });
+        // Also look for inline JSON tool calls (only if no tool blocks found)
+        if calls.is_empty() {
+            for line in response.lines() {
+                let line = line.trim();
+                if line.starts_with('{') && line.contains("\"name\"") {
+                    if let Ok(parsed) = serde_json::from_str::<Value>(line) {
+                        if let (Some(name), Some(args)) = (
+                            parsed.get("name").and_then(|n| n.as_str()),
+                            parsed.get("args"),
+                        ) {
+                            calls.push(ToolCall {
+                                id: Uuid::new_v4().to_string(),
+                                name: name.to_string(),
+                                arguments: args.clone(),
+                            });
+                        }
                     }
                 }
             }
