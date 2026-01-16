@@ -1962,6 +1962,7 @@ dependencies = [
  "md5",
  "nix 0.27.1",
  "oauth2",
+ "once_cell",
  "oslog",
  "playwright",
  "png 0.17.16",
