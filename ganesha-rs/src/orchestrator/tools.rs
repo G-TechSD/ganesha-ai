@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf, Component};
 use std::process::Command;
 
 /// Tool definition
@@ -228,6 +228,25 @@ impl Default for ToolRegistry {
     }
 }
 
+/// Safely resolve a file path to prevent path traversal attacks
+fn resolve_safe_path(path: &str, cwd: &str) -> PathBuf {
+    let full_path = if Path::new(path).is_absolute() {
+        PathBuf::from(path)
+    } else {
+        PathBuf::from(cwd).join(path)
+    };
+
+    // Normalize and prevent path traversal
+    full_path.canonicalize()
+        .unwrap_or_else(|_| {
+            // If canonicalize fails (file doesn't exist yet), at least clean the path
+            let cleaned = full_path.components()
+                .filter(|c| c != &Component::ParentDir && c != &Component::CurDir)
+                .collect::<PathBuf>();
+            cleaned
+        })
+}
+
 /// Execute a tool
 pub async fn execute_tool(
     name: &str,
@@ -293,11 +312,7 @@ fn exec_read(args: &Value, cwd: &str) -> ToolExecResult {
     let offset = args["offset"].as_u64().unwrap_or(0) as usize;
     let limit = args["limit"].as_u64().unwrap_or(2000) as usize;
 
-    let full_path = if Path::new(path).is_absolute() {
-        path.to_string()
-    } else {
-        format!("{}/{}", cwd, path)
-    };
+    let full_path = resolve_safe_path(path, cwd).to_string_lossy().to_string();
 
     match std::fs::read_to_string(&full_path) {
         Ok(content) => {
@@ -343,11 +358,7 @@ fn exec_edit(args: &Value, cwd: &str) -> ToolExecResult {
         };
     }
 
-    let full_path = if Path::new(path).is_absolute() {
-        path.to_string()
-    } else {
-        format!("{}/{}", cwd, path)
-    };
+    let full_path = resolve_safe_path(path, cwd).to_string_lossy().to_string();
 
     match std::fs::read_to_string(&full_path) {
         Ok(content) => {
@@ -405,11 +416,7 @@ fn exec_write(args: &Value, cwd: &str) -> ToolExecResult {
     let path = args["path"].as_str().unwrap_or("");
     let content = args["content"].as_str().unwrap_or("");
 
-    let full_path = if Path::new(path).is_absolute() {
-        path.to_string()
-    } else {
-        format!("{}/{}", cwd, path)
-    };
+    let full_path = resolve_safe_path(path, cwd).to_string_lossy().to_string();
 
     // Create parent directories if needed
     if let Some(parent) = Path::new(&full_path).parent() {
@@ -546,11 +553,7 @@ fn exec_grep(args: &Value, cwd: &str) -> ToolExecResult {
     let path = args["path"].as_str().unwrap_or(".");
     let file_type = args["type"].as_str();
 
-    let full_path = if Path::new(path).is_absolute() {
-        path.to_string()
-    } else {
-        format!("{}/{}", cwd, path)
-    };
+    let full_path = resolve_safe_path(path, cwd).to_string_lossy().to_string();
 
     let mut cmd_args = vec![
         "--line-number".to_string(),
