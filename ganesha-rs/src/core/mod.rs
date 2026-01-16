@@ -992,22 +992,84 @@ DO NOT tell users to SSH themselves - YOU do it!"#,
         Ok((String::new(), None))
     }
 
-    async fn execute_command(&self, command: &str) -> Result<String, GaneshaError> {
+    /// Extract cd target from command and return (new_cwd, remaining_command)
+    /// Handles patterns like:
+    /// - "cd /path" -> (Some(/path), "true")
+    /// - "cd /path && cmd" -> (Some(/path), "cmd")
+    /// - "mkdir -p /path && cd /path && cmd" -> (Some(/path), "mkdir -p /path && cmd")
+    /// - "cmd" (no cd) -> (None, "cmd")
+    fn extract_cd_and_command(&self, command: &str) -> (Option<PathBuf>, String) {
+        // Pattern: cd at start or after &&
+        let cd_pattern = regex::Regex::new(r"(?:^|&&\s*)cd\s+([^\s&;]+)(?:\s*&&\s*|\s*$)").ok();
+
+        if let Some(re) = cd_pattern {
+            if let Some(caps) = re.captures(command) {
+                if let Some(dir_match) = caps.get(1) {
+                    let dir_str = dir_match.as_str();
+
+                    // Expand ~ to home directory
+                    let expanded = if dir_str.starts_with('~') {
+                        if let Some(home) = dirs::home_dir() {
+                            home.join(&dir_str[1..].trim_start_matches('/'))
+                        } else {
+                            PathBuf::from(dir_str)
+                        }
+                    } else if dir_str.starts_with('/') {
+                        PathBuf::from(dir_str)
+                    } else {
+                        // Relative path - resolve from current working directory
+                        self.working_directory.join(dir_str)
+                    };
+
+                    // Remove the "cd /path &&" part but keep any mkdir before it
+                    let cd_full = caps.get(0).unwrap().as_str();
+                    let remaining = command.replace(cd_full, "");
+                    let remaining = remaining.trim();
+
+                    // If nothing left after removing cd, use "true" as a no-op
+                    let final_cmd = if remaining.is_empty() || remaining == "&&" {
+                        "true".to_string()
+                    } else {
+                        remaining.trim_start_matches("&&").trim().to_string()
+                    };
+
+                    return (Some(expanded), final_cmd);
+                }
+            }
+        }
+
+        (None, command.to_string())
+    }
+
+    async fn execute_command(&mut self, command: &str) -> Result<String, GaneshaError> {
         use tokio::process::Command;
+
+        // Track cd commands to update working directory for subsequent commands
+        // Pattern: "cd /path" or "cd /path && ..." or "mkdir -p /path && cd /path"
+        let (effective_cwd, effective_command) = self.extract_cd_and_command(command);
+
+        let working_dir = effective_cwd.as_ref().unwrap_or(&self.working_directory);
 
         let output = if cfg!(target_os = "windows") {
             Command::new("cmd")
-                .args(["/C", command])
-                .current_dir(&self.working_directory)
+                .args(["/C", &effective_command])
+                .current_dir(working_dir)
                 .output()
                 .await?
         } else {
             Command::new("sh")
-                .args(["-c", command])
-                .current_dir(&self.working_directory)
+                .args(["-c", &effective_command])
+                .current_dir(working_dir)
                 .output()
                 .await?
         };
+
+        // If command succeeded and we changed directory, persist the change
+        if output.status.success() {
+            if let Some(new_cwd) = effective_cwd {
+                self.working_directory = new_cwd;
+            }
+        }
 
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
