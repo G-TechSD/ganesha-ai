@@ -38,12 +38,13 @@ ganesha "set up nginx as a reverse proxy for port 3000"
 - **Session Memory** - Resume with `--last` or browse with `--sessions`
 - **Response Metrics** - See timing, tokens, and speed for each response
 - **Flux Capacitor** - Time-boxed autonomous task execution
+- **Remote SSH** - Autonomous SSH into remote systems with sshpass
 
 ---
 
 ## Downloads
 
-Pre-built binaries for the Rust version (v3.14.0):
+Pre-built binaries for v3.14.0:
 
 | Platform | Architecture | Download |
 |----------|-------------|----------|
@@ -57,12 +58,12 @@ Pre-built binaries for the Rust version (v3.14.0):
 
 **Linux/macOS (one-liner):**
 ```bash
-curl -sSL https://raw.githubusercontent.com/G-TechSD/ganesha-ai/main/ganesha-rs/scripts/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/G-TechSD/ganesha-ai/main/install.sh | bash
 ```
 
 **Windows (PowerShell):**
 ```powershell
-iwr -useb https://raw.githubusercontent.com/G-TechSD/ganesha-ai/main/ganesha-rs/scripts/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/G-TechSD/ganesha-ai/main/install.ps1 | iex
 ```
 
 ### Self-Install from Binary
@@ -93,22 +94,19 @@ ganesha --version
 
 ## Installation (From Source)
 
+Requires Rust 1.75+:
+
 ```bash
 # Clone
 git clone https://github.com/G-TechSD/ganesha-ai.git
-cd ganesha-ai
+cd ganesha-ai/ganesha-rs
 
-# Install (basic)
-pip install -e .
+# Build
+cargo build --release
 
-# Install (all features)
-pip install -e ".[all]"
+# Install
+sudo cp target/release/ganesha /usr/local/bin/
 ```
-
-### Requirements
-
-- Python 3.10+
-- A local LLM server (LM Studio or Ollama) OR cloud API key
 
 ---
 
@@ -120,7 +118,7 @@ pip install -e ".[all]"
 # Execute a task
 ganesha "show disk usage"
 
-# Auto-approve (dangerous!)
+# Auto-approve (use carefully!)
 ganesha --auto "update all packages"
 
 # Interactive REPL
@@ -139,7 +137,21 @@ ganesha --last
 ganesha --sessions
 ```
 
-### Flux Capacitor (Autonomous Mode)
+### Autonomous Mode (--auto)
+
+For fully autonomous task execution:
+
+```bash
+# SSH into remote system and troubleshoot
+ganesha --auto "SSH into johnny:password123@192.168.1.100 and fix the display issue"
+
+# The AI will autonomously:
+# - Connect via sshpass
+# - Run diagnostics
+# - Fix issues without asking
+```
+
+### Flux Capacitor (Time-Boxed Autonomous)
 
 Run tasks autonomously for a specified duration:
 
@@ -155,9 +167,6 @@ ganesha --flux auto "continuously monitor and fix linter errors"
 
 # Generate 1000 items with creative temperature
 ganesha -A --flux "30m" --temp 1.0 "Generate 1000 cat facts"
-
-# Resume a previous session
-ganesha --flux "1h" --resume flux_20260112 "Continue where we left off"
 ```
 
 **Features:**
@@ -165,45 +174,6 @@ ganesha --flux "1h" --resume flux_20260112 "Continue where we left off"
 - **Progress tracking** - Auto-detects targets ("1000 facts" -> shows 0/1000)
 - **Session resume** - Continue from where you left off
 - **Export** - Auto-exports to HTML and raw text at completion
-
-### MCP Server
-
-Add to your Claude Desktop config:
-
-```json
-{
-  "mcpServers": {
-    "ganesha": {
-      "command": "python",
-      "args": ["-m", "ganesha.mcp.server"]
-    }
-  }
-}
-```
-
-Now Claude Code can use Ganesha tools:
-- `ganesha_execute` - Execute system tasks
-- `ganesha_plan` - Plan without executing
-- `ganesha_rollback` - Undo changes
-- `ganesha_generate_code` - Generate code
-
-### HTTP API
-
-```bash
-# Start the API server
-ganesha-api
-
-# Or with uvicorn
-uvicorn ganesha.api.server:app --port 8420
-```
-
-Endpoints:
-- `POST /execute` - Execute a task
-- `POST /plan` - Plan without executing
-- `POST /rollback` - Rollback session
-- `GET /history` - Session history
-- `GET /providers` - Available LLM providers
-- `GET /health` - Health check
 
 ---
 
@@ -261,11 +231,11 @@ ganesha --auto "your task"  # Auto-approve all
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     GANESHA 3.0                             │
+│                     GANESHA 3.14                            │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
 │  ┌─────────┐  ┌─────────┐  ┌─────────┐                     │
-│  │   CLI   │  │   MCP   │  │   API   │   ← Interfaces      │
+│  │   CLI   │  │  Daemon │  │   TUI   │   ← Interfaces      │
 │  └────┬────┘  └────┬────┘  └────┬────┘                     │
 │       │            │            │                           │
 │       └────────────┼────────────┘                           │
@@ -273,7 +243,7 @@ ganesha --auto "your task"  # Auto-approve all
 │           ┌───────────────┐                                 │
 │           │  Core Engine  │  ← Planning, Execution, Safety │
 │           └───────┬───────┘                                 │
-│                   ▼                                        │
+│                   ▼                                         │
 │           ┌───────────────┐                                 │
 │           │   Providers   │  ← LLM Abstraction             │
 │           └───────┬───────┘                                 │
@@ -300,20 +270,15 @@ It pioneered concepts that are now standard:
 - Auto-approve flags for automation
 - Cross-platform compatibility
 
-This rewrite (v3.0) adds:
-- Local LLM support (LM Studio, Ollama)
-- MCP server protocol
-- HTTP API for web integration
-- Async-first architecture
-- Clean, modern codebase
-
-**v3.14** (current) adds:
+**v3.14.0** (current) - Complete Rust rewrite:
+- High-performance native binary
 - Session resume (`--last`, `--sessions`)
 - Built-in web search (Brave/DuckDuckGo)
 - MCP server chaining (Playwright, fetch, filesystem)
 - Response metrics (timing, tokens, tok/s)
-- Timestamps throughout for auditing
-- Improved terminal output formatting
+- Flux Capacitor autonomous mode
+- Remote SSH capability with sshpass
+- Autonomous troubleshooting
 
 ---
 
@@ -338,6 +303,5 @@ MIT License - See LICENSE file.
 
 **G-Tech SD**
 - GitHub: [G-TechSD/ganesha-ai](https://github.com/G-TechSD/ganesha-ai)
-- Website: [ganesha-ai.com](https://ganesha-ai.com)
 
 *The first AI-powered system control tool. Predates the rest.*
