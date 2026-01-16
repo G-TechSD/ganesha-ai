@@ -127,9 +127,15 @@ pub mod app_knowledge;
 // Orchestrator - Mini-Me sub-agent architecture for long-horizon tasks
 pub mod orchestrator;
 
+pub use core::config::{
+    ModelTier, ProviderConfig, GaneshaConfig, ConfigManager,
+    ProviderEndpoint, ProviderType, AuthMethod, ModelInfo, OAuth2Config,
+    TierConfig, TierMapping, SlashCommand, parse_slash_command,
+};
+
 pub use orchestrator::{
     Orchestrator, MiniMeTask, MiniMeResult, ForkedContext, SessionContext,
-    ModelTier, ProviderConfig, PlanStep, StepStatus,
+    PlanStep, StepStatus,
 };
 pub use orchestrator::wiggum::{WiggumLoop, WiggumConfig, WiggumOutcome, Verifier, LlmVerifier};
 pub use orchestrator::tools::{ToolRegistry, ToolDef, ToolExecResult, execute_tool};
@@ -141,11 +147,7 @@ pub use orchestrator::mcp::{McpManager, McpServer, ServerStatus, ServerCategory}
 pub use orchestrator::rollback::{RollbackManager, RollbackResult, RollbackRecord, FileSnapshot};
 pub use orchestrator::scheduler::{Scheduler, ScheduledTask, Schedule, TaskAction};
 pub use orchestrator::vision::{VisionAnalyzer, ScreenAnalysis, VisionConfig};
-pub use orchestrator::providers::{
-    ProviderManager, ProviderEndpoint, ProviderType, AuthMethod,
-    ModelInfo, ModelTier as ProviderModelTier, OAuth2Config,
-    TierConfig, TierMapping, SlashCommand, GaneshaConfig, parse_slash_command,
-};
+pub use orchestrator::providers::ProviderManager;
 
 // TUI
 pub use tui::{TuiApp, ChatMessage, MessageRole, StatusBar, run_tui};

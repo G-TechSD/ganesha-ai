@@ -40,6 +40,8 @@ use std::sync::mpsc;
 use tokio::sync::broadcast;
 #[cfg(feature = "voice")]
 use tokio_tungstenite::tungstenite::Message;
+#[cfg(feature = "voice")]
+use futures::stream::StreamExt;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -149,6 +151,9 @@ pub struct VoiceController {
     inactivity_timeout: Duration,
     /// Shutdown signal
     shutdown: Arc<AtomicBool>,
+    /// Current audio level (RMS) for visualization (0.0 - 1.0)
+    /// Stored as atomic u32 (bits of f32) for thread safety
+    current_rms: Arc<std::sync::atomic::AtomicU32>,
 }
 
 impl Default for VoiceController {
@@ -167,7 +172,13 @@ impl VoiceController {
             last_activity: std::sync::Mutex::new(Instant::now()),
             inactivity_timeout: Duration::from_secs(600), // 10 minutes
             shutdown: Arc::new(AtomicBool::new(false)),
+            current_rms: Arc::new(std::sync::atomic::AtomicU32::new(0)),
         }
+    }
+
+    /// Get current audio level (RMS) 0.0 - 1.0
+    pub fn get_current_rms(&self) -> f32 {
+        f32::from_bits(self.current_rms.load(Ordering::Relaxed))
     }
 
     /// Enable voice capabilities (requires user consent)
@@ -342,11 +353,21 @@ impl VoiceController {
 
         let audio_tx_clone = audio_tx.clone();
         let vad_sensitivity = self.config.vad_sensitivity;
+        let current_rms_clone = self.current_rms.clone();
 
         let input_stream = input_device
             .build_input_stream(
                 &input_config,
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                    // Calculate RMS
+                    let sum_sq: f32 = data.iter().map(|&s| s * s).sum();
+                    let rms = if !data.is_empty() {
+                        (sum_sq / data.len() as f32).sqrt()
+                    } else {
+                        0.0
+                    };
+                    current_rms_clone.store(rms.to_bits(), Ordering::Relaxed);
+
                     // Convert f32 to i16
                     let samples: Vec<i16> = data
                         .iter()

@@ -48,119 +48,7 @@ use tokio::sync::{mpsc, RwLock, Semaphore};
 use uuid::Uuid;
 
 use crate::providers::{LlmProvider, ProviderError};
-
-/// Model tier for provider selection
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ModelTier {
-    /// Fast local model for simple tasks (ministral-3b, llama-3.2-3b)
-    Fast,
-    /// Capable local model for planning (gpt-oss-20b, qwen-32b)
-    Capable,
-    /// Vision model for screen analysis
-    Vision,
-    /// Cloud model for complex reasoning (Claude, GPT-4)
-    Cloud,
-    /// Premium cloud for critical decisions (Claude Opus, GPT-5)
-    Premium,
-}
-
-/// Provider endpoint configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProviderConfig {
-    pub name: String,
-    pub endpoint: String,
-    pub model: String,
-    pub tier: ModelTier,
-    pub api_key: Option<String>,
-    pub max_concurrent: usize,
-    pub cost_per_1k_tokens: f64,
-}
-
-impl ProviderConfig {
-    pub fn lm_studio_beast() -> Self {
-        Self {
-            name: "beast".into(),
-            endpoint: "http://192.168.245.155:1234".into(),
-            model: "gpt-oss-20b".into(),
-            tier: ModelTier::Capable,
-            api_key: None,
-            max_concurrent: 1, // Single GPU
-            cost_per_1k_tokens: 0.0,
-        }
-    }
-
-    pub fn lm_studio_bedroom() -> Self {
-        Self {
-            name: "bedroom".into(),
-            endpoint: "http://192.168.27.182:1234".into(),
-            model: "ministral-3-3b".into(),
-            tier: ModelTier::Fast,
-            api_key: None,
-            max_concurrent: 2, // Smaller model, can do more
-            cost_per_1k_tokens: 0.0,
-        }
-    }
-
-    pub fn bedroom_vision() -> Self {
-        Self {
-            name: "bedroom-vision".into(),
-            endpoint: "http://192.168.27.182:1234".into(),
-            model: "ministral-3-3b".into(),
-            tier: ModelTier::Vision,
-            api_key: None,
-            max_concurrent: 1,
-            cost_per_1k_tokens: 0.0,
-        }
-    }
-
-    pub fn anthropic_sonnet() -> Self {
-        Self {
-            name: "anthropic-sonnet".into(),
-            endpoint: "https://api.anthropic.com".into(),
-            model: "claude-sonnet-4-5-20250514".into(),
-            tier: ModelTier::Cloud,
-            api_key: std::env::var("ANTHROPIC_API_KEY").ok(),
-            max_concurrent: 5,
-            cost_per_1k_tokens: 0.003, // $3/million input
-        }
-    }
-
-    pub fn anthropic_opus() -> Self {
-        Self {
-            name: "anthropic-opus".into(),
-            endpoint: "https://api.anthropic.com".into(),
-            model: "claude-opus-4-20250514".into(),
-            tier: ModelTier::Premium,
-            api_key: std::env::var("ANTHROPIC_API_KEY").ok(),
-            max_concurrent: 3,
-            cost_per_1k_tokens: 0.015, // $15/million input
-        }
-    }
-
-    pub fn openai_gpt4o() -> Self {
-        Self {
-            name: "openai-gpt4o".into(),
-            endpoint: "https://api.openai.com".into(),
-            model: "gpt-4o".into(),
-            tier: ModelTier::Cloud,
-            api_key: std::env::var("OPENAI_API_KEY").ok(),
-            max_concurrent: 5,
-            cost_per_1k_tokens: 0.005,
-        }
-    }
-
-    pub fn gemini_pro() -> Self {
-        Self {
-            name: "gemini-pro".into(),
-            endpoint: "https://generativelanguage.googleapis.com".into(),
-            model: "gemini-2.0-flash".into(),
-            tier: ModelTier::Cloud,
-            api_key: std::env::var("GOOGLE_API_KEY").ok(),
-            max_concurrent: 5,
-            cost_per_1k_tokens: 0.00035,
-        }
-    }
-}
+use crate::core::config::{ModelTier, ProviderConfig, ConfigManager};
 
 /// Task for a Mini-Me agent
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -271,16 +159,10 @@ impl Orchestrator {
     pub fn new() -> Self {
         let (tx, rx) = mpsc::channel(100);
 
-        // Default providers - local first
-        let providers = vec![
-            ProviderConfig::lm_studio_beast(),
-            ProviderConfig::lm_studio_bedroom(),
-            ProviderConfig::bedroom_vision(),
-            ProviderConfig::anthropic_sonnet(),
-            ProviderConfig::anthropic_opus(),
-            ProviderConfig::openai_gpt4o(),
-            ProviderConfig::gemini_pro(),
-        ];
+        // Load providers from config
+        let config_manager = ConfigManager::new();
+        let config = config_manager.load();
+        let providers = config.providers;
 
         // Create semaphores for rate limiting
         let mut semaphores = HashMap::new();

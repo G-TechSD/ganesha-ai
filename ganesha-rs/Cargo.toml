@@ -63,6 +63,8 @@ chrono = { version = "0.4", features = ["serde"] }
 directories = "5.0"             # Cross-platform config dirs
 dirs = "5.0"                    # Simple home_dir helper
 toml = "0.8"
+oauth2 = "4.4"                  # Standard OAuth2 implementation
+keyring = "2.3"                 # Secure token storage
 
 # File utilities
 glob = "0.3"                    # Glob pattern matching

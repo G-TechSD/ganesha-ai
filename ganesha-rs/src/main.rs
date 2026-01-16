@@ -20,6 +20,7 @@ mod pretty;
 mod providers;
 mod orchestrator;
 mod tui;
+mod voice;
 mod websearch;
 mod workflow;
 
@@ -162,6 +163,17 @@ enum Commands {
         #[command(subcommand)]
         action: ConfigAction,
     },
+    /// Log in to cloud providers
+    Login {
+        /// Provider to log in to (google, anthropic, openai)
+        provider: String,
+    },
+    /// Voice interaction (real-time audio)
+    Voice {
+        /// Action (enable, disable, status, listen)
+        #[arg(default_value = "status")]
+        action: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -226,6 +238,14 @@ async fn main() {
         match cmd {
             Commands::Config { action } => {
                 handle_config(action);
+                return;
+            }
+            Commands::Login { provider } => {
+                handle_login(&provider).await;
+                return;
+            }
+            Commands::Voice { action } => {
+                handle_voice(&action).await;
                 return;
             }
         }
@@ -2464,6 +2484,116 @@ fn handle_config(action: ConfigAction) {
                 println!("{}", console::style("✗ DENIED").red().bold());
             }
             println!("Reason: {}", result.reason);
+        }
+    }
+}
+
+/// Handle login command
+async fn handle_login(provider: &str) {
+    use core::auth::AuthManager;
+    use core::config::ProviderType;
+
+    let provider_type = match provider.to_lowercase().as_str() {
+        "google" => ProviderType::Google,
+        "anthropic" => ProviderType::Anthropic,
+        "openai" => ProviderType::OpenAI,
+        _ => {
+            print_error(&format!("Unsupported provider: {}", provider));
+            println!("Supported providers: google, anthropic, openai");
+            return;
+        }
+    };
+
+    println!("{}", style(format!("Logging in to {}...", provider)).cyan().bold());
+
+    let auth_manager = AuthManager::new();
+    match auth_manager.login(provider_type).await {
+        Ok(_) => {
+            print_success(&format!("Successfully logged in to {}!", provider));
+            println!("{}", style("Token stored securely in system keyring.").dim());
+        }
+        Err(e) => {
+            print_error(&format!("Login failed: {}", e));
+        }
+    }
+}
+
+/// Handle voice command
+async fn handle_voice(action: &str) {
+    #[cfg(not(feature = "voice"))]
+    {
+        print_error("Voice feature not compiled.");
+        println!("Reinstall with: ./install.sh --voice");
+        return;
+    }
+
+    #[cfg(feature = "voice")]
+    {
+        use voice::{VoiceController, AudioConfig};
+        use std::sync::Arc;
+        
+        let controller = Arc::new(VoiceController::new(AudioConfig::default()));
+        
+        match action {
+            "status" => {
+                let status = controller.status();
+                println!("Voice Status:");
+                println!("  Enabled: {}", status.enabled);
+                println!("  State: {:?}", status.state);
+                println!("  Input: {:?}", status.input_device);
+                println!("  Output: {:?}", status.output_device);
+            }
+            "enable" => {
+                if let Err(e) = controller.enable() {
+                    print_error(&format!("Failed to enable voice: {}", e));
+                } else {
+                    print_success("Voice enabled");
+                }
+            }
+            "disable" => {
+                controller.disable();
+                print_success("Voice disabled");
+            }
+            "listen" => {
+                 // Initialize Engine components
+                 let policy = core::access_control::load_policy();
+                 let chain = providers::ProviderChain::default_chain();
+                 // Use CliConsent for now
+                 let engine = core::GaneshaEngine::new(chain, cli::CliConsent::new(), policy);
+                 
+                 // Enable voice
+                 if let Err(e) = controller.enable() {
+                      print_error(&format!("Failed to enable voice: {}", e));
+                      return;
+                 }
+                 println!("Voice enabled. Starting TUI...");
+
+                 // Setup Poller for visualizer
+                 let controller_clone = controller.clone();
+                 let poller = Box::new(move || {
+                     controller_clone.get_current_rms()
+                 });
+                 
+                 // Setup Input Processor
+                 let engine = Arc::new(tokio::sync::Mutex::new(engine));
+                 
+                 let process_input = Box::new(move |input: String| -> std::pin::Pin<Box<dyn std::future::Future<Output = String> + Send>> {
+                     let engine = engine.clone();
+                     Box::pin(async move {
+                         let mut engine_lock = engine.lock().await;
+                         // Call existing task runner
+                         run_task_with_log(&mut *engine_lock, &input, false, None, false).await
+                     })
+                 });
+                 
+                 if let Err(e) = tui::run_tui(process_input, Some(poller)).await {
+                     print_error(&format!("TUI Error: {}", e));
+                 }
+            }
+            _ => {
+                print_error(&format!("Unknown action: {}", action));
+                println!("Available actions: status, enable, disable, listen");
+            }
         }
     }
 }

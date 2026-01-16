@@ -19,329 +19,39 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 
-/// Provider types
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum ProviderType {
-    LmStudio,
-    Ollama,
-    OpenAI,
-    Anthropic,
-    Google,
-    Azure,
-    OpenRouter,  // Aggregator - access to many models
-    Custom,
-}
+use crate::core::config::{
+    ModelTier, ProviderType, AuthMethod, TierMapping, TierConfig, GaneshaConfig,
+    ProviderEndpoint, SlashCommand, parse_slash_command, OAuth2Config, ConfigManager,
+    TokenResponse, ModelInfo,
+};
 
-/// Authentication method
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum AuthMethod {
-    None,
-    ApiKey(String),
-    OAuth2 {
-        access_token: String,
-        refresh_token: Option<String>,
-        expires_at: Option<u64>,
-    },
-    Bearer(String),
-}
-
-/// Model information
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModelInfo {
-    pub id: String,
-    pub name: String,
-    pub provider: ProviderType,
-    pub context_window: u32,
-    pub max_output: u32,
-    pub supports_vision: bool,
-    pub supports_tools: bool,
-    pub input_cost_per_1m: f64,
-    pub output_cost_per_1m: f64,
-    pub tier: ModelTier,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ModelTier {
-    Fast,       // Quick responses, lower capability
-    Standard,   // Good balance
-    Capable,    // High capability
-    Vision,     // Optimized for vision
-    Premium,    // Best available
-}
-
-/// Provider configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProviderEndpoint {
-    pub provider_type: ProviderType,
-    pub name: String,
-    pub base_url: String,
-    pub auth: AuthMethod,
-    pub default_model: String,
-    pub enabled: bool,
-    pub priority: u32,
-}
-
-/// User-configurable tier mapping
-/// Users can have as many tiers as they want: /1:, /2:, /3:, etc.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TierConfig {
-    /// Maps tier number to endpoint name and model
-    /// e.g., 1 -> ("openrouter", "anthropic/claude-sonnet-4")
-    pub tiers: HashMap<u32, TierMapping>,
-    /// Special vision tier for /vision: commands
-    pub vision: Option<TierMapping>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TierMapping {
-    pub endpoint: String,
-    pub model: String,
-    pub description: String,
-}
-
-impl Default for TierConfig {
-    fn default() -> Self {
-        let mut tiers = HashMap::new();
-
-        // Default tier 1: fast/cheap
-        tiers.insert(1, TierMapping {
-            endpoint: "openrouter".into(),
-            model: "anthropic/claude-haiku-3-5".into(),
-            description: "Fast & cheap (Haiku)".into(),
-        });
-
-        // Default tier 2: balanced
-        tiers.insert(2, TierMapping {
-            endpoint: "openrouter".into(),
-            model: "anthropic/claude-sonnet-4".into(),
-            description: "Balanced (Sonnet)".into(),
-        });
-
-        // Default tier 3: premium
-        tiers.insert(3, TierMapping {
-            endpoint: "openrouter".into(),
-            model: "anthropic/claude-opus-4".into(),
-            description: "Premium (Opus)".into(),
-        });
-
-        Self {
-            tiers,
-            vision: Some(TierMapping {
-                endpoint: "openrouter".into(),
-                model: "anthropic/claude-sonnet-4".into(),
-                description: "Vision model".into(),
-            }),
-        }
-    }
-}
-
-impl TierConfig {
-    /// Get tier mapping for a number
-    pub fn get(&self, tier: u32) -> Option<&TierMapping> {
-        self.tiers.get(&tier)
-    }
-
-    /// Set a tier mapping
-    pub fn set(&mut self, tier: u32, endpoint: &str, model: &str, description: &str) {
-        self.tiers.insert(tier, TierMapping {
-            endpoint: endpoint.into(),
-            model: model.into(),
-            description: description.into(),
-        });
-    }
-
-    /// Remove a tier
-    pub fn remove(&mut self, tier: u32) -> Option<TierMapping> {
-        self.tiers.remove(&tier)
-    }
-
-    /// Get all tier numbers sorted
-    pub fn tier_numbers(&self) -> Vec<u32> {
-        let mut nums: Vec<_> = self.tiers.keys().copied().collect();
-        nums.sort();
-        nums
-    }
-
-    /// Generate system prompt explaining available tiers to the model
-    pub fn system_prompt_section(&self) -> String {
-        let mut prompt = String::from(
-            "\n## Mini-Me Sub-Agents\n\
-            You can spawn sub-agent Mini-Me's to handle subtasks. Use these commands:\n\n"
-        );
-
-        for tier in self.tier_numbers() {
-            if let Some(mapping) = self.tiers.get(&tier) {
-                prompt.push_str(&format!(
-                    "- `/{}: <task>` - {} ({})\n",
-                    tier, mapping.description, mapping.model
-                ));
-            }
-        }
-
-        if let Some(vision) = &self.vision {
-            prompt.push_str(&format!(
-                "- `/vision: <task>` - {} ({})\n",
-                vision.description, vision.model
-            ));
-        }
-
-        prompt.push_str(
-            "\nUse lower tiers for simple tasks (search, summarize) and higher tiers for complex reasoning.\n\
-            Mini-Me agents receive focused context and return summaries, not full transcripts.\n"
-        );
-
-        prompt
-    }
-}
-
-/// Parse a slash command from user input
-/// Returns (tier_or_vision, remaining_prompt) or None if not a slash command
-pub fn parse_slash_command(input: &str) -> Option<(SlashCommand, String)> {
-    let input = input.trim();
-
-    if !input.starts_with('/') {
-        return None;
-    }
-
-    // Find the colon
-    let colon_pos = input.find(':')?;
-    let command = &input[1..colon_pos].trim();
-    let prompt = input[colon_pos + 1..].trim().to_string();
-
-    if prompt.is_empty() {
-        return None;
-    }
-
-    if command.eq_ignore_ascii_case("vision") {
-        Some((SlashCommand::Vision, prompt))
-    } else if let Ok(tier) = command.parse::<u32>() {
-        Some((SlashCommand::Tier(tier), prompt))
-    } else {
-        None
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum SlashCommand {
-    Tier(u32),
-    Vision,
-}
-
-/// OAuth2 configuration for each provider
-#[derive(Debug, Clone)]
-pub struct OAuth2Config {
-    pub client_id: String,
-    pub client_secret: Option<String>,
-    pub auth_url: String,
-    pub token_url: String,
-    pub scopes: Vec<String>,
-    pub redirect_uri: String,
-}
-
-impl OAuth2Config {
-    pub fn openai() -> Self {
-        Self {
-            client_id: std::env::var("OPENAI_CLIENT_ID")
-                .unwrap_or_else(|_| "ganesha-cli".into()),
-            client_secret: std::env::var("OPENAI_CLIENT_SECRET").ok(),
-            auth_url: "https://auth.openai.com/authorize".into(),
-            token_url: "https://auth.openai.com/oauth/token".into(),
-            scopes: vec!["openai.chat".into(), "openai.models.read".into()],
-            redirect_uri: "http://localhost:8420/oauth/callback".into(),
-        }
-    }
-
-    pub fn google() -> Self {
-        Self {
-            client_id: std::env::var("GOOGLE_CLIENT_ID")
-                .unwrap_or_else(|_| "ganesha-cli".into()),
-            client_secret: std::env::var("GOOGLE_CLIENT_SECRET").ok(),
-            auth_url: "https://accounts.google.com/o/oauth2/v2/auth".into(),
-            token_url: "https://oauth2.googleapis.com/token".into(),
-            scopes: vec![
-                "https://www.googleapis.com/auth/generative-language".into(),
-            ],
-            redirect_uri: "http://localhost:8420/oauth/callback".into(),
-        }
-    }
-
-    pub fn anthropic() -> Self {
-        Self {
-            client_id: std::env::var("ANTHROPIC_CLIENT_ID")
-                .unwrap_or_else(|_| "ganesha-cli".into()),
-            client_secret: std::env::var("ANTHROPIC_CLIENT_SECRET").ok(),
-            auth_url: "https://console.anthropic.com/oauth/authorize".into(),
-            token_url: "https://api.anthropic.com/oauth/token".into(),
-            scopes: vec!["messages:write".into(), "models:read".into()],
-            redirect_uri: "http://localhost:8420/oauth/callback".into(),
-        }
-    }
-}
-
-/// Full Ganesha configuration (providers + tiers)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GaneshaConfig {
-    pub endpoints: HashMap<String, ProviderEndpoint>,
-    pub tiers: TierConfig,
-    #[serde(default)]
-    pub setup_complete: bool,
-}
-
-impl Default for GaneshaConfig {
-    fn default() -> Self {
-        Self {
-            endpoints: HashMap::new(),
-            tiers: TierConfig::default(),
-            setup_complete: false,
-        }
-    }
-}
-
-/// The unified provider manager
 pub struct ProviderManager {
     pub endpoints: HashMap<String, ProviderEndpoint>,
     pub tiers: TierConfig,
     models_cache: Arc<RwLock<HashMap<ProviderType, Vec<ModelInfo>>>>,
     cache_expiry: Arc<RwLock<HashMap<ProviderType, Instant>>>,
-    config_path: PathBuf,
+    config_manager: ConfigManager,
     setup_complete: bool,
     client: reqwest::Client,
 }
 
 impl ProviderManager {
     pub fn new() -> Self {
-        let config_path = Self::get_config_path();
-        let (endpoints, tiers, setup_complete) = Self::load_config(&config_path);
+        let config_manager = ConfigManager::new();
+        let config = config_manager.load();
 
         Self {
-            endpoints,
-            tiers,
+            endpoints: config.endpoints,
+            tiers: config.tiers,
             models_cache: Arc::new(RwLock::new(HashMap::new())),
             cache_expiry: Arc::new(RwLock::new(HashMap::new())),
-            config_path,
-            setup_complete,
+            config_manager,
+            setup_complete: config.setup_complete,
             client: reqwest::Client::builder()
                 .timeout(Duration::from_secs(30))
                 .build()
                 .unwrap(),
         }
-    }
-
-    fn get_config_path() -> PathBuf {
-        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-        home.join(".ganesha").join("config.json")
-    }
-
-    fn load_config(path: &PathBuf) -> (HashMap<String, ProviderEndpoint>, TierConfig, bool) {
-        if path.exists() {
-            if let Ok(content) = fs::read_to_string(path) {
-                if let Ok(config) = serde_json::from_str::<GaneshaConfig>(&content) {
-                    return (config.endpoints, config.tiers, config.setup_complete);
-                }
-            }
-        }
-        // Return defaults but mark setup as incomplete
-        (Self::default_endpoints(), TierConfig::default(), false)
     }
 
     /// Get tier configuration for system prompt
@@ -1174,18 +884,12 @@ impl ProviderManager {
 
     /// Save current configuration
     pub fn save(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        if let Some(parent) = self.config_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
+        let mut config = self.config_manager.load();
+        config.endpoints = self.endpoints.clone();
+        config.tiers = self.tiers.clone();
+        config.setup_complete = self.setup_complete;
 
-        let config = GaneshaConfig {
-            endpoints: self.endpoints.clone(),
-            tiers: self.tiers.clone(),
-            setup_complete: self.setup_complete,
-        };
-
-        let content = serde_json::to_string_pretty(&config)?;
-        fs::write(&self.config_path, content)?;
+        self.config_manager.save(&config)?;
         Ok(())
     }
 
@@ -2037,12 +1741,7 @@ impl Default for ProviderManager {
     }
 }
 
-#[derive(Debug)]
-struct TokenResponse {
-    access_token: String,
-    refresh_token: Option<String>,
-    expires_at: Option<u64>,
-}
+
 
 #[cfg(test)]
 mod tests {
