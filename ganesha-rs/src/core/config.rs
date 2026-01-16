@@ -87,8 +87,41 @@ pub struct TierMapping {
     pub description: String,
 }
 
+// Custom serialization for HashMap<u32, TierMapping> to make TOML happy
+mod tier_map_serde {
+    use super::TierMapping;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::HashMap;
+
+    pub fn serialize<S>(map: &HashMap<u32, TierMapping>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let string_map: HashMap<String, &TierMapping> = map
+            .iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect();
+        string_map.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<HashMap<u32, TierMapping>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let string_map: HashMap<String, TierMapping> = HashMap::deserialize(deserializer)?;
+        let mut result = HashMap::new();
+        for (k, v) in string_map {
+            if let Ok(num) = k.parse::<u32>() {
+                result.insert(num, v);
+            }
+        }
+        Ok(result)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TierConfig {
+    #[serde(with = "tier_map_serde")]
     pub tiers: HashMap<u32, TierMapping>,
     pub vision: Option<TierMapping>,
 }
