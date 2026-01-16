@@ -10,6 +10,7 @@
 
 use console::{style, Term, Key};
 use std::io::{self, Write};
+use std::sync::{Mutex, OnceLock};
 
 /// Menu option with label and optional description
 #[derive(Clone)]
@@ -517,27 +518,40 @@ pub struct ProviderConnection {
     pub enabled: bool,
 }
 
-/// Store for configured providers
-static mut CONFIGURED_PROVIDERS: Vec<ProviderConnection> = Vec::new();
-static mut PROVIDER_PRIORITY: Vec<String> = Vec::new();
+/// Store for configured providers - thread-safe with Mutex
+static CONFIGURED_PROVIDERS: OnceLock<Mutex<Vec<ProviderConnection>>> = OnceLock::new();
+static PROVIDER_PRIORITY: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
 
 /// Get all configured providers
 pub fn get_providers() -> Vec<ProviderConnection> {
-    unsafe { CONFIGURED_PROVIDERS.clone() }
+    CONFIGURED_PROVIDERS
+        .get_or_init(|| Mutex::new(Vec::new()))
+        .lock()
+        .expect("Provider lock poisoned")
+        .clone()
 }
 
 /// Get provider priority order
 pub fn get_priority() -> Vec<String> {
-    unsafe { PROVIDER_PRIORITY.clone() }
+    PROVIDER_PRIORITY
+        .get_or_init(|| Mutex::new(Vec::new()))
+        .lock()
+        .expect("Priority lock poisoned")
+        .clone()
 }
 
 /// Initialize providers from environment - call at menu startup to sync with actual providers
 pub fn init_providers_from_env() {
-    unsafe {
-        // Only init if empty - don't overwrite user additions during session
-        if !CONFIGURED_PROVIDERS.is_empty() {
+    // Only init if empty - don't overwrite user additions during session
+    {
+        let providers = CONFIGURED_PROVIDERS
+            .get_or_init(|| Mutex::new(Vec::new()))
+            .lock()
+            .expect("Provider lock poisoned");
+        if !providers.is_empty() {
             return;
         }
+    } // Release lock before doing network checks
 
         // Check for LM Studio servers
         // Note: For network servers, use the /settings menu to add custom endpoints
@@ -557,15 +571,23 @@ pub fn init_providers_from_env() {
                 .unwrap_or(false);
 
             if is_online {
-                CONFIGURED_PROVIDERS.push(ProviderConnection {
-                    name: name.to_string(),
-                    provider_type: "lmstudio".to_string(),
-                    endpoint: endpoint.to_string(),
-                    api_key: None,
-                    model: "default".to_string(),
-                    enabled: true,
-                });
-                PROVIDER_PRIORITY.push(name.to_string());
+                CONFIGURED_PROVIDERS
+                    .get_or_init(|| Mutex::new(Vec::new()))
+                    .lock()
+                    .expect("Provider lock poisoned")
+                    .push(ProviderConnection {
+                        name: name.to_string(),
+                        provider_type: "lmstudio".to_string(),
+                        endpoint: endpoint.to_string(),
+                        api_key: None,
+                        model: "default".to_string(),
+                        enabled: true,
+                    });
+                PROVIDER_PRIORITY
+                    .get_or_init(|| Mutex::new(Vec::new()))
+                    .lock()
+                    .expect("Priority lock poisoned")
+                    .push(name.to_string());
             }
         }
 
@@ -578,42 +600,65 @@ pub fn init_providers_from_env() {
             .map(|r| r.status().is_success())
             .unwrap_or(false)
         {
-            CONFIGURED_PROVIDERS.push(ProviderConnection {
-                name: "ollama".to_string(),
-                provider_type: "ollama".to_string(),
-                endpoint: "http://localhost:11434".to_string(),
-                api_key: None,
-                model: "default".to_string(),
-                enabled: true,
-            });
-            PROVIDER_PRIORITY.push("ollama".to_string());
+            CONFIGURED_PROVIDERS
+                .get_or_init(|| Mutex::new(Vec::new()))
+                .lock()
+                .expect("Provider lock poisoned")
+                .push(ProviderConnection {
+                    name: "ollama".to_string(),
+                    provider_type: "ollama".to_string(),
+                    endpoint: "http://localhost:11434".to_string(),
+                    api_key: None,
+                    model: "default".to_string(),
+                    enabled: true,
+                });
+            PROVIDER_PRIORITY
+                .get_or_init(|| Mutex::new(Vec::new()))
+                .lock()
+                .expect("Priority lock poisoned")
+                .push("ollama".to_string());
         }
 
         // Check for cloud providers via env vars
         if std::env::var("ANTHROPIC_API_KEY").is_ok() {
-            CONFIGURED_PROVIDERS.push(ProviderConnection {
-                name: "anthropic".to_string(),
-                provider_type: "anthropic".to_string(),
-                endpoint: "https://api.anthropic.com".to_string(),
-                api_key: Some("(from env)".to_string()),
-                model: "claude-sonnet-4-5-20250514".to_string(),
-                enabled: true,
-            });
-            PROVIDER_PRIORITY.push("anthropic".to_string());
+            CONFIGURED_PROVIDERS
+                .get_or_init(|| Mutex::new(Vec::new()))
+                .lock()
+                .expect("Provider lock poisoned")
+                .push(ProviderConnection {
+                    name: "anthropic".to_string(),
+                    provider_type: "anthropic".to_string(),
+                    endpoint: "https://api.anthropic.com".to_string(),
+                    api_key: Some("(from env)".to_string()),
+                    model: "claude-sonnet-4-5-20250514".to_string(),
+                    enabled: true,
+                });
+            PROVIDER_PRIORITY
+                .get_or_init(|| Mutex::new(Vec::new()))
+                .lock()
+                .expect("Priority lock poisoned")
+                .push("anthropic".to_string());
         }
 
         if std::env::var("OPENAI_API_KEY").is_ok() {
-            CONFIGURED_PROVIDERS.push(ProviderConnection {
-                name: "openai".to_string(),
-                provider_type: "openai".to_string(),
-                endpoint: "https://api.openai.com".to_string(),
-                api_key: Some("(from env)".to_string()),
-                model: "gpt-4o".to_string(),
-                enabled: true,
-            });
-            PROVIDER_PRIORITY.push("openai".to_string());
+            CONFIGURED_PROVIDERS
+                .get_or_init(|| Mutex::new(Vec::new()))
+                .lock()
+                .expect("Provider lock poisoned")
+                .push(ProviderConnection {
+                    name: "openai".to_string(),
+                    provider_type: "openai".to_string(),
+                    endpoint: "https://api.openai.com".to_string(),
+                    api_key: Some("(from env)".to_string()),
+                    model: "gpt-4o".to_string(),
+                    enabled: true,
+                });
+            PROVIDER_PRIORITY
+                .get_or_init(|| Mutex::new(Vec::new()))
+                .lock()
+                .expect("Priority lock poisoned")
+                .push("openai".to_string());
         }
-    }
 }
 
 /// Providers & Connections menu - manage local and cloud connections
@@ -670,11 +715,17 @@ pub fn show_connections_menu() {
                                     if let Ok(num) = input.parse::<usize>() {
                                         if num >= 1 && num <= providers.len() {
                                             let removed = providers[num - 1].name.clone();
-                                            unsafe {
-                                                CONFIGURED_PROVIDERS.remove(num - 1);
-                                                // Also remove from priority list if present
-                                                PROVIDER_PRIORITY.retain(|p| p != &removed);
-                                            }
+                                            CONFIGURED_PROVIDERS
+                                                .get_or_init(|| Mutex::new(Vec::new()))
+                                                .lock()
+                                                .expect("Provider lock poisoned")
+                                                .remove(num - 1);
+                                            // Also remove from priority list if present
+                                            PROVIDER_PRIORITY
+                                                .get_or_init(|| Mutex::new(Vec::new()))
+                                                .lock()
+                                                .expect("Priority lock poisoned")
+                                                .retain(|p| p != &removed);
                                             println!("{} Removed provider: {}", style("✓").green(), removed);
                                         } else {
                                             println!("{} Invalid number. Must be 1-{}", style("✗").red(), providers.len());
@@ -834,10 +885,16 @@ fn add_local_provider() {
         enabled: true,
     };
 
-    unsafe {
-        CONFIGURED_PROVIDERS.push(connection);
-        PROVIDER_PRIORITY.push(name.clone());
-    }
+    CONFIGURED_PROVIDERS
+        .get_or_init(|| Mutex::new(Vec::new()))
+        .lock()
+        .expect("Provider lock poisoned")
+        .push(connection);
+    PROVIDER_PRIORITY
+        .get_or_init(|| Mutex::new(Vec::new()))
+        .lock()
+        .expect("Priority lock poisoned")
+        .push(name.clone());
 
     println!("\n{} Local server '{}' added", style("✓").green(), name);
     println!("{}", style("Press Enter to continue...").dim());
@@ -919,10 +976,16 @@ fn add_cloud_provider() {
         enabled: true,
     };
 
-    unsafe {
-        CONFIGURED_PROVIDERS.push(connection);
-        PROVIDER_PRIORITY.push(name.clone());
-    }
+    CONFIGURED_PROVIDERS
+        .get_or_init(|| Mutex::new(Vec::new()))
+        .lock()
+        .expect("Provider lock poisoned")
+        .push(connection);
+    PROVIDER_PRIORITY
+        .get_or_init(|| Mutex::new(Vec::new()))
+        .lock()
+        .expect("Priority lock poisoned")
+        .push(name.clone());
 
     println!("\n{} Cloud provider '{}' added", style("✓").green(), name);
     println!("{}", style("Press Enter to continue...").dim());
@@ -940,7 +1003,11 @@ pub fn show_priority_menu() {
             for provider in &providers {
                 if !priority.contains(&provider.name) {
                     priority.push(provider.name.clone());
-                    unsafe { PROVIDER_PRIORITY.push(provider.name.clone()); }
+                    PROVIDER_PRIORITY
+                        .get_or_init(|| Mutex::new(Vec::new()))
+                        .lock()
+                        .expect("Priority lock poisoned")
+                        .push(provider.name.clone());
                 }
             }
         }
@@ -986,28 +1053,30 @@ pub fn show_priority_menu() {
                 if let Ok(num) = input.trim().parse::<usize>() {
                     if num > 0 && num <= priority.len() {
                         let idx = num - 1;
-                        unsafe {
-                            match v.as_str() {
-                                "up" if idx > 0 => {
-                                    PROVIDER_PRIORITY.swap(idx, idx - 1);
-                                    println!("{} Moved up", style("✓").green());
-                                }
-                                "down" if idx < PROVIDER_PRIORITY.len() - 1 => {
-                                    PROVIDER_PRIORITY.swap(idx, idx + 1);
-                                    println!("{} Moved down", style("✓").green());
-                                }
-                                "top" => {
-                                    let item = PROVIDER_PRIORITY.remove(idx);
-                                    PROVIDER_PRIORITY.insert(0, item);
-                                    println!("{} Moved to top", style("✓").green());
-                                }
-                                "bottom" => {
-                                    let item = PROVIDER_PRIORITY.remove(idx);
-                                    PROVIDER_PRIORITY.push(item);
-                                    println!("{} Moved to bottom", style("✓").green());
-                                }
-                                _ => println!("{} Cannot move further", style("⚠").yellow()),
+                        let mut priority_list = PROVIDER_PRIORITY
+                            .get_or_init(|| Mutex::new(Vec::new()))
+                            .lock()
+                            .expect("Priority lock poisoned");
+                        match v.as_str() {
+                            "up" if idx > 0 => {
+                                priority_list.swap(idx, idx - 1);
+                                println!("{} Moved up", style("✓").green());
                             }
+                            "down" if idx < priority_list.len() - 1 => {
+                                priority_list.swap(idx, idx + 1);
+                                println!("{} Moved down", style("✓").green());
+                            }
+                            "top" => {
+                                let item = priority_list.remove(idx);
+                                priority_list.insert(0, item);
+                                println!("{} Moved to top", style("✓").green());
+                            }
+                            "bottom" => {
+                                let item = priority_list.remove(idx);
+                                priority_list.push(item);
+                                println!("{} Moved to bottom", style("✓").green());
+                            }
+                            _ => println!("{} Cannot move further", style("⚠").yellow()),
                         }
                     }
                 }
@@ -1033,7 +1102,7 @@ pub struct ProviderSettings {
 }
 
 /// Secondary local server configuration (for vision, etc.)
-static mut SECONDARY_SERVER: Option<SecondaryServer> = None;
+static SECONDARY_SERVER: OnceLock<Mutex<Option<SecondaryServer>>> = OnceLock::new();
 
 #[derive(Clone)]
 pub struct SecondaryServer {
@@ -1044,7 +1113,11 @@ pub struct SecondaryServer {
 
 /// Get configured secondary server
 pub fn get_secondary_server() -> Option<SecondaryServer> {
-    unsafe { SECONDARY_SERVER.clone() }
+    SECONDARY_SERVER
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .expect("Secondary server lock poisoned")
+        .clone()
 }
 
 /// Configure secondary local server
@@ -1068,9 +1141,10 @@ pub fn show_secondary_server_settings() -> Option<SecondaryServer> {
     };
 
     // Store it
-    unsafe {
-        SECONDARY_SERVER = Some(server.clone());
-    }
+    *SECONDARY_SERVER
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .expect("Secondary server lock poisoned") = Some(server.clone());
 
     println!("\n{} Secondary server configured: {}", style("✓").green(), server.url);
 
@@ -1159,9 +1233,10 @@ pub fn show_vision_settings() -> Option<VisionSettings> {
                 has_vision: true,
             };
             // Also store it as secondary server for future reference
-            unsafe {
-                SECONDARY_SERVER = Some(server.clone());
-            }
+            *SECONDARY_SERVER
+                .get_or_init(|| Mutex::new(None))
+                .lock()
+                .expect("Secondary server lock poisoned") = Some(server.clone());
             return Some(VisionSettings {
                 enabled: true,
                 source: VisionSource::SecondaryLocal,
@@ -1555,12 +1630,14 @@ pub fn show_models_menu() {
             println!("{}", style("Model selection saved for this session.").dim());
 
             // Store the selection (update the provider's model)
-            unsafe {
-                for p in CONFIGURED_PROVIDERS.iter_mut() {
-                    if &p.name == provider {
-                        p.model = model_id.clone();
-                        break;
-                    }
+            let mut providers = CONFIGURED_PROVIDERS
+                .get_or_init(|| Mutex::new(Vec::new()))
+                .lock()
+                .expect("Provider lock poisoned");
+            for p in providers.iter_mut() {
+                if &p.name == provider {
+                    p.model = model_id.clone();
+                    break;
                 }
             }
         } else {
