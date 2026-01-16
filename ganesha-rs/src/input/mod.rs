@@ -122,10 +122,10 @@ impl InputController {
             let settings = Settings::default();
             let enigo = Enigo::new(&settings).map_err(|e| InputError::InitError(e.to_string()))?;
 
-            *self.enigo.lock().unwrap() = Some(enigo);
+            *self.enigo.lock().expect("Enigo lock poisoned - unable to initialize input controller") = Some(enigo);
             INPUT_ENABLED.store(true, Ordering::SeqCst);
             self.enabled.store(true, Ordering::SeqCst);
-            *self.last_activity.lock().unwrap() = Instant::now();
+            *self.last_activity.lock().expect("Last activity lock poisoned - unable to update timestamp") = Instant::now();
             Ok(())
         }
     }
@@ -136,7 +136,7 @@ impl InputController {
         self.enabled.store(false, Ordering::SeqCst);
         #[cfg(feature = "input")]
         {
-            *self.enigo.lock().unwrap() = None;
+            *self.enigo.lock().expect("Enigo lock poisoned - unable to disable input controller") = None;
         }
     }
 
@@ -162,13 +162,13 @@ impl InputController {
 
     /// Check if inactive timeout has expired
     fn is_inactive_timeout(&self) -> bool {
-        let last = self.last_activity.lock().unwrap();
+        let last = self.last_activity.lock().expect("Last activity lock poisoned - unable to check timeout");
         last.elapsed() > self.inactivity_timeout
     }
 
     /// Update activity timestamp
     fn touch(&self) {
-        *self.last_activity.lock().unwrap() = Instant::now();
+        *self.last_activity.lock().expect("Last activity lock poisoned - unable to update activity timestamp") = Instant::now();
     }
 
     /// Check rate limit
@@ -226,7 +226,7 @@ impl InputController {
     pub fn mouse_move(&self, x: i32, y: i32) -> Result<(), InputError> {
         self.preflight_check()?;
 
-        let mut enigo_guard = self.enigo.lock().unwrap();
+        let mut enigo_guard = self.enigo.lock().expect("Enigo lock poisoned - unable to access mouse controller");
         let enigo = enigo_guard.as_mut().ok_or(InputError::NotInitialized)?;
 
         enigo
@@ -242,7 +242,7 @@ impl InputController {
     pub fn mouse_move_relative(&self, dx: i32, dy: i32) -> Result<(), InputError> {
         self.preflight_check()?;
 
-        let mut enigo_guard = self.enigo.lock().unwrap();
+        let mut enigo_guard = self.enigo.lock().expect("Enigo lock poisoned - unable to access mouse controller");
         let enigo = enigo_guard.as_mut().ok_or(InputError::NotInitialized)?;
 
         enigo
@@ -258,7 +258,7 @@ impl InputController {
     pub fn mouse_click(&self, button: MouseButton) -> Result<(), InputError> {
         self.preflight_check()?;
 
-        let mut enigo_guard = self.enigo.lock().unwrap();
+        let mut enigo_guard = self.enigo.lock().expect("Enigo lock poisoned - unable to access mouse controller");
         let enigo = enigo_guard.as_mut().ok_or(InputError::NotInitialized)?;
 
         let btn = match button {
@@ -288,7 +288,7 @@ impl InputController {
     pub fn scroll(&self, dx: i32, dy: i32) -> Result<(), InputError> {
         self.preflight_check()?;
 
-        let mut enigo_guard = self.enigo.lock().unwrap();
+        let mut enigo_guard = self.enigo.lock().expect("Enigo lock poisoned - unable to access scroll controller");
         let enigo = enigo_guard.as_mut().ok_or(InputError::NotInitialized)?;
 
         if dx != 0 {
@@ -318,7 +318,7 @@ impl InputController {
             return Err(InputError::TextTooLong(text.len()));
         }
 
-        let mut enigo_guard = self.enigo.lock().unwrap();
+        let mut enigo_guard = self.enigo.lock().expect("Enigo lock poisoned - unable to access keyboard controller");
         let enigo = enigo_guard.as_mut().ok_or(InputError::NotInitialized)?;
 
         enigo
@@ -339,7 +339,7 @@ impl InputController {
 
         self.preflight_check()?;
 
-        let mut enigo_guard = self.enigo.lock().unwrap();
+        let mut enigo_guard = self.enigo.lock().expect("Enigo lock poisoned - unable to access keyboard controller");
         let enigo = enigo_guard.as_mut().ok_or(InputError::NotInitialized)?;
 
         let enigo_key = self.parse_key(key)?;
@@ -360,7 +360,7 @@ impl InputController {
 
         self.preflight_check()?;
 
-        let mut enigo_guard = self.enigo.lock().unwrap();
+        let mut enigo_guard = self.enigo.lock().expect("Enigo lock poisoned - unable to access keyboard controller");
         let enigo = enigo_guard.as_mut().ok_or(InputError::NotInitialized)?;
 
         let enigo_key = self.parse_key(key)?;
@@ -377,7 +377,7 @@ impl InputController {
     pub fn key_up(&self, key: &str) -> Result<(), InputError> {
         self.preflight_check()?;
 
-        let mut enigo_guard = self.enigo.lock().unwrap();
+        let mut enigo_guard = self.enigo.lock().expect("Enigo lock poisoned - unable to access keyboard controller");
         let enigo = enigo_guard.as_mut().ok_or(InputError::NotInitialized)?;
 
         let enigo_key = self.parse_key(key)?;
@@ -482,7 +482,7 @@ impl InputController {
             "space" | " " => Key::Space,
 
             // Single character
-            _ if key.len() == 1 => Key::Unicode(key.chars().next().unwrap()),
+            _ if key.len() == 1 => Key::Unicode(key.chars().next().expect("Key string unexpectedly empty despite len check")),
 
             _ => return Err(InputError::UnknownKey(key.to_string())),
         };

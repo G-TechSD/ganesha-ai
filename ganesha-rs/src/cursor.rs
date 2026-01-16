@@ -105,7 +105,7 @@ impl AiCursor {
     /// Show the AI cursor at a specific position
     pub fn show_at(&self, x: i32, y: i32) -> Result<(), String> {
         // Update last action time
-        *self.last_action.lock().unwrap() = Instant::now();
+        *self.last_action.lock().expect("Last action lock poisoned - unable to update cursor timestamp") = Instant::now();
 
         // Kill existing overlay if any
         self.hide();
@@ -146,8 +146,8 @@ impl AiCursor {
         // Alternative: use a simpler approach with notify-send or a custom script
         // For now, let's use a GTK-based approach that's more reliable
 
-        *self.overlay_process.lock().unwrap() = Some(child);
-        *self.is_visible.lock().unwrap() = true;
+        *self.overlay_process.lock().expect("Overlay process lock poisoned - unable to set cursor process") = Some(child);
+        *self.is_visible.lock().expect("Visibility lock poisoned - unable to update cursor visibility") = true;
 
         Ok(())
     }
@@ -155,7 +155,7 @@ impl AiCursor {
     /// Show cursor overlay using a simpler GTK approach
     pub fn show_cursor_overlay(&self, x: i32, y: i32) -> Result<(), String> {
         // Update last action time
-        *self.last_action.lock().unwrap() = Instant::now();
+        *self.last_action.lock().expect("Last action lock poisoned - unable to update cursor timestamp") = Instant::now();
 
         let symbol = self.get_symbol();
 
@@ -172,8 +172,8 @@ impl AiCursor {
             .spawn()
             .map_err(|e| format!("Failed to show notification: {}", e))?;
 
-        *self.overlay_process.lock().unwrap() = Some(child);
-        *self.is_visible.lock().unwrap() = true;
+        *self.overlay_process.lock().expect("Overlay process lock poisoned - unable to set cursor process") = Some(child);
+        *self.is_visible.lock().expect("Visibility lock poisoned - unable to update cursor visibility") = true;
 
         Ok(())
     }
@@ -203,17 +203,17 @@ impl AiCursor {
 
     /// Hide the AI cursor
     pub fn hide(&self) {
-        let mut proc = self.overlay_process.lock().unwrap();
+        let mut proc = self.overlay_process.lock().expect("Overlay process lock poisoned - unable to hide cursor");
         if let Some(ref mut child) = *proc {
             let _ = child.kill();
         }
         *proc = None;
-        *self.is_visible.lock().unwrap() = false;
+        *self.is_visible.lock().expect("Visibility lock poisoned - unable to update cursor visibility") = false;
     }
 
     /// Check if cursor should still be visible (within linger duration)
     pub fn should_linger(&self) -> bool {
-        let last = *self.last_action.lock().unwrap();
+        let last = *self.last_action.lock().expect("Last action lock poisoned - unable to check cursor linger");
         last.elapsed() < self.linger_duration
     }
 
@@ -232,12 +232,12 @@ impl AiCursor {
 
         std::thread::spawn(move || {
             std::thread::sleep(linger);
-            let mut proc = overlay.lock().unwrap();
+            let mut proc = overlay.lock().expect("Overlay process lock poisoned - unable to release cursor");
             if let Some(ref mut child) = *proc {
                 let _ = child.kill();
             }
             *proc = None;
-            *is_visible.lock().unwrap() = false;
+            *is_visible.lock().expect("Visibility lock poisoned - unable to update cursor visibility") = false;
         });
     }
 
@@ -250,7 +250,7 @@ impl AiCursor {
 
     /// Is the cursor currently visible?
     pub fn is_visible(&self) -> bool {
-        *self.is_visible.lock().unwrap()
+        *self.is_visible.lock().expect("Visibility lock poisoned - unable to check cursor visibility")
     }
 
     /// Create a cursor overlay using a custom X11 cursor
