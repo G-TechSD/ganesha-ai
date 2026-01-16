@@ -1,1 +1,0 @@
-# Ganesha Privileged Daemon
