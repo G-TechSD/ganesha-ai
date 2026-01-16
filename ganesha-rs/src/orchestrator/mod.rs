@@ -39,7 +39,6 @@ pub mod scheduler;
 pub mod vision;
 pub mod providers;
 
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -47,8 +46,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, RwLock, Semaphore};
 use uuid::Uuid;
 
-use crate::providers::{LlmProvider, ProviderError};
-use crate::core::config::{ModelTier, ProviderConfig, ConfigManager};
+use crate::core::config::{ProviderConfig, ConfigManager, ModelTier};
 
 /// Task for a Mini-Me agent
 #[derive(Debug, Clone, Serialize, Deserialize)]

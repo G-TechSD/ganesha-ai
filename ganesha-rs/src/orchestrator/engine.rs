@@ -9,22 +9,17 @@
 //! - Session management and rollback
 //! - MCP server integration
 
-use super::minime;
 use super::tools::{execute_tool, ToolRegistry};
-use super::wiggum::{LlmVerifier, VerificationResult, WiggumConfig, WiggumLoop};
-use super::memory::{GlobalMemory, SessionRecord, SessionOutcome, Goal, GoalStatus};
-use super::{ForkedContext, MiniMeTask, ModelTier, Orchestrator, ProviderConfig};
+use super::memory::{GlobalMemory, SessionRecord, SessionOutcome};
+use super::{Orchestrator, ProviderConfig};
 use crate::pretty;
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::HashMap;
 use std::io::{self, Write};
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::RwLock;
 use uuid::Uuid;
 
 /// Message in a conversation
