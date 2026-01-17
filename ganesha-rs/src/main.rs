@@ -291,6 +291,16 @@ async fn main() {
     // Initialize menu providers (loads from disk or auto-detects)
     menu::init_providers_from_env();
 
+    // Auto-connect installed MCP servers (playwright, memory, etc.)
+    if !args.bare {
+        use orchestrator::mcp::McpManager;
+        let mut mcp = McpManager::new();
+        let connected = mcp.auto_connect_installed();
+        if connected > 0 {
+            print_info(&format!("MCP: {} server{} connected", connected, if connected == 1 { "" } else { "s" }));
+        }
+    }
+
     // Create provider chain (TODO: migrate to ProviderManager)
     let chain = ProviderChain::default_chain();
     let available = chain.get_available();

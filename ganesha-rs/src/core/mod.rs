@@ -816,6 +816,21 @@ impl<L: LlmProvider, C: ConsentHandler> GaneshaEngine<L, C> {
             return Ok((String::new(), None));
         }
 
+        // Check if MCP/browser tools failed - we need to tell the model NOT to hallucinate
+        let mcp_failed = result_summary.contains("MCP error") ||
+                         result_summary.contains("not connected") ||
+                         result_summary.contains("MCP server") && result_summary.contains("FAILED");
+        let browser_tool_attempted = result_summary.contains("playwright") ||
+                                      result_summary.contains("browser") ||
+                                      result_summary.contains("fetch");
+        let tool_failure_warning = if mcp_failed && browser_tool_attempted {
+            "\n\n⚠️ CRITICAL: The browser/web tools FAILED. You have NO data from the website. \
+            DO NOT make up or hallucinate any content. Instead, respond that you couldn't access \
+            the website and suggest the user run '/mcp install' to set up the browser tools.\n"
+        } else {
+            ""
+        };
+
         // Check if this was a browser/MCP task - provide appropriate prompt
         let has_browser_output = result_summary.contains("Page Snapshot") ||
                                   result_summary.contains("browser_navigate") ||
@@ -829,7 +844,7 @@ impl<L: LlmProvider, C: ConsentHandler> GaneshaEngine<L, C> {
             format!(
                 r#"You are Ganesha. Current date: {}.
 User question: "{}"
-
+{}
 Page data:
 {}
 
@@ -849,12 +864,12 @@ GOOD (unique only): "- 2026 RAV4\n- 2026 RAV4 Hybrid"
 
 BAD (cut off): "- 2026 RAV4 (listed again in the"
 GOOD (complete): "- 2026 RAV4""#,
-                date_str, task, result_summary
+                date_str, task, tool_failure_warning, result_summary
             )
         } else {
             format!(
                 r#"You are Ganesha, an autonomous AI assistant. The user asked: "{}"
-
+{}
 Commands executed:
 {}
 
@@ -891,7 +906,7 @@ QUICK FIX PATTERNS:
 REMOTE SYSTEMS - YOU CAN SSH:
 If working on remote systems, use: sshpass -p 'password' ssh -o StrictHostKeyChecking=no user@host 'command'
 DO NOT tell users to SSH themselves - YOU do it!"#,
-                task, result_summary
+                task, tool_failure_warning, result_summary
             )
         };
 
@@ -1385,15 +1400,25 @@ EXAMPLES:
 
         if let Some(server) = server {
             // Use quiet mode - just show a brief message
-            eprintln!("🌐 Connecting browser...");
+            eprintln!("🌐 Connecting browser ({})...", server.name);
             match connect_mcp_server_verbose(server, false) {
                 Ok(_) => {
                     eprintln!("✓ Browser ready ({})", server.name);
                 }
                 Err(e) => {
-                    eprintln!("⚠ Browser connection failed: {}", e);
+                    let err_msg = e.to_string();
+                    if err_msg.contains("spawn") || err_msg.contains("No such file") {
+                        eprintln!("⚠ Browser unavailable: npx not found");
+                        eprintln!("  Install Node.js: brew install node (macOS) or apt install nodejs (Linux)");
+                        eprintln!("  Then run: /mcp install");
+                    } else {
+                        eprintln!("⚠ Browser connection failed: {}", e);
+                        eprintln!("  Try: /mcp install");
+                    }
                 }
             }
+        } else {
+            eprintln!("⚠ No browser server configured. Run: /mcp install");
         }
 
         // Also auto-connect context7 for documentation/library questions

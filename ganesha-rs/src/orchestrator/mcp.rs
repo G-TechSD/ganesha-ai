@@ -327,16 +327,46 @@ impl McpManager {
             }
         }
 
-        // Auto-start successfully installed servers
+        // Auto-start successfully installed servers (use proper MCP protocol connection)
         println!("\n  Starting installed servers...");
         for name in &installed {
-            match self.start_server(name) {
-                Ok(_) => println!("  ✓ {} started", name),
-                Err(e) => println!("  ⚠ {} failed to start: {}", name, e),
+            if let Some(server) = self.servers.get(name).cloned() {
+                match connect_mcp_server_verbose(&server, false) {
+                    Ok(_) => {
+                        if let Some(s) = self.servers.get_mut(name) {
+                            s.status = ServerStatus::Running;
+                        }
+                        println!("  ✓ {} started", name);
+                    }
+                    Err(e) => println!("  ⚠ {} failed to start: {}", name, e),
+                }
             }
         }
 
         Ok(())
+    }
+
+    /// Auto-connect installed servers on startup (silent, for main.rs)
+    /// Uses the proper MCP protocol connection (not just process spawn)
+    pub fn auto_connect_installed(&mut self) -> usize {
+        let installed: Vec<(String, McpServer)> = self.servers.iter()
+            .filter(|(_, s)| s.status == ServerStatus::Stopped && s.auto_start)
+            .map(|(n, s)| (n.clone(), s.clone()))
+            .collect();
+
+        let mut connected = 0;
+        for (name, server) in installed {
+            // Use connect_mcp_server_verbose which properly initializes MCP protocol
+            // and adds to global client registry (quiet mode)
+            if connect_mcp_server_verbose(&server, false).is_ok() {
+                // Update status in our local tracking
+                if let Some(s) = self.servers.get_mut(&name) {
+                    s.status = ServerStatus::Running;
+                }
+                connected += 1;
+            }
+        }
+        connected
     }
 
     /// Start a server
