@@ -23,6 +23,36 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
+/// Generate output filename from task description
+fn generate_output_filename(task: &str) -> String {
+    // Extract meaningful words from task
+    let stop_words = ["generate", "create", "write", "make", "produce", "the", "a", "an",
+                      "some", "about", "for", "with", "and", "or", "of", "to", "in"];
+
+    let words: Vec<&str> = task.split_whitespace()
+        .filter(|w| {
+            let lower = w.to_lowercase();
+            !stop_words.contains(&lower.as_str()) &&
+            !w.chars().all(|c| c.is_ascii_digit()) &&
+            w.len() > 1
+        })
+        .take(3)
+        .collect();
+
+    let base_name = if words.is_empty() {
+        "flux_output".to_string()
+    } else {
+        // Sanitize for filename
+        words.join("_")
+            .to_lowercase()
+            .chars()
+            .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
+            .collect::<String>()
+    };
+
+    format!("/tmp/{}.html", base_name)
+}
+
 /// Parse a duration string like "1h", "30m", "1 hour", "2 hours 30 minutes"
 pub fn parse_duration(input: &str) -> Option<Duration> {
     let input = input.trim().to_lowercase();
@@ -1169,31 +1199,8 @@ pub async fn run_flux_capacitor(config: FluxConfig) -> Result<FluxStatus, String
     // Export items if we accumulated any
     let final_item_count = canvas.item_count();
     if final_item_count > 0 {
-        // Determine output filename from task content
-        let lower_task = config.task.to_lowercase();
-        let output_file = if lower_task.contains("cat fact") {
-            "/tmp/catfacts.html"
-        } else if lower_task.contains("dog") {
-            "/tmp/dogfacts.html"
-        } else if lower_task.contains("joke") {
-            "/tmp/jokes.html"
-        } else if lower_task.contains("quote") {
-            "/tmp/quotes.html"
-        } else if lower_task.contains("recipe") {
-            "/tmp/recipes.html"
-        } else if lower_task.contains("trivia") {
-            "/tmp/trivia.html"
-        } else if lower_task.contains("idea") {
-            "/tmp/ideas.html"
-        } else if lower_task.contains("name") {
-            "/tmp/names.html"
-        } else if lower_task.contains("product") || lower_task.contains("description") {
-            "/tmp/products.html"
-        } else if lower_task.contains("lexus") || lower_task.contains("vehicle") || lower_task.contains("car") {
-            "/tmp/vehicles.html"
-        } else {
-            "/tmp/flux_output.html"
-        };
+        // Generate filename from task - extract key words and sanitize
+        let output_file = generate_output_filename(&config.task);
 
         // Extract title from task
         let title = if let Some(target) = canvas.target_count {
@@ -1202,13 +1209,13 @@ pub async fn run_flux_capacitor(config: FluxConfig) -> Result<FluxStatus, String
             "Flux Capacitor Output".to_string()
         };
 
-        if let Err(e) = canvas.export_html(&title, output_file) {
+        if let Err(e) = canvas.export_html(&title, &output_file) {
             println!("{} Failed to export items: {}", style("⚠").yellow(), e);
         } else {
             println!("{} Exported {} items to {}",
                 style("📄").green(),
                 final_item_count,
-                style(output_file).cyan()
+                style(&output_file).cyan()
             );
         }
 
