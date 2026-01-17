@@ -1,61 +1,206 @@
-# Ganesha Installer for Windows
-# The Remover of Obstacles
+#Requires -Version 5.1
+<#
+.SYNOPSIS
+    Ganesha Installer - The Remover of Obstacles
+    Cross-platform installer for Windows
 
-Write-Host "🐘 Ganesha Installer - The Remover of Obstacles" -ForegroundColor Yellow
-Write-Host "=============================================" -ForegroundColor Gray
+.DESCRIPTION
+    Downloads and installs Ganesha, the AI-powered system control tool.
+    Tries pre-built binary first, falls back to building from source.
 
-# Check for Rust
-if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
-    Write-Host "Rust not found. Installing rustup..." -ForegroundColor Cyan
-    # Download and run rustup-init
-    $rustupUrl = "https://win.rustup.rs/x86_64"
-    $rustupExe = "$env:TEMP\rustup-init.exe"
-    Invoke-WebRequest -Uri $rustupUrl -OutFile $rustupExe
-    Start-Process -FilePath $rustupExe -ArgumentList "-y" -Wait
-    
-    # Reload path (this is tricky in current session, might need restart)
-    $env:Path += ";$env:USERPROFILE\.cargo\bin"
-    Write-Host "Rust installed. You may need to restart your terminal after this." -ForegroundColor Green
+.EXAMPLE
+    iwr -useb https://raw.githubusercontent.com/G-TechSD/ganesha-ai/main/install.ps1 | iex
+#>
+
+$ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"  # Faster downloads
+
+$Version = "3.14.0-beta.1"
+$Repo = "G-TechSD/ganesha-ai"
+$InstallDir = if ($env:GANESHA_INSTALL_DIR) { $env:GANESHA_INSTALL_DIR } else { "$env:LOCALAPPDATA\Ganesha" }
+
+function Write-Banner {
+    Write-Host ""
+    Write-Host "  ██████   █████  ███    ██ ███████ ███████ ██   ██  █████" -ForegroundColor Cyan
+    Write-Host " ██       ██   ██ ████   ██ ██      ██      ██   ██ ██   ██" -ForegroundColor Cyan
+    Write-Host " ██   ███ ███████ ██ ██  ██ █████   ███████ ███████ ███████" -ForegroundColor Cyan
+    Write-Host " ██    ██ ██   ██ ██  ██ ██ ██           ██ ██   ██ ██   ██" -ForegroundColor Cyan
+    Write-Host "  ██████  ██   ██ ██   ████ ███████ ███████ ██   ██ ██   ██" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "        ✦ The Remover of Obstacles ✦  v$Version" -ForegroundColor Yellow
+    Write-Host ""
 }
 
-# Determine script location to find source
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$SourceDir = Join-Path $ScriptDir "ganesha-rs"
-
-if (-not (Test-Path $SourceDir)) {
-    Write-Error "Could not find ganesha-rs directory at $SourceDir"
-    exit 1
+function Get-Architecture {
+    $arch = $env:PROCESSOR_ARCHITECTURE
+    switch ($arch) {
+        "AMD64" { return "x86_64" }
+        "ARM64" { return "aarch64" }
+        default {
+            Write-Host "❌ Unsupported architecture: $arch" -ForegroundColor Red
+            exit 1
+        }
+    }
 }
 
-Set-Location $SourceDir
+function Download-Binary {
+    param([string]$Arch)
 
-Write-Host "Building Ganesha with Voice support..." -ForegroundColor Cyan
-cargo build --release --features "voice"
+    $url = "https://github.com/$Repo/releases/download/v$Version/ganesha-windows-$Arch.zip"
+    $tempDir = New-TemporaryFile | ForEach-Object { Remove-Item $_; New-Item -ItemType Directory -Path $_ }
+    $zipFile = Join-Path $tempDir "ganesha.zip"
 
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Build failed."
-    exit 1
+    Write-Host "⬇️  Downloading from: $url" -ForegroundColor Cyan
+
+    try {
+        Invoke-WebRequest -Uri $url -OutFile $zipFile -UseBasicParsing
+
+        Write-Host "📂 Extracting..." -ForegroundColor Cyan
+        Expand-Archive -Path $zipFile -DestinationPath $tempDir -Force
+
+        # Find the exe
+        $exe = Get-ChildItem -Path $tempDir -Filter "ganesha.exe" -Recurse | Select-Object -First 1
+        if (-not $exe) {
+            throw "Binary not found in archive"
+        }
+
+        # Install
+        if (-not (Test-Path $InstallDir)) {
+            New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+        }
+
+        Copy-Item -Path $exe.FullName -Destination "$InstallDir\ganesha.exe" -Force
+
+        Remove-Item -Path $tempDir -Recurse -Force
+        Write-Host "✅ Installed to: $InstallDir\ganesha.exe" -ForegroundColor Green
+        return $true
+    }
+    catch {
+        if (Test-Path $tempDir) {
+            Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        return $false
+    }
 }
 
-# Install to standard location (e.g., %LOCALAPPDATA%\Ganesha)
-$InstallDir = "$env:LOCALAPPDATA\Ganesha"
-if (-not (Test-Path $InstallDir)) {
-    New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+function Build-FromSource {
+    Write-Host ""
+    Write-Host "🔨 Pre-built binary not available. Building from source..." -ForegroundColor Yellow
+    Write-Host ""
+
+    # Check for Rust
+    if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
+        Write-Host "📥 Installing Rust..." -ForegroundColor Cyan
+        $rustupUrl = "https://win.rustup.rs/x86_64"
+        $rustupExe = "$env:TEMP\rustup-init.exe"
+        Invoke-WebRequest -Uri $rustupUrl -OutFile $rustupExe -UseBasicParsing
+        Start-Process -FilePath $rustupExe -ArgumentList "-y", "--default-toolchain", "stable" -Wait -NoNewWindow
+        $env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"
+
+        # Verify
+        if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
+            Write-Host "❌ Failed to install Rust. Please install manually from https://rustup.rs" -ForegroundColor Red
+            exit 1
+        }
+    }
+
+    # Check for Git
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+        Write-Host "❌ Git is required to build from source." -ForegroundColor Red
+        Write-Host "   Install from: https://git-scm.com/download/win" -ForegroundColor Yellow
+        exit 1
+    }
+
+    # Clone and build
+    $tempDir = New-TemporaryFile | ForEach-Object { Remove-Item $_; New-Item -ItemType Directory -Path $_ }
+
+    Write-Host "📥 Cloning repository..." -ForegroundColor Cyan
+    git clone --depth 1 "https://github.com/$Repo.git" "$tempDir\ganesha" 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        git clone --depth 1 "https://github.com/G-TechSD/ganesha-ai.git" "$tempDir\ganesha"
+    }
+
+    Set-Location "$tempDir\ganesha\ganesha-rs"
+
+    Write-Host "🔨 Building (this may take several minutes)..." -ForegroundColor Cyan
+    cargo build --release
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "❌ Build failed" -ForegroundColor Red
+        exit 1
+    }
+
+    # Install
+    if (-not (Test-Path $InstallDir)) {
+        New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+    }
+
+    Copy-Item -Path "target\release\ganesha.exe" -Destination "$InstallDir\ganesha.exe" -Force
+
+    Set-Location $env:TEMP
+    Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+
+    Write-Host "✅ Built and installed to: $InstallDir\ganesha.exe" -ForegroundColor Green
 }
 
-$TargetExe = "$InstallDir\ganesha.exe"
-Copy-Item -Path "target\release\ganesha.exe" -Destination $TargetExe -Force
+function Setup-Path {
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 
-Write-Host "Installed to $TargetExe" -ForegroundColor Green
+    if ($userPath -notlike "*$InstallDir*") {
+        Write-Host ""
+        Write-Host "📍 Adding $InstallDir to PATH..." -ForegroundColor Cyan
 
-# Add to User PATH if not present
-$UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
-if ($UserPath -notlike "*$InstallDir*") {
-    Write-Host "Adding $InstallDir to User PATH..." -ForegroundColor Cyan
-    [Environment]::SetEnvironmentVariable("Path", "$UserPath;$InstallDir", "User")
-    $env:Path += ";$InstallDir"
-    Write-Host "Added to PATH. Restart terminal to use 'ganesha' command." -ForegroundColor Yellow
+        [Environment]::SetEnvironmentVariable("Path", "$userPath;$InstallDir", "User")
+        $env:Path = "$env:Path;$InstallDir"
+
+        Write-Host "   Added to User PATH" -ForegroundColor Green
+    }
 }
 
-Write-Host "`n✅ Ganesha installed successfully!" -ForegroundColor Green
-Write-Host "Run 'ganesha --help' to get started."
+function Verify-Install {
+    $exe = "$InstallDir\ganesha.exe"
+
+    if (Test-Path $exe) {
+        Write-Host ""
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Gray
+        & $exe --version 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "ganesha v$Version" -ForegroundColor White
+        }
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "🎉 Installation complete!" -ForegroundColor Green
+        Write-Host ""
+        Write-Host '   Get started:  ganesha "hello world"' -ForegroundColor White
+        Write-Host "   Interactive:  ganesha -i" -ForegroundColor White
+        Write-Host "   Help:         ganesha --help" -ForegroundColor White
+        Write-Host ""
+        Write-Host "⚠️  Restart your terminal to use the 'ganesha' command." -ForegroundColor Yellow
+    }
+    else {
+        Write-Host "❌ Installation failed" -ForegroundColor Red
+        exit 1
+    }
+}
+
+# Main
+function Main {
+    Write-Banner
+
+    $arch = Get-Architecture
+    Write-Host "📦 Detected: Windows $arch" -ForegroundColor Cyan
+
+    # Try downloading pre-built binary first
+    if (Download-Binary -Arch $arch) {
+        Setup-Path
+        Verify-Install
+    }
+    else {
+        Write-Host "⚠️  Pre-built binary not available for Windows-$arch" -ForegroundColor Yellow
+        Build-FromSource
+        Setup-Path
+        Verify-Install
+    }
+}
+
+Main

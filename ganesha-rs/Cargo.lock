@@ -1933,7 +1933,7 @@ dependencies = [
 
 [[package]]
 name = "ganesha"
-version = "3.14.0"
+version = "3.14.0-beta.1"
 dependencies = [
  "anyhow",
  "async-trait",
