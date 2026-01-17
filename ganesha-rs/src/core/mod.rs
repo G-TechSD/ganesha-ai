@@ -1254,26 +1254,29 @@ DO NOT tell users to SSH themselves - YOU do it!
 
 WEB TOOLS - CHOOSE WISELY:
 
-1. PLAYWRIGHT (PREFERRED for visiting websites):
-   Use when: user wants to see/interact with a specific website
-   - "what's on toyota.com" → playwright:browser_navigate to toyota.com
-   - "show me the apple website" → playwright:browser_navigate to apple.com
-   - "check the vehicles on toyota's site" → playwright:browser_navigate, then browser_snapshot
+1. FETCH (BEST for reading website content):
+   Use when: user wants to know what's on a website, list items, extract information
+   - "what's on toyota.com" → fetch:fetch with url https://www.toyota.com
+   - "list vehicles on toyota's site" → fetch:fetch with url https://www.toyota.com
+   - "what products does apple sell" → fetch:fetch with url https://www.apple.com
+   Format: {{"actions":[{{"mcp_tool":"fetch:fetch","mcp_args":{{"url":"https://www.example.com"}},"explanation":"Get page content"}}]}}
+
+2. PLAYWRIGHT (for interactive browsing):
+   Use when: user needs to click buttons, fill forms, or take screenshots
+   - "click the login button" → playwright actions
+   - "fill out the contact form" → playwright actions
    Format: {{"actions":[{{"mcp_tool":"playwright:browser_navigate","mcp_args":{{"url":"https://example.com"}},"explanation":"Visit site"}}]}}
 
-2. FETCH (for static content retrieval):
-   Use when: you need raw page content from a known URL
-   Format: {{"actions":[{{"mcp_tool":"fetch:fetch","mcp_args":{{"url":"https://exact-url.com"}},"explanation":"Get page"}}]}}
-
-3. WEB SEARCH (for finding information):
+3. WEB SEARCH (for finding unknown URLs):
    Use ONLY when: user explicitly asks to search OR you don't know the URL
    - "search for best laptops 2026" → ganesha:web_search
    - "find articles about AI" → ganesha:web_search
    Format: {{"actions":[{{"mcp_tool":"ganesha:web_search","mcp_args":{{"query":"search terms"}},"explanation":"Search"}}]}}
 
 PRIORITY ORDER:
-- User mentions a website by name → use playwright:browser_navigate (construct URL: website.com)
-- User wants to find something unknown → use ganesha:web_search
+- User wants to READ content from a known website → use fetch:fetch
+- User needs to INTERACT with a website → use playwright
+- User wants to FIND something unknown → use ganesha:web_search
 - Answer directly without tools when possible (greetings, basic knowledge, system commands)
 
 EXAMPLES:
