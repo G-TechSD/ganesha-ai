@@ -1577,36 +1577,61 @@ BEGIN OUTPUT:"#,
     }
 
     /// Build HTML page with items
-    fn build_html_with_items(items: &[String], task: &str) -> String {
-        // Infer title from task content
-        let lower_task = task.to_lowercase();
-        let title = if lower_task.contains("cat fact") {
-            "Cat Facts"
-        } else if lower_task.contains("dog fact") || lower_task.contains("dog ") && lower_task.contains("fact") {
-            "Dog Facts"
-        } else if lower_task.contains("joke") {
-            "Jokes"
-        } else if lower_task.contains("quote") {
-            "Quotes"
-        } else if lower_task.contains("tip") || lower_task.contains("advice") {
-            "Tips & Advice"
-        } else if lower_task.contains("recipe") {
-            "Recipes"
-        } else if lower_task.contains("trivia") {
-            "Trivia"
-        } else if lower_task.contains("idea") {
-            "Ideas"
-        } else if lower_task.contains("name") {
-            "Names"
-        } else if lower_task.contains("product") || lower_task.contains("description") {
-            "Product Descriptions"
-        } else if lower_task.contains("story") || lower_task.contains("tale") {
-            "Stories"
-        } else if lower_task.contains("lexus") || lower_task.contains("vehicle") || lower_task.contains("car") {
-            "Vehicles"
+    /// Extract a title from the task description
+    fn extract_title_from_task(task: &str) -> String {
+        // Try to extract the subject from common patterns
+        let task_lower = task.to_lowercase();
+
+        // Pattern: "generate/create/write/make X <subject>" - extract subject
+        let patterns = [
+            r"(?:generate|create|write|make|produce|come up with)\s+\d*\s*(.+?)(?:\s+about|\s+for|\s+with|$)",
+            r"(?:list of|collection of)\s+(.+?)(?:\s+about|\s+for|$)",
+            r"\d+\s+(.+?)(?:\s+about|\s+for|$)",
+        ];
+
+        for pattern in &patterns {
+            if let Ok(re) = regex::Regex::new(pattern) {
+                if let Some(caps) = re.captures(&task_lower) {
+                    if let Some(subject) = caps.get(1) {
+                        let subject_str = subject.as_str().trim();
+                        // Clean up and title-case
+                        if !subject_str.is_empty() && subject_str.len() < 50 {
+                            return Self::title_case(subject_str);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fallback: use first few meaningful words from task
+        let words: Vec<&str> = task.split_whitespace()
+            .filter(|w| !["generate", "create", "write", "make", "the", "a", "an", "some", "100", "1000"].contains(&w.to_lowercase().as_str()))
+            .take(4)
+            .collect();
+
+        if !words.is_empty() {
+            Self::title_case(&words.join(" "))
         } else {
-            "Generated Content"
-        };
+            "Generated Content".to_string()
+        }
+    }
+
+    /// Convert string to Title Case
+    fn title_case(s: &str) -> String {
+        s.split_whitespace()
+            .map(|word| {
+                let mut chars = word.chars();
+                match chars.next() {
+                    None => String::new(),
+                    Some(first) => first.to_uppercase().chain(chars).collect(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    fn build_html_with_items(items: &[String], task: &str) -> String {
+        let title = Self::extract_title_from_task(task);
 
         let items_js: String = items
             .iter()
