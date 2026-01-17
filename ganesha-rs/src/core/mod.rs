@@ -1578,8 +1578,32 @@ BEGIN OUTPUT:"#,
 
     /// Build HTML page with items
     fn build_html_with_items(items: &[String], task: &str) -> String {
-        let title = if task.to_lowercase().contains("cat") {
+        // Infer title from task content
+        let lower_task = task.to_lowercase();
+        let title = if lower_task.contains("cat fact") {
             "Cat Facts"
+        } else if lower_task.contains("dog fact") || lower_task.contains("dog ") && lower_task.contains("fact") {
+            "Dog Facts"
+        } else if lower_task.contains("joke") {
+            "Jokes"
+        } else if lower_task.contains("quote") {
+            "Quotes"
+        } else if lower_task.contains("tip") || lower_task.contains("advice") {
+            "Tips & Advice"
+        } else if lower_task.contains("recipe") {
+            "Recipes"
+        } else if lower_task.contains("trivia") {
+            "Trivia"
+        } else if lower_task.contains("idea") {
+            "Ideas"
+        } else if lower_task.contains("name") {
+            "Names"
+        } else if lower_task.contains("product") || lower_task.contains("description") {
+            "Product Descriptions"
+        } else if lower_task.contains("story") || lower_task.contains("tale") {
+            "Stories"
+        } else if lower_task.contains("lexus") || lower_task.contains("vehicle") || lower_task.contains("car") {
+            "Vehicles"
         } else {
             "Generated Content"
         };

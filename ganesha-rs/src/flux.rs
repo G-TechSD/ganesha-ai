@@ -1169,9 +1169,28 @@ pub async fn run_flux_capacitor(config: FluxConfig) -> Result<FluxStatus, String
     // Export items if we accumulated any
     let final_item_count = canvas.item_count();
     if final_item_count > 0 {
-        // Determine output filename from task or use default
-        let output_file = if config.task.to_lowercase().contains("cat") {
+        // Determine output filename from task content
+        let lower_task = config.task.to_lowercase();
+        let output_file = if lower_task.contains("cat fact") {
             "/tmp/catfacts.html"
+        } else if lower_task.contains("dog") {
+            "/tmp/dogfacts.html"
+        } else if lower_task.contains("joke") {
+            "/tmp/jokes.html"
+        } else if lower_task.contains("quote") {
+            "/tmp/quotes.html"
+        } else if lower_task.contains("recipe") {
+            "/tmp/recipes.html"
+        } else if lower_task.contains("trivia") {
+            "/tmp/trivia.html"
+        } else if lower_task.contains("idea") {
+            "/tmp/ideas.html"
+        } else if lower_task.contains("name") {
+            "/tmp/names.html"
+        } else if lower_task.contains("product") || lower_task.contains("description") {
+            "/tmp/products.html"
+        } else if lower_task.contains("lexus") || lower_task.contains("vehicle") || lower_task.contains("car") {
+            "/tmp/vehicles.html"
         } else {
             "/tmp/flux_output.html"
         };
