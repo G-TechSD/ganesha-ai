@@ -5,7 +5,7 @@
 #
 set -e
 
-VERSION="3.14.0-beta.1"
+VERSION="3.14.0-beta.2"
 REPO="G-TechSD/ganesha-ai"
 INSTALL_DIR="${GANESHA_INSTALL_DIR:-$HOME/.local/bin}"
 
@@ -117,6 +117,18 @@ build_from_source() {
             sudo pacman -S --noconfirm alsa-lib pkg-config openssl base-devel
         fi
     elif [[ "$OS" == "macos" ]]; then
+        # Check for Xcode Command Line Tools (required for compilation)
+        if ! xcode-select -p &> /dev/null; then
+            echo "📥 Installing Xcode Command Line Tools (required for compilation)..."
+            echo "   A dialog will appear - click 'Install' and wait for it to complete."
+            xcode-select --install
+            echo ""
+            echo "⏳ After installation completes, run this installer again:"
+            echo "   curl -sSL https://raw.githubusercontent.com/G-TechSD/ganesha-ai/main/install.sh | bash"
+            exit 0
+        fi
+
+        # Install pkg-config via Homebrew if needed
         if ! command -v pkg-config &> /dev/null; then
             if command -v brew &> /dev/null; then
                 brew install pkg-config openssl

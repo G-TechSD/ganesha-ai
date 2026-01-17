@@ -15,7 +15,7 @@
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"  # Faster downloads
 
-$Version = "3.14.0-beta.1"
+$Version = "3.14.0-beta.2"
 $Repo = "G-TechSD/ganesha-ai"
 $InstallDir = if ($env:GANESHA_INSTALL_DIR) { $env:GANESHA_INSTALL_DIR } else { "$env:LOCALAPPDATA\Ganesha" }
 
