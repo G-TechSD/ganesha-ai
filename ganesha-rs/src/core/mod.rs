@@ -1235,30 +1235,29 @@ Example - fix remote display issue:
 ]}}
 DO NOT tell users to SSH themselves - YOU do it!
 
-WEB SEARCH - USE SELECTIVELY:
+WEB TOOLS - CHOOSE WISELY:
 
-Use ganesha:web_search ONLY when user explicitly asks to search the web or needs current/external information.
-DO NOT use web search for: greetings, basic knowledge, system commands, or questions you can answer directly.
+1. PLAYWRIGHT (PREFERRED for visiting websites):
+   Use when: user wants to see/interact with a specific website
+   - "what's on toyota.com" → playwright:browser_navigate to toyota.com
+   - "show me the apple website" → playwright:browser_navigate to apple.com
+   - "check the vehicles on toyota's site" → playwright:browser_navigate, then browser_snapshot
+   Format: {{"actions":[{{"mcp_tool":"playwright:browser_navigate","mcp_args":{{"url":"https://example.com"}},"explanation":"Visit site"}}]}}
 
-WHEN TO SEARCH (explicit web requests):
-- "search for X" / "look up X online" / "find X on the web" → use ganesha:web_search
-- "what's the latest news about X" → use ganesha:web_search
-- "go to X website" → use ganesha:web_search to find URL first
+2. FETCH (for static content retrieval):
+   Use when: you need raw page content from a known URL
+   Format: {{"actions":[{{"mcp_tool":"fetch:fetch","mcp_args":{{"url":"https://exact-url.com"}},"explanation":"Get page"}}]}}
 
-WHEN NOT TO SEARCH (answer directly instead):
-- "hello" / "hi" → respond with greeting
-- "what is air" / "what is water" → explain using your knowledge
-- "how do I install X" → provide commands directly
-- "list files" / "show disk usage" → execute system commands
+3. WEB SEARCH (for finding information):
+   Use ONLY when: user explicitly asks to search OR you don't know the URL
+   - "search for best laptops 2026" → ganesha:web_search
+   - "find articles about AI" → ganesha:web_search
+   Format: {{"actions":[{{"mcp_tool":"ganesha:web_search","mcp_args":{{"query":"search terms"}},"explanation":"Search"}}]}}
 
-Search format:
-{{"actions":[{{"mcp_tool":"ganesha:web_search","mcp_args":{{"query":"your search terms","max_results":10}},"explanation":"Search the web"}}]}}
-
-FETCH (only for KNOWN URLs provided by user or from search results):
-{{"actions":[{{"mcp_tool":"fetch:fetch","mcp_args":{{"url":"https://exact-url.com"}},"explanation":"Get page"}}]}}
-
-BROWSER (only for interactive tasks: clicking, filling forms, JavaScript sites):
-{{"actions":[{{"mcp_tool":"playwright:browser_navigate","mcp_args":{{"url":"URL"}},"explanation":"Browse"}}]}}
+PRIORITY ORDER:
+- User mentions a website by name → use playwright:browser_navigate (construct URL: website.com)
+- User wants to find something unknown → use ganesha:web_search
+- Answer directly without tools when possible (greetings, basic knowledge, system commands)
 
 EXAMPLES:
 - "install apache and set doc root to /home/user/WWW" → {{"actions":[
@@ -1296,13 +1295,15 @@ EXAMPLES:
             }
         }
 
-        // Remind about web search but not too aggressively
-        section.push_str("\nWEB SEARCH: Use ganesha:web_search only for explicit web/search requests.\n");
-        section.push_str("- \"search for X\" or \"look up X online\" → use ganesha:web_search\n");
-        section.push_str("- Greetings, basic questions, commands → respond directly, no search needed.\n");
+        // Clear guidance on when to use which tool
+        section.push_str("\nTOOL SELECTION GUIDE:\n");
+        section.push_str("- Visit a SPECIFIC website (toyota.com, github.com) → playwright:browser_navigate\n");
+        section.push_str("- Get page content from a URL → fetch:fetch\n");
+        section.push_str("- SEARCH for something (no specific site) → ganesha:web_search\n");
+        section.push_str("- Greetings, basic questions, system commands → respond directly, no MCP tools\n");
 
         // Add dynamic examples based on connected server
-        section.push_str("\nBROWSER EXAMPLES (only for navigating to KNOWN URLs):\n");
+        section.push_str("\nBROWSER EXAMPLES:\n");
 
         // Find tools for examples
         let mcp_tools = get_all_mcp_tools();
