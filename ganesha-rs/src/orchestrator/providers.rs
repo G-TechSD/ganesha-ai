@@ -229,12 +229,12 @@ impl ProviderManager {
 
         let mut found_any = false;
 
-        // Check common endpoints including known network servers
+        // Check localhost endpoints only - no hardcoded network addresses
         let local_checks = [
-            ("192.168.245.155:1234", "LM Studio BEAST"),
-            ("192.168.27.182:1234", "LM Studio BEDROOM"),
-            ("localhost:1234", "LM Studio (localhost)"),
+            ("localhost:1234", "LM Studio"),
+            ("127.0.0.1:1234", "LM Studio"),
             ("localhost:11434", "Ollama"),
+            ("127.0.0.1:11434", "Ollama"),
         ];
 
         for (addr, name) in &local_checks {
@@ -251,15 +251,11 @@ impl ProviderManager {
                     found_any = true;
                     println!("  \x1b[32m✓\x1b[0m {} found at {}", name, addr);
 
-                    // Determine endpoint name and priority
-                    let (endpoint_name, priority) = if addr.contains("192.168.245.155") {
-                        ("beast", 1)  // Primary capable model
-                    } else if addr.contains("192.168.27.182") {
-                        ("bedroom", 2)  // Secondary fast model
-                    } else if is_ollama {
-                        ("ollama", 5)
+                    // Assign generic endpoint names
+                    let (endpoint_name, priority) = if is_ollama {
+                        ("ollama", 2)
                     } else {
-                        ("local", 3)
+                        ("local", 1)  // LM Studio on localhost
                     };
 
                     self.endpoints.insert(endpoint_name.into(), ProviderEndpoint {
@@ -604,9 +600,7 @@ impl ProviderManager {
 
         // Auto-configure based on available endpoints
         let has_openrouter = self.endpoints.contains_key("openrouter");
-        let has_local = self.endpoints.contains_key("beast")
-            || self.endpoints.contains_key("bedroom")
-            || self.endpoints.contains_key("local")
+        let has_local = self.endpoints.contains_key("local")
             || self.endpoints.contains_key("ollama");
         let has_anthropic = self.endpoints.contains_key("anthropic");
 
@@ -633,12 +627,8 @@ impl ProviderManager {
                 description: "Vision (Sonnet)".into(),
             });
         } else if has_local {
-            // Prefer beast > bedroom > local > ollama
-            let local_name = if self.endpoints.contains_key("beast") {
-                "beast"
-            } else if self.endpoints.contains_key("bedroom") {
-                "bedroom"
-            } else if self.endpoints.contains_key("local") {
+            // Prefer local LM Studio > Ollama
+            let local_name = if self.endpoints.contains_key("local") {
                 "local"
             } else {
                 "ollama"
@@ -648,12 +638,6 @@ impl ProviderManager {
             self.tiers.set(1, local_name, "default", "Local model");
             self.tiers.set(2, local_name, "default", "Local model");
             self.tiers.tiers.remove(&3); // Remove premium tier if only local
-
-            // If bedroom is available, use it for fast tier
-            if self.endpoints.contains_key("bedroom") && self.endpoints.contains_key("beast") {
-                self.tiers.set(1, "bedroom", "default", "Fast (BEDROOM)");
-                self.tiers.set(2, "beast", "default", "Capable (BEAST)");
-            }
 
             self.tiers.vision = None;
         }
@@ -1744,8 +1728,9 @@ mod tests {
     #[test]
     fn test_default_endpoints() {
         let endpoints = ProviderManager::default_endpoints();
-        assert!(endpoints.contains_key("beast"));
-        assert!(endpoints.contains_key("bedroom"));
+        // Default endpoints should include local LM Studio and Ollama
+        assert!(endpoints.contains_key("lmstudio"));
+        assert!(endpoints.contains_key("ollama"));
     }
 
     #[test]

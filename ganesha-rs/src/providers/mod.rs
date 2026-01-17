@@ -95,12 +95,8 @@ struct Choice {
 
 impl OpenAiCompatible {
     pub fn lm_studio(url: &str) -> Self {
-        // Derive a name from the URL for better identification
-        let name = if url.contains("192.168.245.155") {
-            "LM Studio BEAST"
-        } else if url.contains("192.168.27.182") {
-            "LM Studio BEDROOM"
-        } else if url.contains("localhost") || url.contains("127.0.0.1") {
+        // Derive a name from the URL
+        let name = if url.contains("localhost") || url.contains("127.0.0.1") {
             "LM Studio Local"
         } else {
             "LM Studio"
@@ -534,14 +530,9 @@ impl ProviderChain {
     pub fn default_chain() -> Self {
         let mut chain = Self::new();
 
-        // LM Studio instances - track URLs for agent mode
-        chain.provider_urls.push(("http://192.168.245.155:1234".into(), "default".into()));
-        chain.provider_urls.push(("http://192.168.27.182:1234".into(), "default".into()));
+        // Local LM Studio - localhost only
         chain.provider_urls.push(("http://localhost:1234".into(), "default".into()));
-
-        chain = chain.add(OpenAiCompatible::lm_studio("http://192.168.245.155:1234")); // BEAST
-        chain = chain.add(OpenAiCompatible::lm_studio("http://192.168.27.182:1234")); // BEDROOM
-        chain = chain.add(OpenAiCompatible::lm_studio("http://localhost:1234")); // Local
+        chain = chain.add(OpenAiCompatible::lm_studio("http://localhost:1234"));
 
         // Ollama
         chain = chain.add(Ollama::default());

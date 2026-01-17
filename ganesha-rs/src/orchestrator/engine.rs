@@ -83,8 +83,8 @@ impl GaneshaEngine {
 
         // Set up providers - local first
         let providers = vec![
-            ProviderConfig::lm_studio_beast(),
-            ProviderConfig::lm_studio_bedroom(),
+            ProviderConfig::lm_studio_local(),
+            ProviderConfig::ollama_local(),
             ProviderConfig::anthropic_sonnet(),
             ProviderConfig::openai_gpt4o(),
             ProviderConfig::gemini_pro(),

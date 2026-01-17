@@ -189,13 +189,15 @@ verify_install() {
         echo ""
         echo "🎉 Installation complete!"
         echo ""
-        echo "   Get started:  ganesha \"hello world\""
-        echo "   Interactive:  ganesha -i"
-        echo "   Help:         ganesha --help"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "⚠️  IMPORTANT: Close and reopen your terminal before using Ganesha"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo ""
-        if [[ ":$PATH:" != *":${INSTALL_DIR}:"* ]]; then
-            echo "⚠️  Restart your terminal or run: source ~/.bashrc"
-        fi
+        echo "   Then get started with:"
+        echo "   ganesha \"hello world\"    # Quick task"
+        echo "   ganesha -i               # Interactive mode"
+        echo "   ganesha --help           # Show all options"
+        echo ""
     else
         echo "❌ Installation failed"
         exit 1

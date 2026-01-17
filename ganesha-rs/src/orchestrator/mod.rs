@@ -356,9 +356,9 @@ mod tests {
 
     #[test]
     fn test_provider_configs() {
-        let beast = ProviderConfig::lm_studio_beast();
-        assert_eq!(beast.tier, ModelTier::Capable);
-        assert_eq!(beast.cost_per_1k_tokens, 0.0);
+        let local = ProviderConfig::lm_studio_local();
+        assert_eq!(local.tier, ModelTier::Capable);
+        assert_eq!(local.cost_per_1k_tokens, 0.0);
 
         let sonnet = ProviderConfig::anthropic_sonnet();
         assert_eq!(sonnet.tier, ModelTier::Cloud);

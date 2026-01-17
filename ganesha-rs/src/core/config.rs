@@ -227,11 +227,11 @@ pub struct ProviderConfig {
 }
 
 impl ProviderConfig {
-    pub fn lm_studio_beast() -> Self {
+    pub fn lm_studio_local() -> Self {
         Self {
-            name: "beast".into(),
-            endpoint: "http://192.168.245.155:1234".into(),
-            model: "gpt-oss-20b".into(),
+            name: "local".into(),
+            endpoint: "http://localhost:1234".into(),
+            model: "default".into(),
             tier: ModelTier::Capable,
             api_key: None,
             max_concurrent: 1,
@@ -239,26 +239,14 @@ impl ProviderConfig {
         }
     }
 
-    pub fn lm_studio_bedroom() -> Self {
+    pub fn ollama_local() -> Self {
         Self {
-            name: "bedroom".into(),
-            endpoint: "http://192.168.27.182:1234".into(),
-            model: "ministral-3-3b".into(),
+            name: "ollama".into(),
+            endpoint: "http://localhost:11434".into(),
+            model: "default".into(),
             tier: ModelTier::Fast,
             api_key: None,
             max_concurrent: 2,
-            cost_per_1k_tokens: 0.0,
-        }
-    }
-
-    pub fn bedroom_vision() -> Self {
-        Self {
-            name: "bedroom-vision".into(),
-            endpoint: "http://192.168.27.182:1234".into(),
-            model: "ministral-3-3b".into(),
-            tier: ModelTier::Vision,
-            api_key: None,
-            max_concurrent: 1,
             cost_per_1k_tokens: 0.0,
         }
     }
@@ -338,9 +326,8 @@ impl Default for GaneshaConfig {
     fn default() -> Self {
         Self {
             providers: vec![
-                ProviderConfig::lm_studio_beast(),
-                ProviderConfig::lm_studio_bedroom(),
-                ProviderConfig::bedroom_vision(),
+                ProviderConfig::lm_studio_local(),
+                ProviderConfig::ollama_local(),
                 ProviderConfig::anthropic_sonnet(),
                 ProviderConfig::anthropic_opus(),
                 ProviderConfig::openai_gpt4o(),
