@@ -1,7 +1,7 @@
 //! Provider System with OAuth2 and Dynamic Model Discovery
 //!
 //! Supports:
-//! - Local: LM Studio (BEAST + BEDROOM), Ollama
+//! - Local: LM Studio, Ollama
 //! - Cloud: OpenAI (GPT-5.2), Anthropic (Opus 4.5), Google (Gemini 3)
 //! - Aggregator: OpenRouter (access to many providers with one key)
 //!

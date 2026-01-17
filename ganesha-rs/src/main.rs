@@ -331,7 +331,7 @@ async fn main() {
     // Wiggum agent mode - with verification loop
     if args.wiggum {
         let (provider_url, model) = chain.get_first_available_url()
-            .unwrap_or_else(|| ("http://192.168.245.155:1234".to_string(), "default".to_string()));
+            .unwrap_or_else(|| ("http://localhost:1234".to_string(), "default".to_string()));
 
         let config = agent_wiggum::AgentConfig {
             provider_url,
@@ -400,7 +400,7 @@ async fn main() {
     // Flux Capacitor mode - time-boxed autonomous execution
     if args.flux.is_some() || args.until.is_some() {
         let (provider_url, model) = chain.get_first_available_url()
-            .unwrap_or_else(|| ("http://192.168.245.155:1234".to_string(), "default".to_string()));
+            .unwrap_or_else(|| ("http://localhost:1234".to_string(), "default".to_string()));
 
         // Calculate duration
         let duration = if let Some(ref flux_str) = args.flux {
@@ -459,7 +459,7 @@ async fn main() {
     // Agent mode - full coding assistant with tool use
     if args.agent {
         let (provider_url, model) = chain.get_first_available_url()
-            .unwrap_or_else(|| ("http://192.168.245.155:1234".to_string(), "default".to_string()));
+            .unwrap_or_else(|| ("http://localhost:1234".to_string(), "default".to_string()));
 
         println!("\n{}", style("─".repeat(60)).dim());
         println!("{}", style("Starting Agent Mode...").cyan().bold());

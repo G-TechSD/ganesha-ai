@@ -1,7 +1,7 @@
 //! Vision Integration for Ganesha
 //!
 //! Screen analysis using vision models with strict JSON output.
-//! The vision model (ministral-3-3b on BEDROOM) returns lightweight JSON only.
+//! The vision model returns lightweight JSON only.
 //!
 //! Used for:
 //! - Confirming UI state
@@ -79,8 +79,8 @@ pub struct VisionConfig {
 impl Default for VisionConfig {
     fn default() -> Self {
         Self {
-            endpoint: "http://192.168.27.182:1234/v1/chat/completions".into(),
-            model: "ministral-3-3b".into(),
+            endpoint: "http://localhost:1234/v1/chat/completions".into(),
+            model: "default".into(),
             timeout: Duration::from_secs(30),
         }
     }
@@ -378,8 +378,7 @@ mod tests {
     #[test]
     fn test_vision_config_default() {
         let config = VisionConfig::default();
-        assert!(config.endpoint.contains("192.168.27.182"));
-        assert!(config.model.contains("ministral"));
+        assert!(config.endpoint.contains("localhost"));
     }
 
     #[test]

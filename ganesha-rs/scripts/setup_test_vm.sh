@@ -139,7 +139,7 @@ Display Info:
 
 Network:
   IP Address: $IP_ADDR
-  LLM API Reachable: $(curl -s --connect-timeout 2 http://192.168.27.182:1234/v1/models > /dev/null && echo "YES" || echo "NO - check network")
+  LLM API Reachable: $(curl -s --connect-timeout 2 http://localhost:1234/v1/models > /dev/null && echo "YES" || echo "NO - check network")
 
 Installed Tools:
   Rust: $(sudo -u "$ACTUAL_USER" bash -c 'source $HOME/.cargo/env && rustc --version 2>/dev/null' || echo "not in path yet - relogin")
@@ -165,7 +165,7 @@ VM_DISPLAY=:0
 RUST_INSTALLED=true
 XDOTOOL_INSTALLED=true
 BLENDER_INSTALLED=true
-LLM_API_REACHABLE=$(curl -s --connect-timeout 2 http://192.168.27.182:1234/v1/models > /dev/null && echo "true" || echo "false")
+LLM_API_REACHABLE=$(curl -s --connect-timeout 2 http://localhost:1234/v1/models > /dev/null && echo "true" || echo "false")
 
 EOF
 

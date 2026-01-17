@@ -1069,7 +1069,7 @@ pub enum EscalationReason {
 
 impl Default for SafetyAdvisor {
     fn default() -> Self {
-        Self::new("http://192.168.27.182:1234/v1", "mistralai/ministral-3-3b")
+        Self::new("http://localhost:1234/v1", "default")
     }
 }
 

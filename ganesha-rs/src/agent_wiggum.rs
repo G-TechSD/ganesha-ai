@@ -39,7 +39,7 @@ pub struct AgentConfig {
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
-            provider_url: "http://192.168.245.155:1234".into(),
+            provider_url: "http://localhost:1234".into(),
             model: "default".into(),
             max_turns: 30,
             max_retries: 3,

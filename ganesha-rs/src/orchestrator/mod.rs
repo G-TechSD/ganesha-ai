@@ -5,17 +5,17 @@
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────┐
 //! │                     GANESHA ORCHESTRATOR                        │
-//! │                    (Primary Model - BEAST)                      │
+//! │                    (Primary Model - Local/Cloud)                │
 //! │                                                                 │
 //! │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
 //! │  │   Mini-Me 1  │  │   Mini-Me 2  │  │   Mini-Me 3  │          │
-//! │  │  (BEDROOM)   │  │  (BEDROOM)   │  │  (Anthropic) │          │
+//! │  │   (Local)    │  │   (Local)    │  │  (Anthropic) │          │
 //! │  │  file search │  │  code edit   │  │  complex Q   │          │
 //! │  └──────────────┘  └──────────────┘  └──────────────┘          │
 //! │                                                                 │
 //! │  ┌──────────────┐                                               │
 //! │  │    Vision    │  (Screen analysis when needed)               │
-//! │  │  (BEDROOM)   │                                               │
+//! │  │   (Local)    │                                               │
 //! │  └──────────────┘                                               │
 //! └─────────────────────────────────────────────────────────────────┘
 //! ```

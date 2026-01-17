@@ -474,7 +474,7 @@ impl Default for TestHarnessConfig {
     fn default() -> Self {
         Self {
             num_sessions: 40,
-            provider_url: "http://192.168.245.155:1234".to_string(),
+            provider_url: "http://localhost:1234".to_string(),
             model: "default".to_string(),
             auto_approve: true,
             timeout_secs: 60,
