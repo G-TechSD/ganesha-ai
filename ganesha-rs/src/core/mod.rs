@@ -845,27 +845,27 @@ impl<L: LlmProvider, C: ConsentHandler> GaneshaEngine<L, C> {
         let system_prompt = if has_browser_output {
             format!(
                 r#"You are Ganesha. Current date: {}.
-User question: "{}"
+
+USER ASKED: "{}"
 {}
-Page data:
+HERE IS THE PAGE CONTENT:
 {}
 
-RESPOND WITH JSON: {{"response":"your complete answer"}}
+YOUR JOB: Read the page content above and answer the user's question.
 
-RULES:
-1. DEDUPLICATE - List each unique item only ONCE (no duplicates!)
-2. COMPLETE - Finish all sentences, never cut off mid-word
-3. CONCISE - One line per item, no verbose descriptions
-4. ALL ITEMS - List every unique item found on the page
+CRITICAL - YOU MUST:
+1. Actually READ the page content above
+2. FIND the information the user asked about
+3. LIST each item you find (vehicles, products, etc.)
+4. Put your answer in JSON format
 
-FORMAT FOR LISTS:
-{{"response":"Found on the website:\n- Item A\n- Item B\n- Item C"}}
+RESPONSE FORMAT:
+{{"response":"Here's what I found:\n- Item 1\n- Item 2\n- Item 3"}}
 
-BAD (duplicates): "- 2026 RAV4\n- 2026 RAV4 (hybrid)"
-GOOD (unique only): "- 2026 RAV4\n- 2026 RAV4 Hybrid"
+EXAMPLE - If user asks "what vehicles are listed" and page shows RAV4, Camry, Corolla:
+{{"response":"Vehicles on the website:\n- RAV4\n- Camry\n- Corolla"}}
 
-BAD (cut off): "- 2026 RAV4 (listed again in the"
-GOOD (complete): "- 2026 RAV4""#,
+DO NOT just say "task complete" - actually LIST what you found!"#,
                 date_str, task, tool_failure_warning, result_summary
             )
         } else {
