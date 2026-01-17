@@ -1,10 +1,8 @@
-# Cross-compilation configuration
+# Cross-compilation configuration (only for cross-compiling from Linux)
+# These are NOT used when building natively on the target platform
 
 [target.x86_64-pc-windows-gnu]
 linker = "x86_64-w64-mingw32-gcc"
 
-[target.x86_64-apple-darwin]
-linker = "x86_64-apple-darwin-clang"
-
-[target.aarch64-apple-darwin]
-linker = "aarch64-apple-darwin-clang"
+# Note: macOS linker overrides removed - they break native builds
+# Native macOS builds use the default clang from Xcode CLT
