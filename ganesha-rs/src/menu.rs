@@ -504,7 +504,7 @@ pub fn text_input(prompt: &str, default: Option<&str>) -> Option<String> {
 }
 
 /// Configured provider connection
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProviderConnection {
     pub name: String,
     pub provider_type: String,
@@ -512,6 +512,77 @@ pub struct ProviderConnection {
     pub api_key: Option<String>,
     pub model: String,
     pub enabled: bool,
+}
+
+/// Provider configuration that gets saved to disk
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct ProviderConfig {
+    providers: Vec<ProviderConnection>,
+    priority: Vec<String>,
+}
+
+/// Get the provider config file path
+fn get_provider_config_path() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+    let config_dir = std::path::PathBuf::from(home).join(".ganesha");
+    let _ = std::fs::create_dir_all(&config_dir);
+    config_dir.join("providers.json")
+}
+
+/// Save providers to disk
+fn save_providers_to_disk() {
+    let providers = CONFIGURED_PROVIDERS
+        .get_or_init(|| Mutex::new(Vec::new()))
+        .lock()
+        .expect("Provider lock poisoned")
+        .clone();
+    let priority = PROVIDER_PRIORITY
+        .get_or_init(|| Mutex::new(Vec::new()))
+        .lock()
+        .expect("Priority lock poisoned")
+        .clone();
+
+    let config = ProviderConfig { providers, priority };
+    let path = get_provider_config_path();
+
+    if let Ok(json) = serde_json::to_string_pretty(&config) {
+        let _ = std::fs::write(&path, json);
+    }
+}
+
+/// Load providers from disk
+fn load_providers_from_disk() -> bool {
+    let path = get_provider_config_path();
+    if !path.exists() {
+        return false;
+    }
+
+    let content = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+
+    let config: ProviderConfig = match serde_json::from_str(&content) {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+
+    if config.providers.is_empty() {
+        return false;
+    }
+
+    // Load into static vars
+    *CONFIGURED_PROVIDERS
+        .get_or_init(|| Mutex::new(Vec::new()))
+        .lock()
+        .expect("Provider lock poisoned") = config.providers;
+
+    *PROVIDER_PRIORITY
+        .get_or_init(|| Mutex::new(Vec::new()))
+        .lock()
+        .expect("Priority lock poisoned") = config.priority;
+
+    true
 }
 
 /// Store for configured providers - thread-safe with Mutex
@@ -536,8 +607,32 @@ pub fn get_priority() -> Vec<String> {
         .clone()
 }
 
-/// Initialize providers from environment - call at menu startup to sync with actual providers
+/// Get the first priority provider's endpoint and model
+/// Returns (endpoint, model) tuple or None if no providers configured
+pub fn get_first_priority_provider() -> Option<(String, String)> {
+    let priority = get_priority();
+    let providers = get_providers();
+
+    // Find first provider in priority order
+    for name in &priority {
+        if let Some(provider) = providers.iter().find(|p| &p.name == name && p.enabled) {
+            return Some((provider.endpoint.clone(), provider.model.clone()));
+        }
+    }
+
+    // Fallback to any enabled provider
+    providers.iter()
+        .find(|p| p.enabled)
+        .map(|p| (p.endpoint.clone(), p.model.clone()))
+}
+
+/// Initialize providers - first try loading from disk, then auto-detect
 pub fn init_providers_from_env() {
+    // Try to load saved config first
+    if load_providers_from_disk() {
+        return; // Successfully loaded from disk
+    }
+
     // Only init if empty - don't overwrite user additions during session
     {
         let providers = CONFIGURED_PROVIDERS
@@ -723,6 +818,7 @@ pub fn show_connections_menu() {
                                                 .expect("Priority lock poisoned")
                                                 .retain(|p| p != &removed);
                                             println!("{} Removed provider: {}", style("✓").green(), removed);
+                                            save_providers_to_disk();
                                         } else {
                                             println!("{} Invalid number. Must be 1-{}", style("✗").red(), providers.len());
                                         }
@@ -901,6 +997,7 @@ fn add_local_provider() {
         .push(name.clone());
 
     println!("\n{} Local server '{}' added", style("✓").green(), name);
+    save_providers_to_disk();
     println!("{}", style("Press Enter to continue...").dim());
     let _ = io::stdin().read_line(&mut String::new());
 }
@@ -1061,26 +1158,37 @@ pub fn show_priority_menu() {
                             .get_or_init(|| Mutex::new(Vec::new()))
                             .lock()
                             .expect("Priority lock poisoned");
-                        match v.as_str() {
+                        let changed = match v.as_str() {
                             "up" if idx > 0 => {
                                 priority_list.swap(idx, idx - 1);
                                 println!("{} Moved up", style("✓").green());
+                                true
                             }
                             "down" if idx < priority_list.len() - 1 => {
                                 priority_list.swap(idx, idx + 1);
                                 println!("{} Moved down", style("✓").green());
+                                true
                             }
                             "top" => {
                                 let item = priority_list.remove(idx);
                                 priority_list.insert(0, item);
                                 println!("{} Moved to top", style("✓").green());
+                                true
                             }
                             "bottom" => {
                                 let item = priority_list.remove(idx);
                                 priority_list.push(item);
                                 println!("{} Moved to bottom", style("✓").green());
+                                true
                             }
-                            _ => println!("{} Cannot move further", style("⚠").yellow()),
+                            _ => {
+                                println!("{} Cannot move further", style("⚠").yellow());
+                                false
+                            }
+                        };
+                        drop(priority_list); // Release lock before saving
+                        if changed {
+                            save_providers_to_disk();
                         }
                     }
                 }

@@ -288,6 +288,9 @@ async fn main() {
     // Load policy
     let policy = load_policy();
 
+    // Initialize menu providers (loads from disk or auto-detects)
+    menu::init_providers_from_env();
+
     // Create provider chain (TODO: migrate to ProviderManager)
     let chain = ProviderChain::default_chain();
     let available = chain.get_available();
@@ -330,7 +333,8 @@ async fn main() {
 
     // Wiggum agent mode - with verification loop
     if args.wiggum {
-        let (provider_url, model) = chain.get_first_available_url()
+        let (provider_url, model) = menu::get_first_priority_provider()
+            .or_else(|| chain.get_first_available_url())
             .unwrap_or_else(|| ("http://localhost:1234".to_string(), "default".to_string()));
 
         let config = agent_wiggum::AgentConfig {
@@ -399,7 +403,8 @@ async fn main() {
 
     // Flux Capacitor mode - time-boxed autonomous execution
     if args.flux.is_some() || args.until.is_some() {
-        let (provider_url, model) = chain.get_first_available_url()
+        let (provider_url, model) = menu::get_first_priority_provider()
+            .or_else(|| chain.get_first_available_url())
             .unwrap_or_else(|| ("http://localhost:1234".to_string(), "default".to_string()));
 
         // Calculate duration
@@ -458,7 +463,8 @@ async fn main() {
 
     // Agent mode - full coding assistant with tool use
     if args.agent {
-        let (provider_url, model) = chain.get_first_available_url()
+        let (provider_url, model) = menu::get_first_priority_provider()
+            .or_else(|| chain.get_first_available_url())
             .unwrap_or_else(|| ("http://localhost:1234".to_string(), "default".to_string()));
 
         println!("\n{}", style("─".repeat(60)).dim());
