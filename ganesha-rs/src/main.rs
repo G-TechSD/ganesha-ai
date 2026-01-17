@@ -36,7 +36,7 @@ use chrono::Local;
 #[derive(Parser)]
 #[command(name = "ganesha")]
 #[command(author = "G-Tech SD")]
-#[command(version = "3.14.0")]
+#[command(version = env!("CARGO_PKG_VERSION"))]
 #[command(about = "The Remover of Obstacles - AI-Powered System Control")]
 #[command(long_about = r#"
 Ganesha translates natural language into safe, executable system commands.
