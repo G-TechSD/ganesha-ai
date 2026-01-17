@@ -122,14 +122,16 @@ impl McpManager {
         });
 
         // Filesystem - Enhanced file operations
+        // Note: Path arg is added at runtime, not during install check
+        let home_dir = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
         servers.insert("filesystem".into(), McpServer {
             name: "filesystem".into(),
             description: "Enhanced filesystem operations".into(),
             command: "npx".into(),
-            args: vec!["-y".into(), "@modelcontextprotocol/server-filesystem".into(), "/".into()],
+            args: vec!["-y".into(), "@modelcontextprotocol/server-filesystem".into(), home_dir],
             env: HashMap::new(),
             status: ServerStatus::NotInstalled,
-            auto_start: true,
+            auto_start: false,  // Requires path configuration
             category: ServerCategory::System,
         });
 
@@ -145,15 +147,15 @@ impl McpManager {
             category: ServerCategory::System,
         });
 
-        // Fetch - Web fetching (simple content retrieval)
+        // Fetch - Web fetching (Python-based, uses uvx)
         servers.insert("fetch".into(), McpServer {
             name: "fetch".into(),
             description: "Web content fetching - simpler than browser for static pages".into(),
-            command: "npx".into(),
-            args: vec!["-y".into(), "@modelcontextprotocol/server-fetch".into()],
+            command: "uvx".into(),
+            args: vec!["mcp-server-fetch".into()],
             env: HashMap::new(),
             status: ServerStatus::NotInstalled,
-            auto_start: true,  // Auto-start for web tasks
+            auto_start: true,
             category: ServerCategory::Browser,
         });
 
@@ -221,13 +223,16 @@ impl McpManager {
 
             println!("  Downloading package...");
 
-            // Try to install/cache the package
-            let mut args = vec!["--yes".to_string()];
-            args.extend(server.args.iter().cloned());
+            // For install check, only use the package name (first 2 args: -y and package)
+            // Don't pass path arguments to --help
+            let install_args: Vec<String> = server.args.iter()
+                .take(2)  // Just -y and package name
+                .cloned()
+                .collect();
 
             let output = Command::new("npx")
-                .args(&args)
-                .arg("--help") // Just check if it works
+                .args(&install_args)
+                .arg("--help") // Just check if it installs
                 .output()?;
 
             if output.status.success() {
@@ -264,19 +269,42 @@ impl McpManager {
             }
         } else if server.command == "uvx" {
             // Python-based servers via uvx
-            let output = Command::new("uvx")
+            let version_check = Command::new("uvx")
                 .arg("--version")
                 .output();
 
-            if output.is_err() {
-                return Err("uvx not found. Please install uv: curl -LsSf https://astral.sh/uv/install.sh | sh".into());
+            if version_check.is_err() || !version_check.as_ref().unwrap().status.success() {
+                return Err("uvx not found. Please install uv:\n  curl -LsSf https://astral.sh/uv/install.sh | sh\n  Then restart your terminal.".into());
             }
 
-            if let Some(s) = self.servers.get_mut(name) {
-                s.status = ServerStatus::Stopped;
+            println!("  Downloading package...");
+
+            // Try to run the package with --help to verify it installs
+            let output = Command::new("uvx")
+                .args(&server.args)
+                .arg("--help")
+                .output();
+
+            match output {
+                Ok(o) if o.status.success() => {
+                    if let Some(s) = self.servers.get_mut(name) {
+                        s.status = ServerStatus::Stopped;
+                    }
+                    self.save_config()?;
+                    println!("  ✓ {} installed successfully", name);
+                }
+                Ok(o) => {
+                    // Some packages don't support --help, just mark as installed
+                    if let Some(s) = self.servers.get_mut(name) {
+                        s.status = ServerStatus::Stopped;
+                    }
+                    self.save_config()?;
+                    println!("  ✓ {} registered (will verify on first run)", name);
+                }
+                Err(e) => {
+                    return Err(format!("Failed to install {}: {}", name, e).into());
+                }
             }
-            self.save_config()?;
-            println!("  ✓ Registered successfully");
         }
 
         Ok(())
@@ -289,9 +317,22 @@ impl McpManager {
             .cloned()
             .collect();
 
+        let mut installed: Vec<String> = Vec::new();
+
         for name in names {
             if let Err(e) = self.install_server(&name) {
                 eprintln!("  Warning: Failed to install {}: {}", name, e);
+            } else {
+                installed.push(name);
+            }
+        }
+
+        // Auto-start successfully installed servers
+        println!("\n  Starting installed servers...");
+        for name in &installed {
+            match self.start_server(name) {
+                Ok(_) => println!("  ✓ {} started", name),
+                Err(e) => println!("  ⚠ {} failed to start: {}", name, e),
             }
         }
 
