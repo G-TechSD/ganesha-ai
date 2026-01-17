@@ -853,23 +853,31 @@ fn add_local_provider() {
         None => return,
     };
 
-    // Fetch available models from server
-    let available_models = fetch_local_models(&endpoint, &provider_type);
+    // Test connection and use default model
+    // Model selection will be available in a future version
+    let model = {
+        let models_url = match provider_type.as_str() {
+            "ollama" => format!("{}/api/tags", endpoint),
+            _ => format!("{}/v1/models", endpoint),
+        };
 
-    let model = if !available_models.is_empty() {
-        println!("\n{} Found {} models", style("✓").green(), available_models.len());
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(3))
+            .build();
 
-        let model_options: Vec<MenuOption> = available_models.iter()
-            .map(|m| MenuOption::new(m, m))
-            .collect();
-
-        match show_menu_with_prompt("Select Model", &model_options, true, false, "Enter model name:") {
-            MenuResult::Selected(v) | MenuResult::Custom(v) => v,
-            _ => "default".to_string(),
+        if let Ok(client) = client {
+            if let Ok(response) = client.get(&models_url).send() {
+                if response.status().is_success() {
+                    println!("{} Server responding - using default loaded model", style("✓").green());
+                } else {
+                    println!("{} Server returned: {} - using 'default'", style("⚠").yellow(), response.status());
+                }
+            } else {
+                println!("{} Could not connect - will retry at runtime", style("⚠").yellow());
+            }
         }
-    } else {
-        println!("{} Could not fetch models. Enter manually.", style("ℹ").cyan());
-        text_input("Model name", Some("default")).unwrap_or_else(|| "default".to_string())
+
+        "default".to_string()
     };
 
     let connection = ProviderConnection {
