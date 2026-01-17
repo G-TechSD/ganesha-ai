@@ -623,6 +623,8 @@ impl McpClient {
     }
 
     /// Send a JSON-RPC request and get response
+    /// Note: This is a blocking call with no timeout. For browser operations,
+    /// the caller should implement their own timeout handling if needed.
     fn send_request(&mut self, method: &str, params: Option<serde_json::Value>)
         -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>>
     {
@@ -642,7 +644,7 @@ impl McpClient {
         writeln!(stdin, "{}", request_str)?;
         stdin.flush()?;
 
-        // Read response (may need multiple attempts for async servers)
+        // Read response (blocking)
         let stdout = self.stdout.as_mut().ok_or("MCP stdout not available")?;
         let mut line = String::new();
         loop {

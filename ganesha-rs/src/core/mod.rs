@@ -292,18 +292,20 @@ impl<L: LlmProvider, C: ConsentHandler> GaneshaEngine<L, C> {
             eprintln!("[DEBUG] Raw LLM response ({} chars): {}", response.len(), &response[..std::cmp::min(500, response.len())]);
         }
 
-        // Add to conversation history for future context
+        // Parse plan from response FIRST (before storing in history)
+        let mut plan = ExecutionPlan::new(task);
+        plan.actions = self.parse_actions(&response)?;
+
+        // Add to conversation history - but store a SUMMARY, not raw JSON
+        // This prevents the model from re-executing old actions when user says "ok"
         self.conversation_history.push(ChatMessage::user(task));
-        self.conversation_history.push(ChatMessage::assistant(&response));
+        let history_response = Self::summarize_response_for_history(&response, &plan.actions);
+        self.conversation_history.push(ChatMessage::assistant(&history_response));
 
         // Trim history if it gets too long (keep last 20 turns = 40 messages)
         if self.conversation_history.len() > 40 {
             self.conversation_history.drain(0..2);
         }
-
-        // Parse plan from response
-        let mut plan = ExecutionPlan::new(task);
-        plan.actions = self.parse_actions(&response)?;
 
         // Post-processing: Override shell commands for website tasks with MCP browser actions
         // This handles the case where LLM uses container.exec/python/curl instead of MCP tools
@@ -2662,6 +2664,46 @@ setInterval(() => {{
         tools.iter().any(|(name, _)| {
             name.contains("playwright") || name.contains("browser")
         })
+    }
+
+    /// Convert a response to a summary suitable for conversation history
+    /// This avoids storing raw JSON action plans that could confuse the model on follow-up turns
+    fn summarize_response_for_history(response: &str, actions: &[Action]) -> String {
+        // If it's a simple response (not an action plan), keep it as-is
+        if actions.len() == 1 && matches!(actions[0].action_type, ActionType::Response) {
+            return actions[0].explanation.clone();
+        }
+
+        // If it's an action plan, summarize the actions
+        if !actions.is_empty() {
+            let action_summaries: Vec<String> = actions.iter()
+                .filter(|a| !matches!(a.action_type, ActionType::Response))
+                .map(|a| {
+                    match a.action_type {
+                        ActionType::Shell => format!("- Run: {}", a.command),
+                        ActionType::McpTool => {
+                            let tool_name = a.command.split('|').next().unwrap_or(&a.command);
+                            format!("- Use tool: {}", tool_name)
+                        }
+                        ActionType::Question => format!("- Ask: {}", a.explanation),
+                        _ => format!("- {}", a.explanation),
+                    }
+                })
+                .collect();
+
+            if action_summaries.is_empty() {
+                return response.to_string();
+            }
+
+            return format!("I'll help with that. Planned actions:\n{}", action_summaries.join("\n"));
+        }
+
+        // Fallback: return original but truncate if too long
+        if response.len() > 500 {
+            format!("{}...", &response[..500])
+        } else {
+            response.to_string()
+        }
     }
 
     /// Check if task is about a website/URL
