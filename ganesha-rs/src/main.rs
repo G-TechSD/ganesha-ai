@@ -719,6 +719,7 @@ async fn run_repl<C: core::ConsentHandler>(
                     println!("\n{}", style("INFO & FEEDBACK:").yellow().bold());
                     println!("  /about         About Ganesha and its history");
                     println!("  /feedback      Send feedback to G-Tech SD");
+                    println!("  /ganesha-update Update to latest version");
 
                     println!("\n{}", style("EXIT:").yellow().bold());
                     println!("  exit, quit     Exit Ganesha");
@@ -1323,6 +1324,58 @@ with real GitLab repositories and documentation.
                     println!("\n{}", style("─".repeat(60)).dim());
                     println!("{}", style("Back to interactive mode.").dim());
                     println!("{}\n", style("─".repeat(60)).dim());
+                    continue;
+                }
+
+                // Handle self-update
+                if input == "/ganesha-update" || input == "/update" {
+                    println!("\n{}", style("═".repeat(60)).cyan());
+                    println!("{}", style("        GANESHA SELF-UPDATE").cyan().bold());
+                    println!("{}\n", style("═".repeat(60)).cyan());
+
+                    println!("{} Checking for updates...\n", style("🔄").cyan());
+
+                    // Detect install location
+                    let exe_path = std::env::current_exe().ok();
+                    let home_dir = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+
+                    // Run update based on platform
+                    let update_cmd = if cfg!(target_os = "windows") {
+                        format!(
+                            "powershell -Command \"iwr -useb https://raw.githubusercontent.com/G-TechSD/ganesha-ai/main/install.ps1 | iex\""
+                        )
+                    } else {
+                        format!(
+                            "curl -sSL https://raw.githubusercontent.com/G-TechSD/ganesha-ai/main/install.sh | bash"
+                        )
+                    };
+
+                    println!("{} Running: {}", style("⚙").dim(), style(&update_cmd).dim());
+                    println!();
+
+                    let status = std::process::Command::new(if cfg!(target_os = "windows") { "powershell" } else { "sh" })
+                        .args(if cfg!(target_os = "windows") {
+                            vec!["-Command", &update_cmd]
+                        } else {
+                            vec!["-c", &update_cmd]
+                        })
+                        .status();
+
+                    match status {
+                        Ok(s) if s.success() => {
+                            println!("\n{} Update complete! Please restart Ganesha.", style("✓").green());
+                            println!("{}", style("Run 'ganesha' to start the new version.").dim());
+                        }
+                        Ok(_) => {
+                            println!("\n{} Update may have encountered issues.", style("⚠").yellow());
+                            println!("{}", style("Check the output above for details.").dim());
+                        }
+                        Err(e) => {
+                            println!("\n{} Update failed: {}", style("✗").red(), e);
+                            println!("{}", style("Try running the install command manually.").dim());
+                        }
+                    }
+                    println!();
                     continue;
                 }
 

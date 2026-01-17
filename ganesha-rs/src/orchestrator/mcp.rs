@@ -209,15 +209,17 @@ impl McpManager {
 
         println!("Installing MCP server: {}", name);
 
-        // For npx-based servers, we just need to verify npm/npx is available
+        // For npx-based servers, we need to verify npm/npx is available
         if server.command == "npx" {
             let output = Command::new("npx")
                 .arg("--version")
                 .output()?;
 
             if !output.status.success() {
-                return Err("npx not found. Please install Node.js".into());
+                return Err("npx not found. Please install Node.js first:\n  macOS: brew install node\n  Linux: curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash - && sudo apt-get install -y nodejs\n  Windows: https://nodejs.org/".into());
             }
+
+            println!("  Downloading package...");
 
             // Try to install/cache the package
             let mut args = vec!["--yes".to_string()];
@@ -229,11 +231,33 @@ impl McpManager {
                 .output()?;
 
             if output.status.success() {
+                // Special handling for playwright - need to install browsers
+                if name == "playwright" || name == "playwright-ea" {
+                    println!("  Installing Playwright browsers (this may take a few minutes)...");
+                    let browser_install = Command::new("npx")
+                        .args(["playwright", "install", "chromium"])
+                        .output();
+
+                    match browser_install {
+                        Ok(out) if out.status.success() => {
+                            println!("  ✓ Chromium browser installed");
+                        }
+                        Ok(out) => {
+                            println!("  ⚠ Browser install warning: {}", String::from_utf8_lossy(&out.stderr));
+                            println!("    You may need to run: npx playwright install");
+                        }
+                        Err(e) => {
+                            println!("  ⚠ Could not install browsers: {}", e);
+                            println!("    Run manually: npx playwright install");
+                        }
+                    }
+                }
+
                 if let Some(s) = self.servers.get_mut(name) {
                     s.status = ServerStatus::Stopped;
                 }
                 self.save_config()?;
-                println!("  ✓ Installed successfully");
+                println!("  ✓ {} installed successfully", name);
             } else {
                 return Err(format!("Failed to install {}: {}",
                     name, String::from_utf8_lossy(&output.stderr)).into());

@@ -16,6 +16,93 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+/// Get system information for the system prompt
+fn get_system_info() -> String {
+    let os = std::env::consts::OS;
+    let arch = std::env::consts::ARCH;
+
+    // Get OS version
+    let os_version = if cfg!(target_os = "macos") {
+        std::process::Command::new("sw_vers")
+            .arg("-productVersion")
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| format!("macOS {}", s.trim()))
+            .unwrap_or_else(|| "macOS".into())
+    } else if cfg!(target_os = "linux") {
+        std::fs::read_to_string("/etc/os-release")
+            .ok()
+            .and_then(|content| {
+                content.lines()
+                    .find(|l| l.starts_with("PRETTY_NAME="))
+                    .map(|l| l.trim_start_matches("PRETTY_NAME=").trim_matches('"').to_string())
+            })
+            .unwrap_or_else(|| "Linux".into())
+    } else if cfg!(target_os = "windows") {
+        "Windows".into()
+    } else {
+        os.to_string()
+    };
+
+    // Get RAM (platform specific)
+    let ram = if cfg!(target_os = "macos") {
+        std::process::Command::new("sysctl")
+            .args(["-n", "hw.memsize"])
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .and_then(|s| s.trim().parse::<u64>().ok())
+            .map(|bytes| format!("{} GB", bytes / 1024 / 1024 / 1024))
+            .unwrap_or_else(|| "Unknown".into())
+    } else if cfg!(target_os = "linux") {
+        std::fs::read_to_string("/proc/meminfo")
+            .ok()
+            .and_then(|content| {
+                content.lines()
+                    .find(|l| l.starts_with("MemTotal:"))
+                    .and_then(|l| l.split_whitespace().nth(1))
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .map(|kb| format!("{} GB", kb / 1024 / 1024))
+            })
+            .unwrap_or_else(|| "Unknown".into())
+    } else {
+        "Unknown".into()
+    };
+
+    // Get CPU info
+    let cpu = if cfg!(target_os = "macos") {
+        std::process::Command::new("sysctl")
+            .args(["-n", "machdep.cpu.brand_string"])
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.trim().to_string())
+            .unwrap_or_else(|| arch.to_string())
+    } else if cfg!(target_os = "linux") {
+        std::fs::read_to_string("/proc/cpuinfo")
+            .ok()
+            .and_then(|content| {
+                content.lines()
+                    .find(|l| l.starts_with("model name"))
+                    .and_then(|l| l.split(':').nth(1))
+                    .map(|s| s.trim().to_string())
+            })
+            .unwrap_or_else(|| arch.to_string())
+    } else {
+        arch.to_string()
+    };
+
+    // Current time
+    let now = chrono::Local::now();
+    let time = now.format("%Y-%m-%d %H:%M:%S %Z").to_string();
+
+    format!(
+        "OS: {} ({})\nRAM: {}\nCPU: {}\nTime: {}",
+        os_version, arch, ram, cpu, time
+    )
+}
+
 /// Message in the conversation
 #[derive(Debug, Clone)]
 struct Message {
@@ -105,9 +192,15 @@ impl AgentEngine {
     }
 
     fn system_prompt(&self) -> String {
+        let sys_info = get_system_info();
         format!(r#"You are Ganesha, an expert AI coding assistant. You help users with software engineering tasks.
 
+SYSTEM INFORMATION:
+{}
+
 CURRENT DIRECTORY: {}
+
+IMPORTANT: Use commands appropriate for this operating system. Do not use Linux commands on macOS or Windows, and vice versa.
 
 You have access to these tools:
 
@@ -150,6 +243,7 @@ IMPORTANT RULES:
 6. Be concise in explanations but thorough in execution
 
 When you're done with a task, summarize what was accomplished."#,
+            sys_info,
             self.cwd.display()
         )
     }
