@@ -88,19 +88,19 @@ iwr -useb https://raw.githubusercontent.com/G-TechSD/ganesha-ai/main/install.ps1
 
 | Platform | Architecture | Download |
 |----------|-------------|----------|
-| **Linux** | x86_64 | [ganesha-linux-x86_64.tar.gz](https://github.com/G-TechSD/ganesha-ai/releases/latest) |
-| **Linux** | ARM64 | [ganesha-linux-aarch64.tar.gz](https://github.com/G-TechSD/ganesha-ai/releases/latest) |
-| **macOS** | Intel | [ganesha-macos-x86_64.tar.gz](https://github.com/G-TechSD/ganesha-ai/releases/latest) |
-| **macOS** | Apple Silicon | [ganesha-macos-aarch64.tar.gz](https://github.com/G-TechSD/ganesha-ai/releases/latest) |
-| **Windows** | x86_64 | [ganesha-windows-x86_64.zip](https://github.com/G-TechSD/ganesha-ai/releases/latest) |
+| **Linux** | x86_64 | [ganesha-linux-x86_64.tar.gz](https://github.com/G-TechSD/ganesha-ai/releases/latest/download/ganesha-linux-x86_64.tar.gz) |
+| **macOS** | Apple Silicon | [ganesha-macos-aarch64.tar.gz](https://github.com/G-TechSD/ganesha-ai/releases/latest/download/ganesha-macos-aarch64.tar.gz) |
+| **Windows** | x86_64 | [ganesha-windows-x86_64.zip](https://github.com/G-TechSD/ganesha-ai/releases/latest/download/ganesha-windows-x86_64.zip) |
 
 ### Build from Source
 
 ```bash
 git clone https://github.com/G-TechSD/ganesha-ai.git
-cd ganesha-ai/ganesha-rs
+cd ganesha-ai/ganesha-rs/ganesha4
 cargo build --release
+# Linux/macOS:
 sudo cp target/release/ganesha /usr/local/bin/
+# Windows: Copy target/release/ganesha.exe to your PATH
 ```
 
 ---

@@ -15,7 +15,7 @@
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"  # Faster downloads
 
-$Version = "3.14.0-beta.2"
+$Version = "4.0.0-beta"
 $Repo = "G-TechSD/ganesha-ai"
 $InstallDir = if ($env:GANESHA_INSTALL_DIR) { $env:GANESHA_INSTALL_DIR } else { "$env:LOCALAPPDATA\Ganesha" }
 
@@ -126,7 +126,7 @@ function Build-FromSource {
         exit 1
     }
 
-    Set-Location "$tempDir\ganesha\ganesha-rs"
+    Set-Location "$tempDir\ganesha\ganesha-rs\ganesha4"
 
     Write-Host "[*] Building (this may take several minutes)..." -ForegroundColor Cyan
     cargo build --release
