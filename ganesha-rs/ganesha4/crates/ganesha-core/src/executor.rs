@@ -25,7 +25,6 @@
 //! ```
 
 use crate::planner::{ActionType, PlanStep, RollbackStrategy, StepId};
-use crate::risk::OperationRisk;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -33,9 +32,8 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 use thiserror::Error;
-use tokio::io::AsyncReadExt;
 use tokio::process::Command;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 /// Errors that can occur during execution
 #[derive(Error, Debug)]
@@ -547,7 +545,7 @@ impl Executor for StandardExecutor {
         let mut result = match &step.action_type {
             ActionType::ReadFile => {
                 let mut outputs = Vec::new();
-                let mut all_changes = Vec::new();
+                let all_changes = Vec::new();
 
                 for path in &step.target_files {
                     match self.read_file(path, context).await {

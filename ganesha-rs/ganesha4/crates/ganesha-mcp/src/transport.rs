@@ -9,7 +9,7 @@ use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
-use tracing::{debug, error, warn};
+use tracing::{debug, error};
 
 /// Transport trait for MCP communication
 #[async_trait]
@@ -101,7 +101,7 @@ impl StdioTransport {
                             break;
                         }
                     }
-                    Err(e) => {
+                    Err(_e) => {
                         debug!("Non-JSON line from server: {}", line);
                     }
                 }

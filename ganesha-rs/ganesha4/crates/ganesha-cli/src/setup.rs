@@ -45,6 +45,7 @@ impl ProviderType {
         }
     }
 
+    #[allow(dead_code)]
     pub fn requires_api_key(&self) -> bool {
         match self {
             ProviderType::Anthropic | ProviderType::OpenAI | ProviderType::OpenRouter => true,

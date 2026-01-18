@@ -452,6 +452,7 @@ impl RollbackResult {
 }
 
 /// Auto-checkpoint wrapper for operations
+#[allow(dead_code)]
 pub struct AutoCheckpoint<'a> {
     manager: &'a mut RollbackManager,
     checkpoint_id: String,

@@ -4,18 +4,16 @@
 //! Uses ratatui for terminal rendering with a clean, professional layout.
 
 use ratatui::{
-    buffer::Buffer,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
-    text::{Line, Span, Text},
+    style::{Modifier, Style},
+    text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Widget, Wrap},
     Frame,
 };
 
-use super::app::{AppState, ChatMessage, DiffEntry, DiffStatus, FileEntry, Panel, ThemeColors};
+use super::app::{AppState, ChatMessage, Panel, ThemeColors};
 use super::widgets::{
-    self, CommandPalette, Header, InputBox, ModeIndicator, ProgressBar, RiskIndicator,
-    Scrollbar as CustomScrollbar, Spinner, StatusBar, TokenCounter,
+    self, CommandPalette, Header, InputBox, StatusBar,
 };
 use ganesha_providers::message::MessageRole;
 
@@ -510,7 +508,7 @@ fn render_command_palette(f: &mut Frame, state: &AppState, colors: &ThemeColors)
 }
 
 /// Render the help overlay
-fn render_help_overlay(f: &mut Frame, state: &AppState, colors: &ThemeColors) {
+fn render_help_overlay(f: &mut Frame, _state: &AppState, colors: &ThemeColors) {
     let area = f.area();
 
     // Calculate overlay size

@@ -2156,6 +2156,7 @@ impl Embedding {
 }
 
 /// Text-based search implementation (before embeddings)
+#[allow(dead_code)]
 pub struct TextSearch {
     config: SemanticSearchConfig,
 }

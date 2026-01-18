@@ -6,14 +6,17 @@ mod cli;
 mod repl;
 mod commands;
 mod tui;
+#[allow(dead_code)]
 mod config;
+#[allow(dead_code)]
 mod render;
+#[allow(dead_code)]
 mod history;
 mod setup;
+#[allow(dead_code)]
 mod voice_input;
 
 use clap::Parser;
-use tracing::info;
 use tracing_subscriber::{fmt, EnvFilter};
 
 use cli::{Cli, Commands};

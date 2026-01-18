@@ -3,7 +3,6 @@
 //! Utilities for rendering formatted output to the terminal.
 
 use colored::Colorize;
-use std::io::{self, Write};
 use textwrap::{wrap, Options};
 use unicode_width::UnicodeWidthStr;
 
@@ -40,6 +39,7 @@ pub fn print_styled(message: &str, style: Style) {
 }
 
 /// Print an assistant message with markdown rendering
+#[allow(unused_assignments)]
 pub fn print_assistant_message(message: &str) {
     println!();
 
@@ -47,7 +47,7 @@ pub fn print_assistant_message(message: &str) {
     // For full markdown, we'd use termimad
     let lines: Vec<&str> = message.lines().collect();
     let mut in_code_block = false;
-    let mut code_lang = String::new();
+    let mut code_lang;
 
     for line in lines {
         if line.starts_with("```") {
@@ -55,6 +55,7 @@ pub fn print_assistant_message(message: &str) {
                 // End code block
                 println!("{}", "─".repeat(40).dimmed());
                 in_code_block = false;
+                code_lang = String::new(); // Reset for next block
             } else {
                 // Start code block
                 code_lang = line[3..].trim().to_string();

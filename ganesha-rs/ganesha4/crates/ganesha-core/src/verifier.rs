@@ -25,7 +25,7 @@
 //! }
 //! ```
 
-use crate::executor::{ExecutionResult, FileChange, FileChangeType};
+use crate::executor::{ExecutionResult, FileChangeType};
 use crate::planner::StepId;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};

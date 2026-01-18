@@ -286,6 +286,7 @@ pub mod platform {
     use super::*;
 
     /// Cross-platform screen capture implementation using xcap.
+    #[allow(dead_code)]
     pub struct XcapCapture {
         settings: CaptureSettings,
     }

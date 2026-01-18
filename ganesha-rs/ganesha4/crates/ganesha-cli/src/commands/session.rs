@@ -5,7 +5,7 @@
 use crate::cli::SessionAction;
 use crate::render;
 use colored::Colorize;
-use ganesha_core::session::{SessionManager, SessionStatus};
+use ganesha_core::session::SessionManager;
 use std::io::{self, Write};
 
 /// Get the sessions directory

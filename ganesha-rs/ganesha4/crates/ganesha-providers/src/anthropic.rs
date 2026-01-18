@@ -256,6 +256,7 @@ struct AnthropicChatResponse {
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type")]
+#[allow(dead_code)]
 enum ResponseContentBlock {
     #[serde(rename = "text")]
     Text { text: String },

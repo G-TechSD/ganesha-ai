@@ -1,6 +1,6 @@
 //! Window management for the desktop app
 
-use crate::{config::DesktopConfig, DesktopError, Result};
+use crate::{config::DesktopConfig, Result};
 
 /// Window manager handles the main application window
 pub struct WindowManager {
@@ -10,6 +10,7 @@ pub struct WindowManager {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct WindowManagerConfig {
     title: String,
     width: u32,

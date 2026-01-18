@@ -4,15 +4,12 @@
 //! Uses an emergent agentic architecture where the AI decides what commands to run.
 
 use crate::cli::{ChatMode, Cli};
-use crate::commands;
-use crate::render::{self, Style};
 use crate::setup::{self, ProvidersConfig, ProviderType};
 use colored::Colorize;
 use ganesha_mcp::{McpManager, config::presets as mcp_presets, Tool as McpTool};
-use ganesha_providers::{GenerateOptions, LocalProvider, LocalProviderType, Message, ProviderManager, ProviderPriority, MessageRole};
+use ganesha_providers::{GenerateOptions, LocalProvider, LocalProviderType, Message, ProviderManager, ProviderPriority};
 use rustyline::error::ReadlineError;
 use rustyline::{Config, Editor, history::FileHistory};
-use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, IsTerminal, Write};
 use std::path::PathBuf;
@@ -1217,6 +1214,7 @@ fn print_ganesha_box(content: &str) {
 }
 
 /// Print info about a single file
+#[allow(dead_code)]
 fn print_file_info(path: &std::path::Path, detailed: bool) -> anyhow::Result<()> {
     let metadata = std::fs::metadata(path)?;
     let name = path.file_name().unwrap_or_default().to_string_lossy();
@@ -1255,6 +1253,7 @@ fn print_file_info(path: &std::path::Path, detailed: bool) -> anyhow::Result<()>
 }
 
 /// Get an icon for a file based on name and type
+#[allow(dead_code)]
 fn get_file_icon(name: &str, is_dir: bool, is_symlink: bool) -> &'static str {
     if is_symlink {
         return "🔗";
@@ -1307,6 +1306,8 @@ fn get_file_icon(name: &str, is_dir: bool, is_symlink: bool) -> &'static str {
 }
 
 /// Colorize a filename based on its type
+#[allow(dead_code)]
+#[allow(unused_variables)]
 fn colorize_filename(name: &str, is_dir: bool, is_symlink: bool, path: &std::path::Path) -> String {
     if is_symlink {
         return format!("{}", name.bright_cyan().italic());
@@ -1394,6 +1395,7 @@ struct SlashCommand {
 }
 
 /// REPL state
+#[allow(dead_code)]
 pub struct ReplState {
     pub mode: ChatMode,
     pub model: Option<String>,
@@ -1451,18 +1453,14 @@ impl ReplState {
             debug!("No MCP config found: {}", e);
         }
 
-        // Add default servers if not already configured
-        let configured = self.mcp_manager.list_configured().await;
-        let has_puppeteer = configured.iter().any(|(id, _)| id == "puppeteer");
-
-        // Add Puppeteer for web browsing if not configured
-        if !has_puppeteer {
-            self.mcp_manager.add_server_config("puppeteer", mcp_presets::puppeteer()).await;
-        }
-
-        // Auto-connect to servers
+        // Auto-connect to configured servers only (don't auto-add puppeteer - requires npx)
+        // Users can manually add MCP servers with /mcp add <preset>
         if let Err(e) = self.mcp_manager.auto_connect().await {
-            warn!("Failed to auto-connect MCP servers: {}", e);
+            // Only warn if there were configured servers that failed
+            let configured = self.mcp_manager.list_configured().await;
+            if !configured.is_empty() {
+                warn!("Failed to auto-connect MCP servers: {}", e);
+            }
         }
 
         // Refresh tool cache
@@ -1517,6 +1515,7 @@ impl ReplState {
     }
 
     /// Get the system prompt based on current mode
+    #[allow(dead_code)]
     fn system_prompt(&self) -> String {
         let context = if self.context_files.is_empty() {
             String::new()
@@ -2043,6 +2042,7 @@ fn handle_slash_command(line: &str, state: &mut ReplState) -> anyhow::Result<boo
 }
 
 /// Send a message to the LLM
+#[allow(dead_code)]
 async fn send_message(message: &str, state: &mut ReplState) -> anyhow::Result<String> {
     debug!("Sending message: {}", message);
 

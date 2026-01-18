@@ -16,6 +16,11 @@
 //! - `ui`: Rendering functions
 //! - `widgets`: Reusable custom widgets
 
+// TUI is scaffolded but not fully integrated yet
+#![allow(dead_code)]
+#![allow(unused_imports)]
+#![allow(unused_variables)]
+
 pub mod app;
 pub mod events;
 pub mod ui;
@@ -28,7 +33,7 @@ use ganesha_providers::{GenerateOptions, Message as ProviderMessage, ProviderMan
 use ratatui::{
     backend::CrosstermBackend,
     crossterm::{
-        event::{self, DisableMouseCapture, EnableMouseCapture, Event},
+        event::{self, DisableMouseCapture, EnableMouseCapture},
         execute,
         terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     },

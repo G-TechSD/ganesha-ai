@@ -718,7 +718,7 @@ fn handle_command_mode_key(key: KeyEvent) -> Msg {
 }
 
 /// Handle keys in visual mode
-fn handle_visual_mode_key(state: &AppState, key: KeyEvent) -> Msg {
+fn handle_visual_mode_key(_state: &AppState, key: KeyEvent) -> Msg {
     match key.code {
         KeyCode::Esc => Msg::EnterNormalMode,
         KeyCode::Char('y') => {
@@ -752,7 +752,7 @@ fn handle_command_palette_key(key: KeyEvent) -> Msg {
 }
 
 /// Handle mouse events
-fn handle_mouse_event(state: &AppState, mouse: MouseEvent) -> Msg {
+fn handle_mouse_event(_state: &AppState, mouse: MouseEvent) -> Msg {
     match mouse.kind {
         MouseEventKind::ScrollUp => Msg::ScrollUp(3),
         MouseEventKind::ScrollDown => Msg::ScrollDown(3),

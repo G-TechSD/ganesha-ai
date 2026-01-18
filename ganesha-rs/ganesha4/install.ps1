@@ -53,14 +53,6 @@ if ($userPath -notlike "*$binDir*") {
 Write-Host ""
 Write-Host "✓ Ganesha installed successfully!" -ForegroundColor Green
 Write-Host ""
-Write-Host "Next steps:" -ForegroundColor Cyan
-Write-Host "  1. Open a new terminal (to refresh PATH)"
-Write-Host "  2. Run: ganesha voice setup    (downloads free voice models)"
-Write-Host "  3. Run: pip install piper-tts  (for local TTS)"
-Write-Host "  4. Run: ganesha voice chat     (start voice chat)"
+Write-Host "Open a new terminal and run: ganesha" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Voice controls:" -ForegroundColor Yellow
-Write-Host "  Hold CTRL      - Push-to-talk (record while held)"
-Write-Host "  Double-tap CTRL - Toggle continuous listening"
-Write-Host "  ESC            - Cancel recording"
-Write-Host "  Ctrl+C         - Exit voice mode"
+Write-Host "Optional: Run 'ganesha voice setup' for voice input (requires Python)" -ForegroundColor DarkGray

@@ -70,6 +70,7 @@ pub enum DesktopError {
 pub type Result<T> = std::result::Result<T, DesktopError>;
 
 /// Main desktop application
+#[allow(dead_code)]
 pub struct DesktopApp {
     config: DesktopConfig,
     state: AppState,

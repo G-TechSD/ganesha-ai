@@ -425,7 +425,7 @@ pub async fn run(action: VoiceAction) -> anyhow::Result<()> {
                     .build()?
             };
 
-            let manager = match VoiceManager::new(config).await {
+            let _manager = match VoiceManager::new(config).await {
                 Ok(m) => m,
                 Err(e) => {
                     println!("{} Failed to initialize voice: {}", "Error:".red(), e);

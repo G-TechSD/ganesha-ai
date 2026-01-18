@@ -14,7 +14,7 @@ use crate::{
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 use std::time::Duration;
 
 /// Type of local provider

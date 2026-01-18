@@ -9,7 +9,7 @@ use crate::{
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, warn};
+use tracing::debug;
 
 /// OpenAI API provider
 pub struct OpenAiProvider {

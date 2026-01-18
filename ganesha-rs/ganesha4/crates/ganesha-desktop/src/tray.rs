@@ -36,6 +36,7 @@ impl TrayManager {
     }
 
     /// Build the tray menu
+    #[allow(dead_code)]
     fn build_menu(&self) -> TrayMenu {
         TrayMenu {
             items: vec![

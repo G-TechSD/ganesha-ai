@@ -48,7 +48,7 @@ impl HotkeyManager {
         // - macOS: CGEventTapCreate
         // - Linux: X11 XGrabKey or libxkbcommon
 
-        for (name, binding) in &self.hotkeys {
+        for (_name, binding) in &self.hotkeys {
             tracing::info!("Registered hotkey: {} -> {:?}", binding.key_combo, binding.action);
         }
 

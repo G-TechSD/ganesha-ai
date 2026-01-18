@@ -6,7 +6,6 @@ use crate::{
     GenerateOptions, LlmProvider, LocalProvider, Message, ModelInfo, ModelTier,
     OpenAiProvider, AnthropicProvider, OpenRouterProvider, ProviderError, Response, Result,
 };
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};

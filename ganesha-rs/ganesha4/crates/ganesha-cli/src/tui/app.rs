@@ -4,7 +4,7 @@
 //! All UI state is centralized here with immutable updates via messages.
 
 use ganesha_core::RiskLevel;
-use ganesha_providers::message::{Message, MessageRole};
+use ganesha_providers::message::MessageRole;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
