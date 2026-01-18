@@ -285,72 +285,27 @@ impl SessionLogger {
 }
 
 /// Parse and detect multiple choice options from AI response
-/// Only returns options if the AI is explicitly asking the user to make a choice
+/// Only returns options if the AI is EXPLICITLY presenting numbered choices for user selection
+/// This is very strict to avoid false positives on informational numbered lists
 /// Returns detected options if any, or None
-fn detect_options(text: &str) -> Option<Vec<String>> {
-    let text_lower = text.to_lowercase();
-
-    // Check if the AI is actually asking for a choice (not just listing information)
-    // Look for choice-indicating phrases BEFORE or NEAR the numbered list
-    let choice_indicators = [
-        "which would you",
-        "which one would you",
-        "would you like",
-        "would you prefer",
-        "choose from",
-        "select from",
-        "pick from",
-        "select one",
-        "choose one",
-        "here are your options",
-        "here are some options",
-        "your options are",
-        "options:",
-        "choose:",
-        "select:",
-        "which do you",
-        "what would you like",
-        "let me know which",
-        "tell me which",
-    ];
-
-    // Must have a choice indicator
-    let has_choice_indicator = choice_indicators.iter().any(|&indicator| text_lower.contains(indicator));
-
-    if !has_choice_indicator {
-        return None;
-    }
-
-    let lines: Vec<&str> = text.lines().collect();
-    let mut options = Vec::new();
-    let mut in_options_section = false;
-
-    // Look for numbered options (1. Option, 2. Option, etc.)
-    let option_pattern = Regex::new(r"^\s*(\d+)[.)]\s+(.+)$").unwrap();
-
-    for line in &lines {
-        if let Some(caps) = option_pattern.captures(line) {
-            let num: i32 = caps.get(1).unwrap().as_str().parse().unwrap_or(0);
-            let option_text = caps.get(2).unwrap().as_str().trim().to_string();
-
-            // Options should start at 1 and be sequential
-            if num == (options.len() + 1) as i32 && !option_text.is_empty() {
-                options.push(option_text);
-                in_options_section = true;
-            }
-        } else if in_options_section && !line.trim().is_empty() && !line.trim().starts_with("```") {
-            // If we hit a non-option line after starting options, stop collecting
-            // (unless it's a code block or empty line)
-            break;
-        }
-    }
-
-    // Only return if we found 2-10 options (reasonable range for choices)
-    if options.len() >= 2 && options.len() <= 10 {
-        Some(options)
-    } else {
-        None
-    }
+fn detect_options(_text: &str) -> Option<Vec<String>> {
+    // DISABLED: This feature was causing too many false positives
+    // (e.g., detecting ingredient lists as choices when AI asks "would you like to know more?")
+    //
+    // The multiple choice UI should only appear when the AI explicitly formats choices like:
+    // "Please select an option:
+    //  1. Option A
+    //  2. Option B"
+    //
+    // But distinguishing this from informational lists like:
+    // "Here are the ingredients:
+    //  1. Malt - provides color
+    //  2. Hops - adds bitterness
+    //  Would you like to learn more?"
+    //
+    // Is too error-prone. Disabling until we can implement a more robust solution
+    // (e.g., having the AI explicitly mark choices with a special format)
+    None
 }
 
 /// Display interactive multiple choice prompt
