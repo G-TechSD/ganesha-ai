@@ -16,5 +16,9 @@ serde_json.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 
+# Configuration
+toml.workspace = true
+dirs.workspace = true
+
 # Tauri will be added when building the desktop app
 # tauri = "2"
