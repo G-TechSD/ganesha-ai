@@ -44,26 +44,26 @@ jobs:
           sudo apt-get install -y libasound2-dev pkg-config libssl-dev libudev-dev
 
       - name: Build
-        working-directory: ganesha-rs
+        working-directory: ganesha-rs/ganesha4
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Package (Linux)
         if: runner.os == 'Linux'
         run: |
-          cd ganesha-rs/target/${{ matrix.target }}/release
-          tar -czvf ../../../../${{ matrix.artifact }} ganesha
+          cd ganesha-rs/ganesha4/target/${{ matrix.target }}/release
+          tar -czvf ../../../../../${{ matrix.artifact }} ganesha
 
       - name: Package (macOS)
         if: runner.os == 'macOS'
         run: |
-          cd ganesha-rs/target/${{ matrix.target }}/release
-          tar -czvf ../../../../${{ matrix.artifact }} ganesha
+          cd ganesha-rs/ganesha4/target/${{ matrix.target }}/release
+          tar -czvf ../../../../../${{ matrix.artifact }} ganesha
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Compress-Archive -Path ganesha-rs/target/${{ matrix.target }}/release/ganesha.exe -DestinationPath ${{ matrix.artifact }}
+          Compress-Archive -Path ganesha-rs/ganesha4/target/${{ matrix.target }}/release/ganesha.exe -DestinationPath ${{ matrix.artifact }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
