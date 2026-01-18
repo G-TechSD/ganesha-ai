@@ -1668,6 +1668,7 @@ dependencies = [
  "serde",
  "serde_json",
  "syntect",
+ "sysinfo 0.33.1",
  "tempfile",
  "termimad",
  "textwrap",
@@ -4524,6 +4525,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "sysinfo"
+version = "0.33.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4fc858248ea01b66f19d8e8a6d55f41deaf91e9d495246fd01368d99935c6c01"
+dependencies = [
+ "core-foundation-sys",
+ "libc",
+ "memchr",
+ "ntapi",
+ "rayon",
+ "windows 0.57.0",
+]
+
+[[package]]
 name = "system-configuration"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5869,7 +5884,7 @@ dependencies = [
  "image",
  "log",
  "percent-encoding",
- "sysinfo",
+ "sysinfo 0.32.1",
  "thiserror 1.0.69",
  "windows 0.58.0",
  "xcb",

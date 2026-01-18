@@ -1041,6 +1041,8 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
 
 /// Generate the agentic system prompt
 fn agentic_system_prompt(state: &ReplState) -> String {
+    use sysinfo::System;
+
     let mode_context = match state.mode {
         ChatMode::Code => "You are Ganesha, an intelligent AI coding assistant.",
         ChatMode::Ask => "You are Ganesha, a helpful AI assistant.",
@@ -1064,46 +1066,76 @@ fn agentic_system_prompt(state: &ReplState) -> String {
     // Get MCP tools if available
     let tools_prompt = state.get_mcp_tools_prompt();
 
+    // Platform-specific shell info
+    let (os_name, shell_type, list_cmd, list_example) = if cfg!(windows) {
+        ("Windows", "cmd.exe", "dir", "dir /b")
+    } else if cfg!(target_os = "macos") {
+        ("macOS", "sh", "ls", "ls -la")
+    } else {
+        ("Linux", "sh", "ls", "ls -la")
+    };
+
+    // Get system info
+    let mut sys = System::new_all();
+    sys.refresh_all();
+
+    let os_version = System::long_os_version().unwrap_or_else(|| "Unknown".to_string());
+    let cpu_name = sys.cpus().first()
+        .map(|c| c.brand().to_string())
+        .unwrap_or_else(|| "Unknown CPU".to_string());
+    let cpu_count = sys.cpus().len();
+    let total_memory_gb = sys.total_memory() as f64 / 1024.0 / 1024.0 / 1024.0;
+    let available_memory_gb = sys.available_memory() as f64 / 1024.0 / 1024.0 / 1024.0;
+    let current_time = chrono::Local::now().format("%Y-%m-%d %H:%M:%S %Z").to_string();
+
     format!(
         r#"{mode_context}
 
-Current working directory: {cwd}
+SYSTEM:
+- Date/Time: {current_time}
+- OS: {os_version}
+- CPU: {cpu_name} ({cpu_count} cores)
+- Memory: {available_memory_gb:.1} GB available / {total_memory_gb:.1} GB total
+- Shell: {shell_type}
+- Working directory: {cwd}
 {context_files}
 
 CAPABILITIES:
 
-1. SHELL COMMANDS - Execute ONE command at a time:
-```bash
-ls -la
+1. SHELL COMMANDS - Execute ONE command at a time using {shell_type} syntax:
+```shell
+{list_example}
 ```
+On {os_name}, use {shell_type} commands. For listing files: `{list_cmd}`. For changing directories: `cd`.
 
 2. MCP TOOLS - Call external tools for web browsing, data gathering, etc:
 ```tool
-tool_name: puppeteer:puppeteer_navigate
+tool_name: tool_name_here
 arguments:
-  url: https://example.com
-  allowDangerous: true
-  launchOptions: {{"headless": true, "args": ["--no-sandbox"]}}
+  key: value
 ```
-IMPORTANT: When using puppeteer tools, ALWAYS include allowDangerous: true and launchOptions with --no-sandbox for Linux compatibility.
 {tools_prompt}
 
 BEHAVIOR RULES:
 - Think step-by-step to accomplish tasks
-- For information gathering: use available tools (web fetch, browser) to get real data
+- Use {os_name}/{shell_type} compatible commands ONLY
 - For shell commands: ONE per response, NON-INTERACTIVE only (no editors/password prompts)
 - After results: briefly describe what you found, then continue if needed
 - Be resourceful: if one approach fails, try another
 - NEVER ask "what would you like to do" - just observe and report
-- NEVER hardcode answers - always gather real, current data when asked about external resources
-
-EXAMPLES OF GOOD BEHAVIOR:
-- Asked "list Toyota models": Navigate to toyota.com, extract model names from the page
-- Asked "what's the weather": Use a weather API or web search
-- Asked "ls": Run the command, describe the files present
 
 The key is to be intelligent and use the right tool for each task."#,
         mode_context = mode_context,
+        current_time = current_time,
+        os_version = os_version,
+        cpu_name = cpu_name,
+        cpu_count = cpu_count,
+        total_memory_gb = total_memory_gb,
+        available_memory_gb = available_memory_gb,
+        os_name = os_name,
+        shell_type = shell_type,
+        list_cmd = list_cmd,
+        list_example = list_example,
         cwd = state.working_dir.display(),
         context_files = context_files,
         tools_prompt = tools_prompt

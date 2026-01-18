@@ -461,6 +461,19 @@ impl StandardExecutor {
             return Ok((format!("[DRY RUN] Would execute: {}", command), 0));
         }
 
+        // Use platform-appropriate shell
+        #[cfg(windows)]
+        let child = Command::new("cmd")
+            .arg("/C")
+            .arg(command)
+            .current_dir(&context.working_directory)
+            .envs(&context.environment)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()?;
+
+        #[cfg(not(windows))]
         let child = Command::new("sh")
             .arg("-c")
             .arg(command)
