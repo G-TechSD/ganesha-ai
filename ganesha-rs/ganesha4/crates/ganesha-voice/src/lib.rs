@@ -57,11 +57,13 @@ pub mod conversation;
 pub mod input;
 pub mod output;
 pub mod personality;
+pub mod setup;
 
 pub use config::{VoiceConfig, VoiceConfigBuilder};
 pub use conversation::{ConversationEvent, ConversationState, VoiceConversation};
 pub use input::{AudioData, AudioRecorder, TranscriptionResult, VoiceInput, VoiceInputEvent, WhisperInput, LocalWhisperInput};
-pub use output::{AudioPlayer, OpenAITTS, ElevenLabsTTS, OpenAIVoice, SpeechAudio, VoiceOutput, VoiceOutputEvent};
+pub use output::{AudioPlayer, OpenAITTS, ElevenLabsTTS, PiperTTS, OpenAIVoice, SpeechAudio, VoiceOutput, VoiceOutputEvent};
+pub use setup::{VoiceModels, VoiceSetupStatus, download_whisper_model, download_piper_voice, WHISPER_MODELS, PIPER_VOICES};
 pub use personality::{BuiltInPersonalities, Personality, PersonalityManager};
 
 use std::sync::atomic::{AtomicBool, Ordering};

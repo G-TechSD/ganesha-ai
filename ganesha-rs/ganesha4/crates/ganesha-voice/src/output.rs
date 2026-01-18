@@ -571,6 +571,186 @@ impl VoiceOutput for ElevenLabsTTS {
     }
 }
 
+/// Piper TTS implementation (local, free)
+/// Uses the piper command-line tool for neural TTS
+pub struct PiperTTS {
+    model_path: std::path::PathBuf,
+    config_path: Option<std::path::PathBuf>,
+    speaker_id: Option<i32>,
+    length_scale: f32, // Speed: < 1.0 = faster, > 1.0 = slower
+}
+
+impl PiperTTS {
+    /// Create a new Piper TTS instance with a model path
+    pub fn new(model_path: impl Into<std::path::PathBuf>) -> Self {
+        let model_path = model_path.into();
+        let config_path = {
+            let mut p = model_path.clone();
+            p.set_extension("onnx.json");
+            if p.exists() {
+                Some(p)
+            } else {
+                None
+            }
+        };
+
+        Self {
+            model_path,
+            config_path,
+            speaker_id: None,
+            length_scale: 1.0,
+        }
+    }
+
+    /// Set the config file path
+    pub fn with_config(mut self, config_path: impl Into<std::path::PathBuf>) -> Self {
+        self.config_path = Some(config_path.into());
+        self
+    }
+
+    /// Set the speaker ID (for multi-speaker models)
+    pub fn with_speaker(mut self, speaker_id: i32) -> Self {
+        self.speaker_id = Some(speaker_id);
+        self
+    }
+
+    /// Set the length scale (speed adjustment)
+    pub fn with_speed(mut self, length_scale: f32) -> Self {
+        self.length_scale = length_scale.clamp(0.5, 2.0);
+        self
+    }
+
+    /// Check if piper command is available
+    pub fn is_piper_installed() -> bool {
+        std::process::Command::new("piper")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+}
+
+#[async_trait]
+impl VoiceOutput for PiperTTS {
+    fn name(&self) -> &str {
+        "Piper TTS (Local)"
+    }
+
+    async fn synthesize(&self, text: &str) -> Result<SpeechAudio> {
+        use std::process::{Command, Stdio};
+        use std::io::Write;
+
+        // Check if piper is available
+        if !Self::is_piper_installed() {
+            return Err(VoiceError::FeatureDisabled(
+                "Piper TTS not installed. Install with: pip install piper-tts".to_string(),
+            ));
+        }
+
+        // Check if model exists
+        if !self.model_path.exists() {
+            return Err(VoiceError::ConfigError(format!(
+                "Piper model not found: {}",
+                self.model_path.display()
+            )));
+        }
+
+        // Create a temp file for output
+        let temp_dir = std::env::temp_dir();
+        let output_file = temp_dir.join(format!("piper_output_{}.wav", std::process::id()));
+
+        // Build piper command
+        let mut cmd = Command::new("piper");
+        cmd.arg("--model")
+            .arg(&self.model_path)
+            .arg("--output_file")
+            .arg(&output_file)
+            .arg("--length_scale")
+            .arg(self.length_scale.to_string())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
+
+        if let Some(ref config) = self.config_path {
+            cmd.arg("--config").arg(config);
+        }
+
+        if let Some(speaker) = self.speaker_id {
+            cmd.arg("--speaker").arg(speaker.to_string());
+        }
+
+        // Spawn process and write text
+        let mut child = cmd.spawn().map_err(|e| {
+            VoiceError::AudioError(format!("Failed to start piper: {}", e))
+        })?;
+
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin.write_all(text.as_bytes()).map_err(|e| {
+                VoiceError::AudioError(format!("Failed to write to piper: {}", e))
+            })?;
+        }
+
+        // Wait for completion
+        let output = child.wait_with_output().map_err(|e| {
+            VoiceError::AudioError(format!("Piper process failed: {}", e))
+        })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(VoiceError::AudioError(format!(
+                "Piper TTS failed: {}",
+                stderr
+            )));
+        }
+
+        // Read the output file
+        let audio_data = std::fs::read(&output_file).map_err(|e| {
+            VoiceError::AudioError(format!("Failed to read piper output: {}", e))
+        })?;
+
+        // Clean up temp file
+        let _ = std::fs::remove_file(&output_file);
+
+        Ok(SpeechAudio {
+            data: Bytes::from(audio_data),
+            format: AudioFormat::Wav,
+            duration: None,
+            text: text.to_string(),
+        })
+    }
+
+    async fn is_available(&self) -> bool {
+        Self::is_piper_installed() && self.model_path.exists()
+    }
+
+    fn current_voice(&self) -> String {
+        self.model_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown")
+            .to_string()
+    }
+
+    async fn list_voices(&self) -> Result<Vec<String>> {
+        // For Piper, voices are model files - list available models in the directory
+        let parent = self.model_path.parent().unwrap_or(std::path::Path::new("."));
+        let mut voices = Vec::new();
+
+        if let Ok(entries) = std::fs::read_dir(parent) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().map(|e| e == "onnx").unwrap_or(false) {
+                    if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
+                        voices.push(name.to_string());
+                    }
+                }
+            }
+        }
+
+        Ok(voices)
+    }
+}
+
 /// List available output devices
 pub fn list_output_devices() -> Result<Vec<String>> {
     use cpal::traits::HostTrait;

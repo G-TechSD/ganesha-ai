@@ -198,6 +198,7 @@ impl McpServer {
         let response = self.transport.request(rpc_request).await?;
 
         if let Some(error) = response.error {
+            warn!("MCP tool error: {} - {}", error.code, error.message);
             return Ok(ToolCallResponse {
                 id: request.id,
                 content: None,

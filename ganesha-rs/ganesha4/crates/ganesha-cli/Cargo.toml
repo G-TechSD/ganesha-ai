@@ -15,6 +15,7 @@ path = "src/main.rs"
 ganesha-core = { path = "../ganesha-core" }
 ganesha-providers = { path = "../ganesha-providers" }
 ganesha-mcp = { path = "../ganesha-mcp" }
+ganesha-voice = { path = "../ganesha-voice" }
 
 # Workspace dependencies
 tokio.workspace = true
@@ -38,7 +39,7 @@ crossterm = "0.28"
 # Terminal formatting
 colored = "2"
 syntect = "5"
-textwrap = "0.16"
+textwrap = { version = "0.16", features = ["terminal_size"] }
 unicode-width = "0.2"
 
 # User interaction
@@ -66,6 +67,12 @@ ctrlc = "3"
 
 # Error handling
 anyhow.workspace = true
+
+# Regex for parsing AI responses
+regex = "1"
+
+# HTTP client for provider setup
+reqwest = { workspace = true, features = ["blocking"] }
 
 # UUID for session IDs
 uuid.workspace = true

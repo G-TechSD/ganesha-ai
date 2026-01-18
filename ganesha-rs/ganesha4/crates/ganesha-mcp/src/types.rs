@@ -19,6 +19,7 @@ pub struct Tool {
     /// Human-readable description
     pub description: String,
     /// JSON Schema for input parameters
+    #[serde(rename = "inputSchema")]
     pub input_schema: ToolSchema,
 }
 

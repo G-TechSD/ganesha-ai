@@ -316,27 +316,82 @@ pub mod presets {
         }
     }
 
-    /// Fetch (web content) MCP server
-    pub fn fetch() -> ServerConfig {
+    /// Puppeteer MCP server for browser automation
+    pub fn puppeteer() -> ServerConfig {
+        // Set up environment variables for puppeteer
+        let mut env = HashMap::new();
+        // Enable --no-sandbox for Linux compatibility (AppArmor restrictions)
+        env.insert("PUPPETEER_LAUNCH_ARGS".to_string(), "--no-sandbox --disable-setuid-sandbox".to_string());
+        // Also set the chromium args directly
+        env.insert("CHROMIUM_FLAGS".to_string(), "--no-sandbox --disable-setuid-sandbox".to_string());
+
         ServerConfig {
-            name: "Fetch".to_string(),
+            name: "Puppeteer".to_string(),
             transport: TransportConfig::Stdio {
                 command: "npx".to_string(),
                 args: vec![
                     "-y".to_string(),
-                    "@anthropics/mcp-server-fetch".to_string(),
+                    "@modelcontextprotocol/server-puppeteer".to_string(),
+                ],
+                env,
+                cwd: None,
+            },
+            enabled: true,
+            auto_connect: true,
+            trusted: false, // Browser automation requires approval
+            include_tools: None,
+            exclude_tools: None,
+            timeout: 120, // Browser operations can take time
+            required_env: Vec::new(),
+            description: Some("Browser automation via Puppeteer".to_string()),
+        }
+    }
+
+    /// Playwright MCP server - use puppeteer-mcp-server as alternative
+    pub fn playwright() -> ServerConfig {
+        ServerConfig {
+            name: "Playwright".to_string(),
+            transport: TransportConfig::Stdio {
+                command: "npx".to_string(),
+                args: vec![
+                    "-y".to_string(),
+                    "puppeteer-mcp-server".to_string(), // Alternative that's available
                 ],
                 env: HashMap::new(),
                 cwd: None,
             },
             enabled: true,
             auto_connect: true,
-            trusted: true, // Read-only, safe to trust
+            trusted: false,
             include_tools: None,
             exclude_tools: None,
-            timeout: 60, // Web requests may take longer
+            timeout: 120,
             required_env: Vec::new(),
-            description: Some("Fetch web content".to_string()),
+            description: Some("Browser automation".to_string()),
+        }
+    }
+
+    /// Memory MCP server for persistent knowledge
+    pub fn memory() -> ServerConfig {
+        ServerConfig {
+            name: "Memory".to_string(),
+            transport: TransportConfig::Stdio {
+                command: "npx".to_string(),
+                args: vec![
+                    "-y".to_string(),
+                    "@modelcontextprotocol/server-memory".to_string(),
+                ],
+                env: HashMap::new(),
+                cwd: None,
+            },
+            enabled: true,
+            auto_connect: true,
+            trusted: true,
+            include_tools: None,
+            exclude_tools: None,
+            timeout: 30,
+            required_env: Vec::new(),
+            description: Some("Persistent knowledge storage".to_string()),
         }
     }
 }

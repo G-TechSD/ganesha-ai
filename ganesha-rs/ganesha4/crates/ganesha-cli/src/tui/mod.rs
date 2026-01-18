@@ -24,6 +24,7 @@ pub mod widgets;
 use app::AppState;
 use events::{handle_event, update, Msg};
 
+use ganesha_providers::{GenerateOptions, Message as ProviderMessage, ProviderManager};
 use ratatui::{
     backend::CrosstermBackend,
     crossterm::{
@@ -34,7 +35,9 @@ use ratatui::{
     Terminal,
 };
 use std::io;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::mpsc;
 
 /// Result type for TUI operations
 pub type Result<T> = std::result::Result<T, TuiError>;
@@ -49,8 +52,23 @@ pub enum TuiError {
     Terminal(String),
 }
 
+/// Message from async AI task back to UI
+pub enum AiResponse {
+    /// AI responded with content
+    Response(String),
+    /// AI call failed
+    Error(String),
+}
+
 /// Run the TUI application
 pub async fn run() -> anyhow::Result<()> {
+    // Initialize provider manager
+    let provider_manager = Arc::new(ProviderManager::new());
+    provider_manager.auto_discover().await?;
+
+    // Check if we have providers available
+    let has_providers = provider_manager.has_available_provider().await;
+
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -61,6 +79,21 @@ pub async fn run() -> anyhow::Result<()> {
     // Create app state
     let mut state = AppState::new();
 
+    // Show provider status
+    if has_providers {
+        let providers = provider_manager.list_providers().await;
+        let names: Vec<_> = providers.iter().map(|p| p.name.clone()).collect();
+        state.add_message(app::ChatMessage::system(format!(
+            "Connected to {} provider(s): {}",
+            providers.len(),
+            names.join(", ")
+        )));
+    } else {
+        state.add_message(app::ChatMessage::system(
+            "Warning: No LLM providers available. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or start a local server.".to_string()
+        ));
+    }
+
     // Get initial terminal size
     let size = terminal.size()?;
     state.update_terminal_size(size.width, size.height);
@@ -68,8 +101,11 @@ pub async fn run() -> anyhow::Result<()> {
     // Load initial data
     load_git_info(&mut state);
 
+    // Create channel for AI responses
+    let (ai_tx, ai_rx) = mpsc::channel::<AiResponse>(10);
+
     // Main event loop
-    let result = run_event_loop(&mut terminal, &mut state).await;
+    let result = run_event_loop(&mut terminal, &mut state, provider_manager, ai_tx, ai_rx).await;
 
     // Restore terminal
     disable_raw_mode()?;
@@ -87,6 +123,9 @@ pub async fn run() -> anyhow::Result<()> {
 async fn run_event_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     state: &mut AppState,
+    provider_manager: Arc<ProviderManager>,
+    ai_tx: mpsc::Sender<AiResponse>,
+    mut ai_rx: mpsc::Receiver<AiResponse>,
 ) -> anyhow::Result<()> {
     let tick_rate = Duration::from_millis(100);
 
@@ -95,6 +134,21 @@ async fn run_event_loop(
         if state.needs_redraw {
             terminal.draw(|f| ui::view(f, state))?;
             state.needs_redraw = false;
+        }
+
+        // Check for AI responses (non-blocking)
+        while let Ok(response) = ai_rx.try_recv() {
+            match response {
+                AiResponse::Response(content) => {
+                    state.stop_thinking();
+                    state.add_message(app::ChatMessage::assistant(content));
+                }
+                AiResponse::Error(error) => {
+                    state.stop_thinking();
+                    state.add_message(app::ChatMessage::system(format!("Error: {}", error)));
+                    state.last_error = Some(error);
+                }
+            }
         }
 
         // Poll for events with timeout (for spinner animation)
@@ -107,6 +161,61 @@ async fn run_event_loop(
             // Process message chain (some messages trigger other messages)
             let mut current_msg = Some(msg);
             while let Some(msg) = current_msg {
+                // Check if this is a SendMessage that needs AI handling
+                if let Msg::SendMessage = &msg {
+                    // Get the input and add user message
+                    if let Some(input) = state.submit_input() {
+                        state.add_message(app::ChatMessage::user(&input));
+                        state.start_thinking("Thinking...");
+
+                        // Spawn async task to call AI
+                        let pm = provider_manager.clone();
+                        let tx = ai_tx.clone();
+                        let messages: Vec<ProviderMessage> = state
+                            .messages
+                            .iter()
+                            .map(|m| match m.role {
+                                ganesha_providers::message::MessageRole::System => {
+                                    ProviderMessage::system(&m.content)
+                                }
+                                ganesha_providers::message::MessageRole::User => {
+                                    ProviderMessage::user(&m.content)
+                                }
+                                ganesha_providers::message::MessageRole::Assistant => {
+                                    ProviderMessage::assistant(&m.content)
+                                }
+                                ganesha_providers::message::MessageRole::Tool => {
+                                    ProviderMessage::tool(&m.content, m.tool_call_id.clone().unwrap_or_default())
+                                }
+                            })
+                            .collect();
+
+                        tokio::spawn(async move {
+                            let system_prompt = "You are Ganesha, an AI coding assistant. Be concise and helpful.";
+                            let mut all_messages = vec![ProviderMessage::system(system_prompt)];
+                            all_messages.extend(messages);
+
+                            let options = GenerateOptions {
+                                temperature: Some(0.7),
+                                max_tokens: Some(4096),
+                                ..Default::default()
+                            };
+
+                            match pm.chat(&all_messages, &options).await {
+                                Ok(response) => {
+                                    let _ = tx.send(AiResponse::Response(response.content)).await;
+                                }
+                                Err(e) => {
+                                    let _ = tx.send(AiResponse::Error(e.to_string())).await;
+                                }
+                            }
+                        });
+
+                        current_msg = None;
+                        continue;
+                    }
+                }
+
                 current_msg = update(state, msg);
             }
         } else {

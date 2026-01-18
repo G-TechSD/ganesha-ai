@@ -104,6 +104,18 @@ pub struct SessionConfig {
 
     /// Session storage path
     pub path: Option<PathBuf>,
+
+    /// Enable session logging to text files
+    #[serde(default = "default_true")]
+    pub logging_enabled: bool,
+
+    /// Maximum total size of session logs in bytes (default: 512MB)
+    #[serde(default = "default_max_log_size")]
+    pub max_log_size: u64,
+}
+
+fn default_max_log_size() -> u64 {
+    512 * 1024 * 1024 // 512 MB
 }
 
 impl Default for SessionConfig {
@@ -111,6 +123,8 @@ impl Default for SessionConfig {
         Self {
             auto_save: true,
             path: None,
+            logging_enabled: true,
+            max_log_size: default_max_log_size(),
         }
     }
 }

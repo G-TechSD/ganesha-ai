@@ -26,6 +26,10 @@ pub struct Cli {
     #[arg(long)]
     pub tui: bool,
 
+    /// Enable voice mode (speak responses, accept voice input)
+    #[arg(long)]
+    pub voice: bool,
+
     /// Start in a specific chat mode
     #[arg(long, default_value = "code")]
     pub mode: ChatMode,
@@ -98,6 +102,12 @@ pub enum Commands {
     /// Start TUI mode
     Tui,
 
+    /// Voice commands
+    Voice {
+        #[command(subcommand)]
+        action: VoiceAction,
+    },
+
     /// Generate shell completions
     Completions {
         /// Shell to generate completions for
@@ -139,6 +149,30 @@ pub enum McpAction {
         /// Server ID from registry
         server_id: String,
     },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum VoiceAction {
+    /// Setup local voice (download free models)
+    Setup,
+    /// Check voice status
+    Status,
+    /// Test voice input (record and transcribe)
+    Test,
+    /// List audio devices
+    Devices,
+    /// Speak some text
+    Say {
+        /// Text to speak
+        text: String,
+    },
+    /// Set personality
+    Personality {
+        /// Personality name (friendly, professional, mentor, pirate)
+        name: String,
+    },
+    /// Start voice chat mode
+    Chat,
 }
 
 #[derive(Subcommand, Debug)]
