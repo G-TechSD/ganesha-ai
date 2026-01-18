@@ -1,0 +1,39 @@
+[package]
+name = "ganesha-mcp"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "MCP (Model Context Protocol) management for Ganesha"
+
+[dependencies]
+# Workspace dependencies
+tokio.workspace = true
+futures.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+
+# Process management (using tokio's built-in process module)
+
+# For SSE/HTTP transport
+reqwest.workspace = true
+eventsource-stream = "0.2"
+
+# JSON Schema validation
+jsonschema = "0.26"
+
+# For watching config changes
+notify = "7"
+
+# UUID for request IDs
+uuid = { version = "1", features = ["v4"] }
+
+# Directories
+dirs.workspace = true
+
+[dev-dependencies]
+tokio-test = "0.4"

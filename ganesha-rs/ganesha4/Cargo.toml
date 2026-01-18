@@ -1,0 +1,89 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/ganesha-core",
+    "crates/ganesha-providers",
+    "crates/ganesha-mcp",
+    "crates/ganesha-vision",
+    "crates/ganesha-voice",
+    "crates/ganesha-cli",
+    "crates/ganesha-desktop",
+]
+
+[workspace.package]
+version = "4.0.0"
+edition = "2021"
+authors = ["GTechSD <team@gtechsd.com>"]
+license = "MIT"
+repository = "https://github.com/gtechsd/ganesha"
+homepage = "https://ganesha.dev"
+description = "The Obstacle Remover - A lightning-fast, local-first AI assistant"
+keywords = ["ai", "assistant", "cli", "llm", "agent"]
+categories = ["command-line-utilities", "development-tools"]
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.49", features = ["full"] }
+futures = "0.3"
+async-trait = "0.1"
+
+# HTTP/WebSocket
+reqwest = { version = "0.12", features = ["json", "stream"] }
+tokio-tungstenite = { version = "0.25", features = ["native-tls"] }
+axum = "0.8"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# CLI
+clap = { version = "4.5", features = ["derive", "env"] }
+console = "0.15"
+indicatif = "0.17"
+
+# TUI
+ratatui = "0.30"
+crossterm = "0.29"
+
+# Database
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# Logging/Tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Crypto/Security
+keyring = "3.0"
+sha2 = "0.10"
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# UUID
+uuid = { version = "1.11", features = ["v4", "serde"] }
+
+# Directories
+dirs = "6.0"
+
+# Process management
+which = "7.0"
+sysinfo = "0.33"
+
+# Platform-specific (add to individual crates as needed)
+# nix = { version = "0.30", features = ["process", "signal"] }  # Unix
+# windows = { version = "0.58", features = [...] }  # Windows
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 0
+debug = true

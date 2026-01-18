@@ -1,0 +1,33 @@
+[package]
+name = "ganesha-providers"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "LLM provider abstraction layer for Ganesha"
+
+[dependencies]
+# Workspace dependencies
+tokio.workspace = true
+futures.workspace = true
+async-trait.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+keyring.workspace = true
+
+# Streaming
+tokio-stream = "0.1"
+async-stream = "0.3"
+pin-project-lite = "0.2"
+
+# For SSE parsing
+eventsource-stream = "0.2"
+
+[dev-dependencies]
+tokio-test = "0.4"
+mockito = "1.5"
