@@ -284,27 +284,69 @@ impl SessionLogger {
     }
 }
 
-/// Parse and display multiple choice options from AI response
+/// Parse and detect multiple choice options from AI response
+/// Only returns options if the AI is explicitly asking the user to make a choice
 /// Returns detected options if any, or None
 fn detect_options(text: &str) -> Option<Vec<String>> {
+    let text_lower = text.to_lowercase();
+
+    // Check if the AI is actually asking for a choice (not just listing information)
+    // Look for choice-indicating phrases BEFORE or NEAR the numbered list
+    let choice_indicators = [
+        "which would you",
+        "which one would you",
+        "would you like",
+        "would you prefer",
+        "choose from",
+        "select from",
+        "pick from",
+        "select one",
+        "choose one",
+        "here are your options",
+        "here are some options",
+        "your options are",
+        "options:",
+        "choose:",
+        "select:",
+        "which do you",
+        "what would you like",
+        "let me know which",
+        "tell me which",
+    ];
+
+    // Must have a choice indicator
+    let has_choice_indicator = choice_indicators.iter().any(|&indicator| text_lower.contains(indicator));
+
+    if !has_choice_indicator {
+        return None;
+    }
+
     let lines: Vec<&str> = text.lines().collect();
     let mut options = Vec::new();
+    let mut in_options_section = false;
 
     // Look for numbered options (1. Option, 2. Option, etc.)
     let option_pattern = Regex::new(r"^\s*(\d+)[.)]\s+(.+)$").unwrap();
 
     for line in &lines {
         if let Some(caps) = option_pattern.captures(line) {
-            let _num: i32 = caps.get(1).unwrap().as_str().parse().unwrap_or(0);
-            let text = caps.get(2).unwrap().as_str().trim().to_string();
-            if !text.is_empty() {
-                options.push(text);
+            let num: i32 = caps.get(1).unwrap().as_str().parse().unwrap_or(0);
+            let option_text = caps.get(2).unwrap().as_str().trim().to_string();
+
+            // Options should start at 1 and be sequential
+            if num == (options.len() + 1) as i32 && !option_text.is_empty() {
+                options.push(option_text);
+                in_options_section = true;
             }
+        } else if in_options_section && !line.trim().is_empty() && !line.trim().starts_with("```") {
+            // If we hit a non-option line after starting options, stop collecting
+            // (unless it's a code block or empty line)
+            break;
         }
     }
 
-    // Only return if we found multiple options
-    if options.len() >= 2 {
+    // Only return if we found 2-10 options (reasonable range for choices)
+    if options.len() >= 2 && options.len() <= 10 {
         Some(options)
     } else {
         None
@@ -312,39 +354,55 @@ fn detect_options(text: &str) -> Option<Vec<String>> {
 }
 
 /// Display interactive multiple choice prompt
-/// Returns the selected option or custom text
+/// Returns the selected option, custom text, or None if declined
 fn prompt_multiple_choice(options: &[String]) -> Option<String> {
     use std::io::{self, Write};
 
     println!();
-    println!("{}", "Select an option:".bright_cyan());
+    println!("{}", "┌─ Select an option: ─────────────────────────".bright_cyan());
+    println!("{}", "│".bright_cyan());
     for (i, opt) in options.iter().enumerate() {
-        println!("  {} {}", format!("[{}]", i + 1).bright_yellow(), opt);
+        println!("{}  {} {}", "│".bright_cyan(), format!("[{}]", i + 1).bright_yellow(), opt);
     }
-    println!("  {} Type your own response", "[0]".dimmed());
+    println!("{}", "│".bright_cyan());
+    println!("{}  {} No thanks / Skip", "│".bright_cyan(), "[n]".bright_red());
+    println!("{}  {} Type your own response", "│".bright_cyan(), "[o]".dimmed());
+    println!("{}", "│".bright_cyan());
+    println!("{}", "└──────────────────────────────────────────────".bright_cyan());
     println!();
 
-    print!("{} ", "Choice:".bright_white());
+    print!("{} ", "Choice (1-{}, n, or o):".replace("{}", &options.len().to_string()).bright_white());
     io::stdout().flush().ok()?;
 
     let mut input = String::new();
     io::stdin().read_line(&mut input).ok()?;
-    let input = input.trim();
+    let input = input.trim().to_lowercase();
 
     if input.is_empty() {
         return None;
     }
 
+    // Check for decline
+    if input == "n" || input == "no" || input == "skip" || input == "none" {
+        return None;
+    }
+
+    // Check for custom response
+    if input == "o" || input == "other" || input == "0" {
+        print!("{} ", "Your response:".bright_white());
+        io::stdout().flush().ok()?;
+        let mut custom = String::new();
+        io::stdin().read_line(&mut custom).ok()?;
+        let custom = custom.trim();
+        if custom.is_empty() {
+            return None;
+        }
+        return Some(custom.to_string());
+    }
+
     // Check if it's a number
     if let Ok(num) = input.parse::<usize>() {
-        if num == 0 {
-            // User wants to type custom
-            print!("{} ", "Your response:".bright_white());
-            io::stdout().flush().ok()?;
-            let mut custom = String::new();
-            io::stdin().read_line(&mut custom).ok()?;
-            return Some(custom.trim().to_string());
-        } else if num > 0 && num <= options.len() {
+        if num > 0 && num <= options.len() {
             return Some(options[num - 1].clone());
         }
     }
@@ -1172,56 +1230,101 @@ fn sanitize_output(content: &str) -> String {
 }
 
 /// Print content in a styled Ganesha box with title and timestamp
-/// Renders markdown for better readability
+/// Renders markdown for better readability with proper box borders and word wrap
 fn print_ganesha_box(content: &str) {
     let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
 
     // Sanitize content first
     let content = sanitize_output(content);
 
-    println!();
-    // Header line
-    println!("{} {} {}",
-        "🐘".bright_green(),
-        "Ganesha".bright_green().bold(),
-        timestamp.dimmed()
-    );
-    println!("{}", "─".repeat(70).cyan());
+    // Get terminal width, default to 80 if can't determine
+    let term_width = textwrap::termwidth().min(100).max(60);
+    let box_width = term_width - 4; // Account for "│ " prefix and " │" suffix
+    let inner_width = box_width - 2; // Content area
 
-    // Simple markdown-aware rendering
-    // Handle headers, bold, italic, bullet points, and code blocks
+    println!();
+    // Header with box top
+    println!("{}{} {} {} {}{}",
+        "┌".cyan(),
+        "─".repeat(2).cyan(),
+        "🐘 Ganesha".bright_green().bold(),
+        timestamp.dimmed(),
+        "─".repeat(term_width.saturating_sub(20)).cyan(),
+        "┐".cyan()
+    );
+
+    // Helper to print a line with box borders
+    let print_boxed = |text: &str, prefix: &str| {
+        // Word wrap the text
+        let wrapped = textwrap::fill(text, inner_width.saturating_sub(prefix.len()));
+        for (i, wrapped_line) in wrapped.lines().enumerate() {
+            let line_prefix = if i == 0 { prefix } else { "  " };
+            let padded = format!("{}{}", line_prefix, wrapped_line);
+            let padding = box_width.saturating_sub(padded.chars().count());
+            println!("{} {}{} {}", "│".cyan(), padded, " ".repeat(padding), "│".cyan());
+        }
+    };
+
+    let print_boxed_colored = |text: &colored::ColoredString| {
+        let padding = box_width.saturating_sub(text.to_string().chars().count());
+        println!("{} {}{} {}", "│".cyan(), text, " ".repeat(padding), "│".cyan());
+    };
+
+    // Empty line after header
+    println!("{} {} {}", "│".cyan(), " ".repeat(box_width), "│".cyan());
+
+    // Process content with markdown-aware rendering
+    let mut in_code_block = false;
+
     for line in content.lines() {
         let trimmed = line.trim();
 
+        // Handle code blocks
+        if trimmed.starts_with("```") {
+            in_code_block = !in_code_block;
+            let separator = format!("  {}", "─".repeat(inner_width.saturating_sub(2)));
+            println!("{} {}{} {}", "│".cyan(), separator.dimmed(), " ".repeat(box_width.saturating_sub(separator.len())), "│".cyan());
+            continue;
+        }
+
+        if in_code_block {
+            // Code block content - preserve as-is with monospace styling
+            let code_line = format!("    {}", trimmed);
+            let padding = box_width.saturating_sub(code_line.chars().count());
+            println!("{} {}{} {}", "│".cyan(), code_line.bright_black(), " ".repeat(padding), "│".cyan());
+            continue;
+        }
+
         // Check for headers
         if trimmed.starts_with("### ") {
-            println!("   {}", &trimmed[4..].bright_white());
+            print_boxed_colored(&format!("   {}", &trimmed[4..]).bright_white());
         } else if trimmed.starts_with("## ") {
-            println!("  {}", &trimmed[3..].bright_white().bold());
+            println!("{} {} {}", "│".cyan(), " ".repeat(box_width), "│".cyan()); // blank line before header
+            print_boxed_colored(&format!("  {}", &trimmed[3..]).bright_white().bold());
         } else if trimmed.starts_with("# ") {
-            println!(" {}", &trimmed[2..].bright_cyan().bold());
+            println!("{} {} {}", "│".cyan(), " ".repeat(box_width), "│".cyan());
+            print_boxed_colored(&format!(" {}", &trimmed[2..]).bright_cyan().bold());
         }
         // Check for bullet points
         else if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
-            println!("  {} {}", "•".green(), &trimmed[2..]);
+            print_boxed(&trimmed[2..], "  • ");
         }
         // Check for numbered lists
         else if trimmed.len() > 2 && trimmed.chars().next().map(|c| c.is_numeric()).unwrap_or(false)
             && (trimmed.contains(". ") || trimmed.contains(") "))
         {
-            // Extract number and rest
             if let Some(pos) = trimmed.find(". ").or_else(|| trimmed.find(") ")) {
                 let (num, rest) = trimmed.split_at(pos + 2);
-                println!("  {} {}", num.bright_yellow(), rest);
+                print_boxed(rest.trim(), &format!("  {} ", num));
             } else {
-                println!("{}", line);
+                print_boxed(trimmed, "  ");
             }
         }
-        // Check for code blocks
-        else if trimmed.starts_with("```") {
-            println!("{}", "  ─────────────────────────".dimmed());
+        // Empty lines
+        else if trimmed.is_empty() {
+            println!("{} {} {}", "│".cyan(), " ".repeat(box_width), "│".cyan());
         }
-        // Inline code and bold handling for regular lines
+        // Regular text with bold handling
         else {
             // Simple bold handling: **text**
             let processed = line
@@ -1229,19 +1332,26 @@ fn print_ganesha_box(content: &str) {
                 .enumerate()
                 .map(|(i, s)| {
                     if i % 2 == 1 {
-                        s.bright_white().bold().to_string()
+                        format!("{}", s.bright_white().bold())
                     } else {
                         s.to_string()
                     }
                 })
                 .collect::<Vec<_>>()
                 .join("");
-            println!("{}", processed);
+            print_boxed(&processed, "  ");
         }
     }
 
+    // Empty line before footer
+    println!("{} {} {}", "│".cyan(), " ".repeat(box_width), "│".cyan());
+
     // Footer
-    println!("{}", "─".repeat(70).cyan());
+    println!("{}{}{}",
+        "└".cyan(),
+        "─".repeat(term_width - 2).cyan(),
+        "┘".cyan()
+    );
     println!();
 }
 
