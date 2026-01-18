@@ -53,23 +53,6 @@ ganesha "install docker and let me use it without sudo"
 
 ---
 
-## What Makes Ganesha Different
-
-| Feature | Ganesha | Claude Code | Codex CLI |
-|---------|---------|-------------|-----------|
-| **Release Date** | 2024 | 2025 | 2025 |
-| **Local LLM Support** | Native | No | No |
-| **Cloud-Free Operation** | Yes | No | No |
-| **System Control** | Full | Sandboxed | Sandboxed |
-| **Rollback Support** | Built-in | No | No |
-| **Time-Boxed Autonomy** | Flux Capacitor | No | No |
-| **Remote SSH** | Autonomous | Manual | Manual |
-| **MCP Protocol** | Native | Native | No |
-| **Session Memory** | Persistent | Limited | No |
-| **Cross-Platform** | Linux/macOS/Windows | Linux/macOS | Limited |
-
----
-
 ## Installation
 
 ### Quick Install (Recommended)
