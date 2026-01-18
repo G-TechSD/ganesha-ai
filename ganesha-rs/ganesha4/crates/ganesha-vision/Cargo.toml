@@ -1,0 +1,49 @@
+[package]
+name = "ganesha-vision"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Vision and VLA (Vision-Language-Action) capabilities for Ganesha"
+
+[features]
+default = ["gui-automation"]
+gui-automation = ["dep:enigo", "dep:xcap"]
+
+[dependencies]
+# Workspace dependencies
+tokio.workspace = true
+futures.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+
+# Image processing
+image = "0.25"
+base64 = "0.22"
+
+# Screen capture (cross-platform)
+xcap = { version = "0.8", optional = true }
+
+# Input simulation (cross-platform)
+enigo = { version = "0.3", optional = true }
+
+# HTTP client for vision API calls
+reqwest = { version = "0.12", features = ["json"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# X11/Wayland support comes from xcap and enigo
+
+[target.'cfg(target_os = "windows")'.dependencies]
+# Windows support comes from xcap and enigo
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# macOS support comes from xcap and enigo
+
+[dev-dependencies]
+tokio-test = "0.4"
+tempfile = "3.14"

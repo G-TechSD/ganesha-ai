@@ -10,6 +10,14 @@
  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝
 ```
 
+> **⚠️ BETA SOFTWARE - EXPERIMENTAL**
+>
+> Ganesha 4.0 is currently in active development and is **highly experimental**.
+> Features may change, break, or be removed without notice. Use at your own risk.
+> Not recommended for production environments at this time.
+>
+> **Current Status:** Pre-release beta (v4.0.0-beta)
+
 <p align="center">
   <strong>The world's first cross-platform AI-powered system control tool.</strong><br>
   <em>Originally developed in 2024 — predating Claude Code and OpenAI Codex CLI.</em>
@@ -80,19 +88,19 @@ iwr -useb https://raw.githubusercontent.com/G-TechSD/ganesha-ai/main/install.ps1
 
 | Platform | Architecture | Download |
 |----------|-------------|----------|
-| **Linux** | x86_64 | [ganesha-linux-x86_64.tar.gz](https://github.com/G-TechSD/ganesha-ai/releases/latest) |
-| **Linux** | ARM64 | [ganesha-linux-aarch64.tar.gz](https://github.com/G-TechSD/ganesha-ai/releases/latest) |
-| **macOS** | Intel | [ganesha-macos-x86_64.tar.gz](https://github.com/G-TechSD/ganesha-ai/releases/latest) |
-| **macOS** | Apple Silicon | [ganesha-macos-aarch64.tar.gz](https://github.com/G-TechSD/ganesha-ai/releases/latest) |
-| **Windows** | x86_64 | [ganesha-windows-x86_64.zip](https://github.com/G-TechSD/ganesha-ai/releases/latest) |
+| **Linux** | x86_64 | [ganesha-linux-x86_64.tar.gz](https://github.com/G-TechSD/ganesha-ai/releases/latest/download/ganesha-linux-x86_64.tar.gz) |
+| **macOS** | Apple Silicon | [ganesha-macos-aarch64.tar.gz](https://github.com/G-TechSD/ganesha-ai/releases/latest/download/ganesha-macos-aarch64.tar.gz) |
+| **Windows** | x86_64 | [ganesha-windows-x86_64.zip](https://github.com/G-TechSD/ganesha-ai/releases/latest/download/ganesha-windows-x86_64.zip) |
 
 ### Build from Source
 
 ```bash
 git clone https://github.com/G-TechSD/ganesha-ai.git
-cd ganesha-ai/ganesha-rs
+cd ganesha-ai/ganesha-rs/ganesha4
 cargo build --release
+# Linux/macOS:
 sudo cp target/release/ganesha /usr/local/bin/
+# Windows: Copy target/release/ganesha.exe to your PATH
 ```
 
 ---

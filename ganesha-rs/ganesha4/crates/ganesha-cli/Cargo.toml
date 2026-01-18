@@ -1,0 +1,89 @@
+[package]
+name = "ganesha-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Ganesha CLI - AI coding assistant"
+
+[[bin]]
+name = "ganesha"
+path = "src/main.rs"
+
+[dependencies]
+# Workspace crates
+ganesha-core = { path = "../ganesha-core" }
+ganesha-providers = { path = "../ganesha-providers" }
+ganesha-mcp = { path = "../ganesha-mcp" }
+ganesha-voice = { path = "../ganesha-voice" }
+
+# Workspace dependencies
+tokio.workspace = true
+futures.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+
+# CLI
+clap = { version = "4", features = ["derive", "env", "string"] }
+clap_complete = "4"
+
+# TUI
+ratatui = "0.29"
+crossterm = "0.28"
+
+# Terminal formatting
+colored = "2"
+syntect = "5"
+textwrap = { version = "0.16", features = ["terminal_size"] }
+unicode-width = "0.2"
+
+# User interaction
+rustyline = "14"
+rustyline-derive = "0.10"
+
+# Progress and spinners
+indicatif = "0.17"
+
+# Configuration
+directories = "5"
+config = "0.14"
+
+# Logging
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Git integration
+git2 = "0.19"
+
+# Markdown rendering
+termimad = "0.31"
+
+# For signal handling
+ctrlc = "3"
+
+# Error handling
+anyhow.workspace = true
+
+# Regex for parsing AI responses
+regex = "1"
+
+# HTTP client for provider setup
+reqwest = { workspace = true, features = ["blocking"] }
+
+# UUID for session IDs
+uuid.workspace = true
+
+# Directories
+dirs.workspace = true
+
+# System info
+sysinfo.workspace = true
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"

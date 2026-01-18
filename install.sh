@@ -5,7 +5,7 @@
 #
 set -e
 
-VERSION="3.14.0-beta.2"
+VERSION="4.0.0-beta"
 REPO="G-TechSD/ganesha-ai"
 INSTALL_DIR="${GANESHA_INSTALL_DIR:-$HOME/.local/bin}"
 
@@ -142,7 +142,7 @@ build_from_source() {
     git clone --depth 1 "https://github.com/${REPO}.git" "$tmp_dir/ganesha" 2>/dev/null || \
     git clone --depth 1 "https://github.com/G-TechSD/ganesha-ai.git" "$tmp_dir/ganesha"
 
-    cd "$tmp_dir/ganesha/ganesha-rs"
+    cd "$tmp_dir/ganesha/ganesha-rs/ganesha4"
     echo "🔨 Building (this may take a few minutes)..."
     cargo build --release
 

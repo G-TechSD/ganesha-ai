@@ -1,0 +1,44 @@
+[package]
+name = "ganesha-voice"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Voice interface for Ganesha with STT, TTS, and personalities"
+
+[features]
+default = ["openai-whisper", "openai-tts"]
+openai-whisper = []
+openai-tts = []
+elevenlabs = []
+local-whisper = ["dep:whisper-rs"]
+all = ["openai-whisper", "openai-tts", "elevenlabs", "local-whisper"]
+
+[dependencies]
+# Workspace dependencies
+tokio = { workspace = true, features = ["sync", "time", "fs"] }
+futures.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+reqwest = { workspace = true, features = ["json", "multipart", "stream"] }
+
+# Audio handling
+rodio = { version = "0.19", default-features = false, features = ["wav", "mp3"] }
+cpal = "0.15"
+hound = "3.5"
+
+# Optional: Local Whisper support
+whisper-rs = { version = "0.12", optional = true }
+
+# Configuration
+toml.workspace = true
+dirs.workspace = true
+
+# Utilities
+base64 = "0.22"
+tokio-util = { version = "0.7", features = ["io"] }
+bytes = "1.7"
+parking_lot = "0.12"
