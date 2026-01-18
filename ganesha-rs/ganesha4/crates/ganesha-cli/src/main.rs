@@ -23,6 +23,10 @@ use cli::{Cli, Commands};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Enable ANSI colors on Windows
+    #[cfg(windows)]
+    let _ = colored::control::set_virtual_terminal(true);
+
     // Initialize logging - default to warn to keep output clean
     // Use RUST_LOG=info or RUST_LOG=debug for verbose output
     let filter = EnvFilter::try_from_default_env()

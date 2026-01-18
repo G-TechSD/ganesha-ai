@@ -91,25 +91,51 @@ impl LocalProvider {
         self
     }
 
-    /// Detect available local providers
+    /// Detect available local providers (with fast parallel health checks)
     pub async fn detect_available() -> Vec<LocalProvider> {
-        let mut available = Vec::new();
+        use futures::future::join_all;
 
-        // Try each provider type
-        for provider_type in [
+        // Quick health check client with 1 second timeout
+        let quick_client = Client::builder()
+            .timeout(Duration::from_secs(1))
+            .build()
+            .unwrap_or_else(|_| Client::new());
+
+        let provider_types = [
             LocalProviderType::LmStudio,
             LocalProviderType::Ollama,
             LocalProviderType::LlamaCpp,
             LocalProviderType::Vllm,
-        ] {
-            let provider = LocalProvider::new(provider_type);
-            if provider.is_available().await {
-                info!("Detected local provider: {:?}", provider_type);
-                available.push(provider);
-            }
-        }
+        ];
 
-        available
+        // Check all providers in parallel
+        let checks: Vec<_> = provider_types
+            .iter()
+            .map(|&provider_type| {
+                let client = quick_client.clone();
+                async move {
+                    let base_url = provider_type.default_base_url();
+                    let health_url = match provider_type {
+                        LocalProviderType::Ollama => format!("{}/tags", base_url),
+                        _ => format!("{}/models", base_url),
+                    };
+
+                    match client.get(&health_url).send().await {
+                        Ok(response) if response.status().is_success() => {
+                            info!("Detected local provider: {:?}", provider_type);
+                            Some(LocalProvider::new(provider_type))
+                        }
+                        _ => None,
+                    }
+                }
+            })
+            .collect();
+
+        join_all(checks)
+            .await
+            .into_iter()
+            .flatten()
+            .collect()
     }
 
     /// Convert messages to provider-specific format

@@ -1992,7 +1992,7 @@ fn get_prompt(state: &ReplState) -> String {
     let dir_display = if let Some(home) = dirs::home_dir() {
         if state.working_dir.starts_with(&home) {
             let relative = state.working_dir.strip_prefix(&home).unwrap_or(&state.working_dir);
-            format!("~/{}", relative.display())
+            format!("~{}{}", std::path::MAIN_SEPARATOR, relative.display())
         } else {
             state.working_dir.display().to_string()
         }
@@ -2001,10 +2001,11 @@ fn get_prompt(state: &ReplState) -> String {
     };
 
     // Truncate if too long
+    let sep = std::path::MAIN_SEPARATOR;
     let dir_short = if dir_display.len() > 30 {
-        let parts: Vec<&str> = dir_display.split('/').collect();
+        let parts: Vec<&str> = dir_display.split(|c| c == '/' || c == '\\').collect();
         if parts.len() > 3 {
-            format!(".../{}", parts[parts.len() - 2..].join("/"))
+            format!("...{}{}", sep, parts[parts.len() - 2..].join(&sep.to_string()))
         } else {
             dir_display
         }
@@ -2012,11 +2013,8 @@ fn get_prompt(state: &ReplState) -> String {
         dir_display
     };
 
-    format!(
-        "{} <{}>>> ",
-        dir_short.dimmed(),
-        "Ganesha".bright_cyan().bold()
-    )
+    // Use plain prompt - ANSI colors confuse readline's cursor positioning
+    format!("{} [Ganesha]> ", dir_short)
 }
 
 /// Handle a slash command
@@ -2129,64 +2127,83 @@ fn cmd_mode(args: &str, state: &mut ReplState) -> anyhow::Result<()> {
 }
 
 fn cmd_model(args: &str, state: &mut ReplState) -> anyhow::Result<()> {
-    let model = args.trim();
+    let input = args.trim();
 
-    // Show current model if no args
-    if model.is_empty() {
-        if let Some(ref m) = state.model {
-            println!("Current model: {}", m.bright_cyan());
-        } else {
-            println!("Using default model");
+    // Get available models
+    let models = tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(state.provider_manager.list_all_models())
+    });
+
+    let models = match models {
+        Ok(m) => m,
+        Err(e) => {
+            println!("{} {}", "Error listing models:".red(), e);
+            return Ok(());
         }
+    };
 
-        // Also list available models
-        println!();
-        println!("{}", "Available models:".dimmed());
-
-        // Use tokio runtime to get models
-        let models = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(state.provider_manager.list_all_models())
-        });
-
-        match models {
-            Ok(models) if !models.is_empty() => {
-                for model in models {
-                    let tier_icon = match model.tier {
-                        ganesha_providers::ModelTier::Exceptional => "🟢",
-                        ganesha_providers::ModelTier::Capable => "🟡",
-                        ganesha_providers::ModelTier::Limited => "🟠",
-                        ganesha_providers::ModelTier::Unsafe => "🔴",
-                        ganesha_providers::ModelTier::Unknown => "⚪",
-                    };
-                    println!(
-                        "  {} {} {} ({})",
-                        tier_icon,
-                        model.id.bright_white(),
-                        format!("[{}]", model.provider).dimmed(),
-                        if model.supports_vision { "vision" } else { "text" }
-                    );
-                }
-            }
-            Ok(_) => {
-                println!("  {}", "No models available".dimmed());
-            }
-            Err(e) => {
-                println!("  {} {}", "Error listing models:".red(), e);
-            }
+    // Check if input is a number (model selection)
+    if let Ok(num) = input.parse::<usize>() {
+        if num > 0 && num <= models.len() {
+            let selected = &models[num - 1];
+            state.model = Some(selected.id.clone());
+            println!("Switched to model: {}", selected.id.bright_cyan());
+            return Ok(());
+        } else if !input.is_empty() {
+            println!("{} Invalid selection. Choose 1-{}", "Error:".red(), models.len());
+            return Ok(());
         }
+    }
 
-        println!();
-        println!("Use {} to switch models", "/model <name>".bright_green());
+    // If input matches a model name directly, use it
+    if !input.is_empty() && input != "list" && input != "ls" {
+        // Check if it's a valid model name
+        if models.iter().any(|m| m.id == input) {
+            state.model = Some(input.to_string());
+            println!("Switched to model: {}", input.bright_cyan());
+            return Ok(());
+        }
+        // Allow setting any model name (might be on a provider we can't list)
+        state.model = Some(input.to_string());
+        println!("Switched to model: {}", input.bright_cyan());
         return Ok(());
     }
 
-    // If model contains "list" or "ls", also list
-    if model == "list" || model == "ls" {
-        return cmd_model("", state);
+    // Show current model
+    if let Some(ref m) = state.model {
+        println!("Current model: {}", m.bright_cyan());
+    } else {
+        println!("Using default model");
     }
 
-    state.model = Some(model.to_string());
-    println!("Switched to model: {}", model.bright_cyan());
+    // List available models with numbers
+    println!();
+    println!("{}", "Available models:".dimmed());
+
+    if models.is_empty() {
+        println!("  {}", "No models available".dimmed());
+    } else {
+        for (i, model) in models.iter().enumerate() {
+            let tier_icon = match model.tier {
+                ganesha_providers::ModelTier::Exceptional => "🟢",
+                ganesha_providers::ModelTier::Capable => "🟡",
+                ganesha_providers::ModelTier::Limited => "🟠",
+                ganesha_providers::ModelTier::Unsafe => "🔴",
+                ganesha_providers::ModelTier::Unknown => "⚪",
+            };
+            println!(
+                "  {:>2}) {} {} {} ({})",
+                (i + 1).to_string().bright_yellow(),
+                tier_icon,
+                model.id.bright_white(),
+                format!("[{}]", model.provider).dimmed(),
+                if model.supports_vision { "vision" } else { "text" }
+            );
+        }
+    }
+
+    println!();
+    println!("Use {} to switch models", "/model <number>".bright_green());
     Ok(())
 }
 
