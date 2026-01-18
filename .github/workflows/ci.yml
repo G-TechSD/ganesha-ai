@@ -49,12 +49,17 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev pkg-config libssl-dev libudev-dev
+          sudo apt-get install -y libasound2-dev pkg-config libssl-dev libudev-dev \
+            libx11-dev libxcb1-dev libxrandr-dev libxi-dev libxtst-dev libxdo-dev
 
       - name: Build
         working-directory: ganesha-rs/ganesha4
         run: cargo build --release --target ${{ matrix.target }}
+        env:
+          RUST_BACKTRACE: 1
 
       - name: Run tests
         working-directory: ganesha-rs/ganesha4
         run: cargo test --target ${{ matrix.target }}
+        env:
+          RUST_BACKTRACE: 1
