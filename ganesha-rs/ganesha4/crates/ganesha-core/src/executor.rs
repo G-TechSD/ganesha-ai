@@ -463,8 +463,10 @@ impl StandardExecutor {
 
         // Use platform-appropriate shell
         #[cfg(windows)]
-        let child = Command::new("cmd")
-            .arg("/C")
+        let child = Command::new("powershell")
+            .arg("-NoProfile")
+            .arg("-NonInteractive")
+            .arg("-Command")
             .arg(command)
             .current_dir(&context.working_directory)
             .envs(&context.environment)

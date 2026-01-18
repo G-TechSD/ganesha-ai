@@ -1068,7 +1068,7 @@ fn agentic_system_prompt(state: &ReplState) -> String {
 
     // Platform-specific shell info
     let (os_name, shell_type, list_cmd, list_example) = if cfg!(windows) {
-        ("Windows", "cmd.exe", "dir", "dir /b")
+        ("Windows", "PowerShell", "ls", "ls -la")  // PowerShell supports Unix aliases
     } else if cfg!(target_os = "macos") {
         ("macOS", "sh", "ls", "ls -la")
     } else {
