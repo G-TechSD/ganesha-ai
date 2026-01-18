@@ -50,7 +50,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libasound2-dev pkg-config libssl-dev libudev-dev \
-            libx11-dev libxcb1-dev libxrandr-dev libxi-dev libxtst-dev libxdo-dev
+            libx11-dev libxcb1-dev libxrandr-dev libxi-dev libxtst-dev libxdo-dev \
+            libpipewire-0.3-dev libspa-0.2-dev libclang-dev libgbm-dev libwayland-dev
 
       - name: Build
         working-directory: ganesha-rs/ganesha4

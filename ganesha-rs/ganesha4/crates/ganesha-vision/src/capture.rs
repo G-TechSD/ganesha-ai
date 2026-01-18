@@ -329,17 +329,25 @@ pub mod platform {
             let monitors = xcap::Monitor::all()
                 .map_err(|e| CaptureError::CaptureFailed(e.to_string()))?;
 
-            Ok(monitors
-                .into_iter()
-                .enumerate()
-                .map(|(i, m)| MonitorInfo {
+            let mut result = Vec::new();
+            for (i, m) in monitors.into_iter().enumerate() {
+                let name = m.name().unwrap_or_else(|_| format!("Monitor {}", i));
+                let is_primary = m.is_primary().unwrap_or(i == 0);
+                let x = m.x().unwrap_or(0);
+                let y = m.y().unwrap_or(0);
+                let width = m.width().unwrap_or(1920);
+                let height = m.height().unwrap_or(1080);
+                let scale_factor = m.scale_factor().unwrap_or(1.0) as f64;
+
+                result.push(MonitorInfo {
                     index: i as u32,
-                    name: m.name().to_string(),
-                    is_primary: m.is_primary(),
-                    region: Region::new(m.x(), m.y(), m.width(), m.height()),
-                    scale_factor: m.scale_factor() as f64,
-                })
-                .collect())
+                    name,
+                    is_primary,
+                    region: Region::new(x, y, width, height),
+                    scale_factor,
+                });
+            }
+            Ok(result)
         }
 
         async fn get_primary_monitor(&self) -> CaptureResult<MonitorInfo> {
@@ -354,10 +362,12 @@ pub mod platform {
         async fn capture_all(&self) -> CaptureResult<Screenshot> {
             // Capture primary monitor for now
             // TODO: Implement stitching multiple monitors
-            let monitor = xcap::Monitor::all()
-                .map_err(|e| CaptureError::CaptureFailed(e.to_string()))?
+            let monitors = xcap::Monitor::all()
+                .map_err(|e| CaptureError::CaptureFailed(e.to_string()))?;
+
+            let monitor = monitors
                 .into_iter()
-                .find(|m| m.is_primary())
+                .find(|m| m.is_primary().unwrap_or(false))
                 .ok_or_else(|| CaptureError::MonitorNotFound(0))?;
 
             let capture = monitor
@@ -369,9 +379,12 @@ pub mod platform {
             let data = capture.into_raw();
 
             let image = Self::convert_image(data, width, height)?;
-            let region = Region::new(monitor.x(), monitor.y(), width, height);
+            let mon_x = monitor.x().unwrap_or(0);
+            let mon_y = monitor.y().unwrap_or(0);
+            let mon_name = monitor.name().unwrap_or_else(|_| "Primary".to_string());
+            let region = Region::new(mon_x, mon_y, width, height);
 
-            Ok(Screenshot::new(image, region, monitor.name()))
+            Ok(Screenshot::new(image, region, mon_name))
         }
 
         async fn capture_monitor(&self, monitor_index: u32) -> CaptureResult<Screenshot> {
@@ -392,9 +405,12 @@ pub mod platform {
             let data = capture.into_raw();
 
             let image = Self::convert_image(data, width, height)?;
-            let region = Region::new(monitor.x(), monitor.y(), width, height);
+            let mon_x = monitor.x().unwrap_or(0);
+            let mon_y = monitor.y().unwrap_or(0);
+            let mon_name = monitor.name().unwrap_or_else(|_| format!("Monitor {}", monitor_index));
+            let region = Region::new(mon_x, mon_y, width, height);
 
-            Ok(Screenshot::new(image, region, monitor.name()))
+            Ok(Screenshot::new(image, region, mon_name))
         }
 
         async fn capture_region(&self, region: Region) -> CaptureResult<Screenshot> {
@@ -413,19 +429,32 @@ pub mod platform {
             let windows = xcap::Window::all()
                 .map_err(|e| CaptureError::CaptureFailed(e.to_string()))?;
 
-            Ok(windows
-                .into_iter()
-                .filter(|w| !w.is_minimized())
-                .map(|w| WindowInfo {
-                    id: w.id() as u64,
-                    title: w.title().to_string(),
-                    process_name: w.app_name().to_string(),
-                    pid: w.id(), // xcap Window doesn't have pid(), use id() instead
-                    region: Region::new(w.x(), w.y(), w.width(), w.height()),
-                    is_minimized: w.is_minimized(),
-                    is_visible: !w.is_minimized(),
-                })
-                .collect())
+            let mut result = Vec::new();
+            for w in windows.into_iter() {
+                let is_minimized = w.is_minimized().unwrap_or(false);
+                if is_minimized {
+                    continue;
+                }
+
+                let id = w.id().unwrap_or(0) as u64;
+                let title = w.title().unwrap_or_else(|_| String::new());
+                let app_name = w.app_name().unwrap_or_else(|_| String::new());
+                let x = w.x().unwrap_or(0);
+                let y = w.y().unwrap_or(0);
+                let width = w.width().unwrap_or(0);
+                let height = w.height().unwrap_or(0);
+
+                result.push(WindowInfo {
+                    id,
+                    title,
+                    process_name: app_name,
+                    pid: id as u32,
+                    region: Region::new(x, y, width, height),
+                    is_minimized,
+                    is_visible: !is_minimized,
+                });
+            }
+            Ok(result)
         }
 
         async fn find_window_by_title(&self, title: &str) -> CaptureResult<Option<WindowInfo>> {
@@ -454,7 +483,7 @@ pub mod platform {
 
             let window = windows
                 .into_iter()
-                .find(|w| w.id() as u64 == window_id)
+                .find(|w| w.id().unwrap_or(0) as u64 == window_id)
                 .ok_or_else(|| CaptureError::WindowNotFound(format!("ID: {}", window_id)))?;
 
             let capture = window
@@ -466,9 +495,12 @@ pub mod platform {
             let data = capture.into_raw();
 
             let image = Self::convert_image(data, width, height)?;
-            let region = Region::new(window.x(), window.y(), width, height);
+            let win_x = window.x().unwrap_or(0);
+            let win_y = window.y().unwrap_or(0);
+            let win_title = window.title().unwrap_or_else(|_| format!("Window {}", window_id));
+            let region = Region::new(win_x, win_y, width, height);
 
-            Ok(Screenshot::new(image, region, window.title()))
+            Ok(Screenshot::new(image, region, win_title))
         }
     }
 }

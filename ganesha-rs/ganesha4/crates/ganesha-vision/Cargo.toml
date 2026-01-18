@@ -27,7 +27,7 @@ image = "0.25"
 base64 = "0.22"
 
 # Screen capture (cross-platform)
-xcap = { version = "0.0.14", optional = true }
+xcap = { version = "0.8", optional = true }
 
 # Input simulation (cross-platform)
 enigo = { version = "0.3", optional = true }
