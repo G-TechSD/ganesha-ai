@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Ganesha CLI - AI coding assistant"
+description = "Ganesha CLI - The Remover of Obstacles"
 
 [[bin]]
 name = "ganesha"

@@ -5,7 +5,7 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
 
-/// Ganesha - AI coding assistant
+/// Ganesha - The Remover of Obstacles
 #[derive(Parser, Debug)]
 #[command(name = "ganesha")]
 #[command(author, version, about, long_about = None)]

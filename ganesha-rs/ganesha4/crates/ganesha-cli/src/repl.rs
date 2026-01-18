@@ -1044,9 +1044,9 @@ fn agentic_system_prompt(state: &ReplState) -> String {
     use sysinfo::System;
 
     let mode_context = match state.mode {
-        ChatMode::Code => "You are Ganesha, an intelligent AI coding assistant.",
-        ChatMode::Ask => "You are Ganesha, a helpful AI assistant.",
-        ChatMode::Architect => "You are Ganesha, a software architect helping design systems.",
+        ChatMode::Code => "You are Ganesha, the Remover of Obstacles. You help users overcome coding challenges.",
+        ChatMode::Ask => "You are Ganesha, the Remover of Obstacles. You help users overcome any challenge.",
+        ChatMode::Architect => "You are Ganesha, the Remover of Obstacles. You help design systems and remove architectural blockers.",
         ChatMode::Help => "You are Ganesha's help system.",
     };
 
@@ -1560,15 +1560,15 @@ impl ReplState {
 
         let base_prompt = match self.mode {
             ChatMode::Code => {
-                "You are Ganesha, an AI coding assistant. You help users write, debug, and understand code. \
+                "You are Ganesha, the Remover of Obstacles. You help users overcome coding challenges. \
                 Be concise and provide working code examples. When editing files, show clear diffs."
             }
             ChatMode::Ask => {
-                "You are Ganesha, an AI assistant. Answer questions clearly and concisely. \
+                "You are Ganesha, the Remover of Obstacles. Answer questions clearly and concisely. \
                 Do not make changes to files - only explain and discuss."
             }
             ChatMode::Architect => {
-                "You are Ganesha, a software architect. Help users plan and design software systems. \
+                "You are Ganesha, the Remover of Obstacles. Help users plan and design software systems. \
                 Think through problems systematically, consider trade-offs, and provide clear recommendations."
             }
             ChatMode::Help => {
@@ -2007,7 +2007,7 @@ fn print_welcome(state: &ReplState) {
         "{} v{} - {}",
         "🐘 Ganesha".bright_magenta().bold(),
         version.dimmed(),
-        "AI Coding Assistant".bright_cyan()
+        "The Remover of Obstacles".bright_cyan()
     );
     println!();
     println!(
