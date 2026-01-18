@@ -1218,14 +1218,19 @@ fn print_ganesha_box(content: &str) {
 
 /// Print info about a single file
 fn print_file_info(path: &std::path::Path, detailed: bool) -> anyhow::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-
     let metadata = std::fs::metadata(path)?;
     let name = path.file_name().unwrap_or_default().to_string_lossy();
     let icon = get_file_icon(&name, false, false);
 
     if detailed {
-        let perms = format_permissions(metadata.permissions().mode());
+        #[cfg(unix)]
+        let perms = {
+            use std::os::unix::fs::PermissionsExt;
+            format_permissions(metadata.permissions().mode())
+        };
+        #[cfg(not(unix))]
+        let perms = if metadata.permissions().readonly() { "r--" } else { "rw-" }.to_string();
+
         let size = format_size(metadata.len());
         let modified = metadata
             .modified()
@@ -1303,8 +1308,6 @@ fn get_file_icon(name: &str, is_dir: bool, is_symlink: bool) -> &'static str {
 
 /// Colorize a filename based on its type
 fn colorize_filename(name: &str, is_dir: bool, is_symlink: bool, path: &std::path::Path) -> String {
-    use std::os::unix::fs::PermissionsExt;
-
     if is_symlink {
         return format!("{}", name.bright_cyan().italic());
     }
@@ -1312,9 +1315,22 @@ fn colorize_filename(name: &str, is_dir: bool, is_symlink: bool, path: &std::pat
         return format!("{}", name.bright_blue().bold());
     }
 
-    // Check if executable
-    if let Ok(meta) = path.metadata() {
-        if meta.permissions().mode() & 0o111 != 0 {
+    // Check if executable (Unix only)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = path.metadata() {
+            if meta.permissions().mode() & 0o111 != 0 {
+                return format!("{}", name.bright_green().bold());
+            }
+        }
+    }
+
+    // On Windows, check for executable extensions
+    #[cfg(windows)]
+    {
+        let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
+        if matches!(ext.as_str(), "exe" | "cmd" | "bat" | "ps1" | "com") {
             return format!("{}", name.bright_green().bold());
         }
     }
@@ -1347,6 +1363,7 @@ fn format_size(bytes: u64) -> String {
 }
 
 /// Format Unix permissions
+#[cfg(unix)]
 fn format_permissions(mode: u32) -> String {
     let mut result = String::with_capacity(9);
 
