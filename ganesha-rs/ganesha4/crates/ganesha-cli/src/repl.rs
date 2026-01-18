@@ -1232,46 +1232,61 @@ fn sanitize_output(content: &str) -> String {
 /// Print content in a styled Ganesha box with title and timestamp
 /// Renders markdown for better readability with proper box borders and word wrap
 fn print_ganesha_box(content: &str) {
+    use unicode_width::UnicodeWidthStr;
+
     let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
 
     // Sanitize content first
     let content = sanitize_output(content);
 
-    // Get terminal width, default to 80 if can't determine
-    let term_width = textwrap::termwidth().min(100).max(60);
-    let box_width = term_width - 4; // Account for "│ " prefix and " │" suffix
-    let inner_width = box_width - 2; // Content area
+    // Fixed box width for consistent appearance
+    const BOX_WIDTH: usize = 72;
+    const CONTENT_WIDTH: usize = 68; // BOX_WIDTH - 4 for "│ " and " │"
 
-    println!();
-    // Header with box top
-    println!("{}{} {} {} {}{}",
-        "┌".cyan(),
-        "─".repeat(2).cyan(),
-        "🐘 Ganesha".bright_green().bold(),
-        timestamp.dimmed(),
-        "─".repeat(term_width.saturating_sub(20)).cyan(),
-        "┐".cyan()
-    );
-
-    // Helper to print a line with box borders
-    let print_boxed = |text: &str, prefix: &str| {
-        // Word wrap the text
-        let wrapped = textwrap::fill(text, inner_width.saturating_sub(prefix.len()));
-        for (i, wrapped_line) in wrapped.lines().enumerate() {
-            let line_prefix = if i == 0 { prefix } else { "  " };
-            let padded = format!("{}{}", line_prefix, wrapped_line);
-            let padding = box_width.saturating_sub(padded.chars().count());
-            println!("{} {}{} {}", "│".cyan(), padded, " ".repeat(padding), "│".cyan());
+    // Helper to pad a string to exact width
+    let pad_to_width = |s: &str, width: usize| -> String {
+        let visible_len = UnicodeWidthStr::width(s);
+        if visible_len >= width {
+            s.to_string()
+        } else {
+            format!("{}{}", s, " ".repeat(width - visible_len))
         }
     };
 
-    let print_boxed_colored = |text: &colored::ColoredString| {
-        let padding = box_width.saturating_sub(text.to_string().chars().count());
-        println!("{} {}{} {}", "│".cyan(), text, " ".repeat(padding), "│".cyan());
+    // Helper to print a bordered line
+    let print_line = |content: &str| {
+        let padded = pad_to_width(content, CONTENT_WIDTH);
+        println!("{} {} {}", "│".cyan(), padded, "│".cyan());
     };
 
+    // Helper to word-wrap and print with prefix
+    let print_wrapped = |text: &str, first_prefix: &str, cont_prefix: &str| {
+        let wrap_width = CONTENT_WIDTH - UnicodeWidthStr::width(first_prefix);
+        let wrapped = textwrap::fill(text, wrap_width);
+        for (i, line) in wrapped.lines().enumerate() {
+            let prefix = if i == 0 { first_prefix } else { cont_prefix };
+            let full_line = format!("{}{}", prefix, line);
+            print_line(&full_line);
+        }
+    };
+
+    println!();
+
+    // Top border with title
+    let title = format!(" Ganesha {} ", timestamp);
+    let title_len = UnicodeWidthStr::width(title.as_str()) + 2; // +2 for emoji width
+    let left_dashes = 3;
+    let right_dashes = BOX_WIDTH.saturating_sub(left_dashes + title_len + 2);
+    println!("{}{}{}{}{}",
+        "┌".cyan(),
+        "─".repeat(left_dashes).cyan(),
+        format!(" 🐘{}", title).bright_green().bold(),
+        "─".repeat(right_dashes).cyan(),
+        "┐".cyan()
+    );
+
     // Empty line after header
-    println!("{} {} {}", "│".cyan(), " ".repeat(box_width), "│".cyan());
+    print_line("");
 
     // Process content with markdown-aware rendering
     let mut in_code_block = false;
@@ -1282,32 +1297,28 @@ fn print_ganesha_box(content: &str) {
         // Handle code blocks
         if trimmed.starts_with("```") {
             in_code_block = !in_code_block;
-            let separator = format!("  {}", "─".repeat(inner_width.saturating_sub(2)));
-            println!("{} {}{} {}", "│".cyan(), separator.dimmed(), " ".repeat(box_width.saturating_sub(separator.len())), "│".cyan());
+            print_line(&format!("  {}", "─".repeat(CONTENT_WIDTH - 4)));
             continue;
         }
 
         if in_code_block {
-            // Code block content - preserve as-is with monospace styling
-            let code_line = format!("    {}", trimmed);
-            let padding = box_width.saturating_sub(code_line.chars().count());
-            println!("{} {}{} {}", "│".cyan(), code_line.bright_black(), " ".repeat(padding), "│".cyan());
+            print_line(&format!("    {}", trimmed));
             continue;
         }
 
         // Check for headers
         if trimmed.starts_with("### ") {
-            print_boxed_colored(&format!("   {}", &trimmed[4..]).bright_white());
+            print_line(&format!("   {}", &trimmed[4..]));
         } else if trimmed.starts_with("## ") {
-            println!("{} {} {}", "│".cyan(), " ".repeat(box_width), "│".cyan()); // blank line before header
-            print_boxed_colored(&format!("  {}", &trimmed[3..]).bright_white().bold());
+            print_line("");
+            print_line(&format!("  {}", &trimmed[3..]));
         } else if trimmed.starts_with("# ") {
-            println!("{} {} {}", "│".cyan(), " ".repeat(box_width), "│".cyan());
-            print_boxed_colored(&format!(" {}", &trimmed[2..]).bright_cyan().bold());
+            print_line("");
+            print_line(&format!(" {}", &trimmed[2..]));
         }
         // Check for bullet points
         else if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
-            print_boxed(&trimmed[2..], "  • ");
+            print_wrapped(&trimmed[2..], "  • ", "    ");
         }
         // Check for numbered lists
         else if trimmed.len() > 2 && trimmed.chars().next().map(|c| c.is_numeric()).unwrap_or(false)
@@ -1315,41 +1326,30 @@ fn print_ganesha_box(content: &str) {
         {
             if let Some(pos) = trimmed.find(". ").or_else(|| trimmed.find(") ")) {
                 let (num, rest) = trimmed.split_at(pos + 2);
-                print_boxed(rest.trim(), &format!("  {} ", num));
+                let prefix = format!("  {} ", num.trim());
+                let cont_prefix = " ".repeat(prefix.len());
+                print_wrapped(rest.trim(), &prefix, &cont_prefix);
             } else {
-                print_boxed(trimmed, "  ");
+                print_wrapped(trimmed, "  ", "  ");
             }
         }
         // Empty lines
         else if trimmed.is_empty() {
-            println!("{} {} {}", "│".cyan(), " ".repeat(box_width), "│".cyan());
+            print_line("");
         }
-        // Regular text with bold handling
+        // Regular text
         else {
-            // Simple bold handling: **text**
-            let processed = line
-                .split("**")
-                .enumerate()
-                .map(|(i, s)| {
-                    if i % 2 == 1 {
-                        format!("{}", s.bright_white().bold())
-                    } else {
-                        s.to_string()
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("");
-            print_boxed(&processed, "  ");
+            print_wrapped(trimmed, "  ", "  ");
         }
     }
 
     // Empty line before footer
-    println!("{} {} {}", "│".cyan(), " ".repeat(box_width), "│".cyan());
+    print_line("");
 
-    // Footer
+    // Bottom border
     println!("{}{}{}",
         "└".cyan(),
-        "─".repeat(term_width - 2).cyan(),
+        "─".repeat(BOX_WIDTH - 2).cyan(),
         "┘".cyan()
     );
     println!();
