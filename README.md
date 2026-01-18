@@ -10,6 +10,14 @@
  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝
 ```
 
+> **⚠️ BETA SOFTWARE - EXPERIMENTAL**
+>
+> Ganesha 4.0 is currently in active development and is **highly experimental**.
+> Features may change, break, or be removed without notice. Use at your own risk.
+> Not recommended for production environments at this time.
+>
+> **Current Status:** Pre-release beta (v4.0.0-beta)
+
 <p align="center">
   <strong>The world's first cross-platform AI-powered system control tool.</strong><br>
   <em>Originally developed in 2024 — predating Claude Code and OpenAI Codex CLI.</em>
