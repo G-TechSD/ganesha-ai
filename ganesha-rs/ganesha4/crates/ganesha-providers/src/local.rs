@@ -48,7 +48,34 @@ impl LocalProviderType {
     }
 
     /// Get the default base URL for this provider type
+    /// Checks environment variables first: LM_STUDIO_URL, OLLAMA_URL, etc.
     pub fn default_base_url(&self) -> String {
+        // Check for environment variable override first
+        let env_url = match self {
+            Self::LmStudio => std::env::var("LM_STUDIO_URL").ok(),
+            Self::Ollama => std::env::var("OLLAMA_URL").ok(),
+            Self::LlamaCpp => std::env::var("LLAMA_CPP_URL").ok(),
+            Self::Vllm => std::env::var("VLLM_URL").ok(),
+            Self::TextGenWebUi => std::env::var("TEXT_GEN_WEBUI_URL").ok(),
+            Self::OpenAiCompatible => std::env::var("OPENAI_COMPATIBLE_URL").ok(),
+        };
+
+        if let Some(url) = env_url {
+            // Ensure the URL has the correct path suffix
+            let url = url.trim_end_matches('/');
+            return match self {
+                Self::Ollama => {
+                    if url.ends_with("/api") { url.to_string() }
+                    else { format!("{}/api", url) }
+                }
+                _ => {
+                    if url.ends_with("/v1") { url.to_string() }
+                    else { format!("{}/v1", url) }
+                }
+            };
+        }
+
+        // Default to localhost
         let port = self.default_port();
         match self {
             Self::Ollama => format!("http://localhost:{}/api", port),

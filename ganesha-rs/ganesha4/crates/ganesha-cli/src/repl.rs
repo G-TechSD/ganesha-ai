@@ -371,6 +371,13 @@ fn prompt_multiple_choice(options: &[String]) -> Option<String> {
 fn run_shell_command(command: &str, working_dir: &PathBuf) -> (String, String, bool) {
     debug!("Executing: {}", command);
 
+    #[cfg(windows)]
+    let output = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", command])
+        .current_dir(working_dir)
+        .output();
+
+    #[cfg(not(windows))]
     let output = std::process::Command::new("sh")
         .arg("-c")
         .arg(command)
@@ -456,8 +463,9 @@ fn looks_like_shell_command(s: &str) -> bool {
 fn extract_commands(response: &str) -> Vec<String> {
     let mut commands = Vec::new();
 
-    // Method 1: Standard markdown bash code blocks with explicit language tag
-    let re = Regex::new(r"```(?:bash|sh|shell)\n([\s\S]*?)```").unwrap();
+    // Method 1: Standard markdown code blocks with explicit language tag
+    // Support bash/sh/shell for Unix, powershell/pwsh/cmd for Windows
+    let re = Regex::new(r"```(?:bash|sh|shell|powershell|pwsh|cmd)\n([\s\S]*?)```").unwrap();
 
     for cap in re.captures_iter(response) {
         if let Some(m) = cap.get(1) {
@@ -485,17 +493,57 @@ fn extract_commands(response: &str) -> Vec<String> {
         }
     }
 
-    // Method 2: Local model JSON format (e.g., {"cmd":["bash","-lc","ls -la"]})
+    // Method 2: Local model JSON format (e.g., {"cmd":["bash","-lc","ls -la"]} or {"cmd":["powershell","-Command","..."]})
     // Only try this if no markdown blocks found
     if commands.is_empty() {
-        // Use [^"\n]+ to NOT match newlines - prevents multi-line config capture
-        let json_re = Regex::new(r#"\{"cmd"\s*:\s*\["bash"\s*,\s*"-lc"\s*,\s*"([^"\n]+)"\]\}"#).unwrap();
+        // Match various shell invocation formats in JSON
+        // Format: {"cmd":["shell","flag","command"]}
+        let json_re = Regex::new(r#"\{"cmd"\s*:\s*\["([^"]+)"\s*,\s*"([^"]+)"\s*,\s*"([^"]+)"(?:\s*,\s*"[^"]*")*\]\}"#).unwrap();
         if let Some(cap) = json_re.captures(response) {
+            if let (Some(shell), Some(_flag), Some(cmd_match)) = (cap.get(1), cap.get(2), cap.get(3)) {
+                let shell_name = shell.as_str();
+                let cmd = cmd_match.as_str().trim();
+
+                // Check if this is a shell invocation (bash, sh, powershell, cmd)
+                if ["bash", "sh", "powershell", "pwsh", "cmd"].contains(&shell_name) {
+                    if !cmd.is_empty() && looks_like_shell_command(cmd) {
+                        commands.push(cmd.to_string());
+                        return commands;
+                    }
+                }
+            }
+        }
+
+        // Also try simpler format: {"cmd":["command"]} (single element)
+        let simple_json_re = Regex::new(r#"\{"cmd"\s*:\s*\["([^"]+)"\]\}"#).unwrap();
+        if let Some(cap) = simple_json_re.captures(response) {
             if let Some(m) = cap.get(1) {
-                let cmd = strip_shell_comment(m.as_str().trim());
+                let cmd = m.as_str().trim();
                 if !cmd.is_empty() && looks_like_shell_command(cmd) {
                     commands.push(cmd.to_string());
                     return commands;
+                }
+            }
+        }
+    }
+
+    // Method 3: Unmarked code blocks (no language tag) - common with local models
+    // Only try if no commands found yet
+    if commands.is_empty() {
+        let unmarked_re = Regex::new(r"```\n([\s\S]*?)```").unwrap();
+        for cap in unmarked_re.captures_iter(response) {
+            if let Some(m) = cap.get(1) {
+                let block_content = m.as_str().trim();
+                // Only consider single-line blocks that look like commands
+                let lines: Vec<&str> = block_content.lines().collect();
+                if lines.len() <= 3 {
+                    for line in lines {
+                        let trimmed = line.trim();
+                        if !trimmed.is_empty() && !trimmed.starts_with('#') && looks_like_shell_command(trimmed) {
+                            commands.push(trimmed.to_string());
+                            return commands;
+                        }
+                    }
                 }
             }
         }
@@ -862,6 +910,67 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
         // Handle tool calls first (if any)
         if !tool_calls.is_empty() {
             let (tool_id, args) = &tool_calls[0];
+
+            // Special handling for container.exec (used by some fine-tuned models)
+            // Convert to shell command execution
+            if tool_id == "container.exec" || tool_id.starts_with("container.") {
+                if let Some(cmd) = args.get("cmd").or_else(|| args.get("command")) {
+                    let command = if let Some(arr) = cmd.as_array() {
+                        // Format: {"cmd": ["bash", "-c", "ls -la"]}
+                        arr.iter()
+                            .filter_map(|v| v.as_str())
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    } else if let Some(s) = cmd.as_str() {
+                        s.to_string()
+                    } else {
+                        format!("{}", cmd)
+                    };
+
+                    // Extract actual command (skip bash -c or sh -c prefix)
+                    let actual_cmd = if command.starts_with("bash -c ") || command.starts_with("sh -c ") {
+                        command.splitn(3, ' ').nth(2).unwrap_or(&command).trim_matches('"').to_string()
+                    } else if command.starts_with("bash -lc ") || command.starts_with("sh -lc ") {
+                        command.splitn(3, ' ').nth(2).unwrap_or(&command).trim_matches('"').to_string()
+                    } else {
+                        command
+                    };
+
+                    println!("{} {}", "→".bright_blue(), actual_cmd.dimmed());
+                    let (stdout, stderr, success) = run_shell_command(&actual_cmd, &state.working_dir);
+
+                    let output = if !stdout.is_empty() && !stderr.is_empty() {
+                        format!("{}\n{}", stdout, stderr)
+                    } else if !stdout.is_empty() {
+                        stdout
+                    } else {
+                        stderr
+                    };
+
+                    // Print brief output
+                    if !output.is_empty() {
+                        for line in output.lines().take(10) {
+                            println!("  {}", line);
+                        }
+                        if output.lines().count() > 10 {
+                            println!("  ... {} more lines", output.lines().count() - 10);
+                        }
+                    }
+
+                    if let Err(e) = state.session_logger.log_command(&actual_cmd, &output, success) {
+                        debug!("Failed to log command: {}", e);
+                    }
+
+                    state.messages.push(Message::assistant(&content));
+                    state.messages.push(Message::user(&format!(
+                        "Command output:\n```\n{}\n```\n\nBriefly describe what you found, then continue if needed.",
+                        output
+                    )));
+                    consecutive_failures = 0;
+                    continue;
+                }
+            }
+
             // Show brief tool name (remove server prefix for display)
             let short_name = tool_id.split(':').last().unwrap_or(tool_id);
             print!("{} {}", "⚡".bright_cyan(), short_name.bright_white());
@@ -1080,12 +1189,12 @@ fn agentic_system_prompt(state: &ReplState) -> String {
     let tools_prompt = state.get_mcp_tools_prompt();
 
     // Platform-specific shell info
-    let (os_name, shell_type, list_cmd, list_example) = if cfg!(windows) {
-        ("Windows", "PowerShell", "ls", "ls -la")  // PowerShell supports Unix aliases
+    let (os_name, shell_type, code_block_lang, list_cmd, list_example) = if cfg!(windows) {
+        ("Windows", "PowerShell", "powershell", "Get-ChildItem", "Get-ChildItem -Force")
     } else if cfg!(target_os = "macos") {
-        ("macOS", "sh", "ls", "ls -la")
+        ("macOS", "sh", "shell", "ls", "ls -la")
     } else {
-        ("Linux", "sh", "ls", "ls -la")
+        ("Linux", "sh", "shell", "ls", "ls -la")
     };
 
     // Get system info
@@ -1116,7 +1225,7 @@ SYSTEM:
 CAPABILITIES:
 
 1. SHELL COMMANDS - Execute ONE command at a time using {shell_type} syntax:
-```shell
+```{code_block_lang}
 {list_example}
 ```
 On {os_name}, use {shell_type} commands. For listing files: `{list_cmd}`. For changing directories: `cd`.
@@ -1147,6 +1256,7 @@ The key is to be intelligent and use the right tool for each task."#,
         available_memory_gb = available_memory_gb,
         os_name = os_name,
         shell_type = shell_type,
+        code_block_lang = code_block_lang,
         list_cmd = list_cmd,
         list_example = list_example,
         cwd = state.working_dir.display(),
