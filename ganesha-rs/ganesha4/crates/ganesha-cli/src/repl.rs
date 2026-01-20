@@ -372,10 +372,33 @@ fn run_shell_command(command: &str, working_dir: &PathBuf) -> (String, String, b
     debug!("Executing: {}", command);
 
     #[cfg(windows)]
-    let output = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", command])
-        .current_dir(working_dir)
-        .output();
+    let output = {
+        use base64::Engine;
+
+        // For commands with quotes, use -EncodedCommand to avoid escaping issues
+        // This encodes the command as base64 UTF-16LE which PowerShell decodes
+        let needs_encoding = command.contains('\'') && command.contains('"')
+            || command.matches('\'').count() > 2
+            || command.matches('"').count() > 2;
+
+        if needs_encoding {
+            // Encode as UTF-16LE base64 for PowerShell -EncodedCommand
+            let utf16: Vec<u8> = command.encode_utf16()
+                .flat_map(|c| c.to_le_bytes())
+                .collect();
+            let encoded = base64::engine::general_purpose::STANDARD.encode(&utf16);
+
+            std::process::Command::new("powershell")
+                .args(["-NoProfile", "-NonInteractive", "-EncodedCommand", &encoded])
+                .current_dir(working_dir)
+                .output()
+        } else {
+            std::process::Command::new("powershell")
+                .args(["-NoProfile", "-NonInteractive", "-Command", command])
+                .current_dir(working_dir)
+                .output()
+        }
+    };
 
     #[cfg(not(windows))]
     let output = std::process::Command::new("sh")
@@ -415,9 +438,9 @@ fn looks_like_shell_command(s: &str) -> bool {
         return false;
     }
 
-    // Must start with a valid command character (letter, dot, slash)
+    // Must start with a valid command character (letter, dot, slash, or parenthesis for PowerShell expressions)
     let first_char = first_word.chars().next().unwrap_or(' ');
-    if !first_char.is_ascii_alphabetic() && first_char != '.' && first_char != '/' {
+    if !first_char.is_ascii_alphabetic() && first_char != '.' && first_char != '/' && first_char != '(' && first_char != '$' {
         return false;
     }
 
@@ -455,7 +478,184 @@ fn looks_like_shell_command(s: &str) -> bool {
         return false;  // "- Explore a sub-folder" style
     }
 
+    // Reject code examples (not actual commands to execute)
+    // Rust code patterns
+    if trimmed.starts_with("///") || trimmed.starts_with("//!") {
+        return false;  // Rust doc comments
+    }
+    if first_word == "fn" || first_word == "pub" || first_word == "impl" || first_word == "struct" || first_word == "enum" {
+        return false;  // Rust declarations
+    }
+    if trimmed.starts_with("let ") && trimmed.contains(" = ") && !trimmed.contains("$(") {
+        return false;  // Rust/JS variable assignment (not shell export)
+    }
+
+    // Python code patterns
+    if first_word == "def" || first_word == "class" || first_word == "import" || first_word == "from" {
+        return false;  // Python declarations
+    }
+    if trimmed.starts_with("print(") || trimmed.starts_with("return ") || trimmed.starts_with("raise ") {
+        return false;  // Python statements
+    }
+    if trimmed.starts_with(">>> ") || trimmed.starts_with("... ") {
+        return false;  // Python REPL examples
+    }
+
+    // JavaScript/TypeScript code patterns
+    if first_word == "const" || first_word == "function" || first_word == "async" || first_word == "await" {
+        return false;  // JS declarations
+    }
+    if trimmed.starts_with("console.log(") || trimmed.starts_with("module.exports") {
+        return false;  // JS statements
+    }
+
+    // Generic code patterns
+    if trimmed.contains("->") && trimmed.contains("(") && !trimmed.contains("|") {
+        return false;  // Type annotations
+    }
+    if trimmed.ends_with(";") && !first_word.chars().all(|c| c.is_ascii_alphabetic() || c == '-' || c == '_') {
+        return false;  // Code statements ending in semicolon
+    }
+
+    // Reject lines that look like error messages from the model
+    if first_word == "error:" || first_word == "Error:" || first_word == "warning:" {
+        return false;
+    }
+
+    // Reject assert statements (test code)
+    if first_word == "assert" || trimmed.starts_with("assert_") {
+        return false;
+    }
+
+    // Reject lines that are clearly examples in documentation
+    if trimmed.starts_with("$") && trimmed.len() > 1 && trimmed.chars().nth(1) == Some(' ') {
+        // "$ command" style examples - extract the actual command
+        return false;  // We'll handle these differently
+    }
+
     true
+}
+
+/// Extract command from various JSON formats that models output
+/// Handles: {"cmd":[...]}, {"command":"..."}, {"tool":"shell","arguments":{...}}, etc.
+fn extract_command_from_json(response: &str) -> Option<String> {
+    // First, try to find complete JSON objects by brace matching
+    // This handles multi-line JSON better than regex
+    let response_clean = response.replace('\n', " ").replace('\r', " ");
+
+    // Find JSON objects by brace matching
+    let mut json_candidates: Vec<String> = Vec::new();
+    let chars: Vec<char> = response_clean.chars().collect();
+    let mut i = 0;
+
+    while i < chars.len() {
+        if chars[i] == '{' {
+            let start = i;
+            let mut depth = 1;
+            i += 1;
+
+            while i < chars.len() && depth > 0 {
+                match chars[i] {
+                    '{' => depth += 1,
+                    '}' => depth -= 1,
+                    _ => {}
+                }
+                i += 1;
+            }
+
+            if depth == 0 {
+                let json_str: String = chars[start..i].iter().collect();
+                json_candidates.push(json_str);
+            }
+        } else {
+            i += 1;
+        }
+    }
+
+    // Also try with regex for simpler cases
+    let json_re = Regex::new(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}").unwrap();
+    for cap in json_re.find_iter(&response_clean) {
+        let json_str = cap.as_str().to_string();
+        if !json_candidates.contains(&json_str) {
+            json_candidates.push(json_str);
+        }
+    }
+
+    for json_str in json_candidates {
+        // Try to parse as JSON
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json_str) {
+            // Format 1: {"cmd": ["powershell", "-Command", "Get-Date"]} or {"cmd": ["command"]}
+            if let Some(cmd_array) = value.get("cmd").and_then(|v| v.as_array()) {
+                let parts: Vec<&str> = cmd_array.iter()
+                    .filter_map(|v| v.as_str())
+                    .collect();
+
+                if !parts.is_empty() {
+                    // If it's a shell invocation, extract the actual command
+                    let first = parts[0].to_lowercase();
+                    if ["bash", "sh", "powershell", "pwsh", "cmd"].contains(&first.as_str()) {
+                        // Find the actual command after -c, -Command, etc.
+                        for (i, part) in parts.iter().enumerate() {
+                            if *part == "-c" || *part == "-lc" || part.eq_ignore_ascii_case("-Command") {
+                                if i + 1 < parts.len() {
+                                    return Some(parts[i + 1].to_string());
+                                }
+                            }
+                        }
+                        // If no flag found, join remaining parts
+                        if parts.len() > 1 {
+                            return Some(parts[1..].join(" "));
+                        }
+                    } else {
+                        // Direct command array
+                        return Some(parts.join(" "));
+                    }
+                }
+            }
+
+            // Format 2: {"command": "ls -la"} or {"command": [...]}
+            if let Some(cmd) = value.get("command") {
+                if let Some(s) = cmd.as_str() {
+                    return Some(s.to_string());
+                }
+                if let Some(arr) = cmd.as_array() {
+                    let parts: Vec<&str> = arr.iter()
+                        .filter_map(|v| v.as_str())
+                        .collect();
+                    if !parts.is_empty() {
+                        return Some(parts.join(" "));
+                    }
+                }
+            }
+
+            // Format 3: {"tool": "shell", "arguments": {"command": "..."}}
+            if let Some(tool) = value.get("tool").or(value.get("name")).and_then(|v| v.as_str()) {
+                if ["shell", "powershell", "bash", "execute", "run"].contains(&tool.to_lowercase().as_str()) {
+                    if let Some(args) = value.get("arguments") {
+                        if let Some(cmd) = args.get("command").and_then(|v| v.as_str()) {
+                            return Some(cmd.to_string());
+                        }
+                        if let Some(cmd) = args.get("cmd").and_then(|v| v.as_str()) {
+                            return Some(cmd.to_string());
+                        }
+                    }
+                }
+            }
+
+            // Format 4: {"tool_name": "shell", "arguments": {"command": "..."}}
+            if let Some(tool) = value.get("tool_name").and_then(|v| v.as_str()) {
+                if ["shell", "powershell", "bash", "execute", "run"].contains(&tool.to_lowercase().as_str()) {
+                    if let Some(args) = value.get("arguments") {
+                        if let Some(cmd) = args.get("command").and_then(|v| v.as_str()) {
+                            return Some(cmd.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
 }
 
 /// Extract bash/shell code blocks from AI response
@@ -493,36 +693,13 @@ fn extract_commands(response: &str) -> Vec<String> {
         }
     }
 
-    // Method 2: Local model JSON format (e.g., {"cmd":["bash","-lc","ls -la"]} or {"cmd":["powershell","-Command","..."]})
-    // Only try this if no markdown blocks found
+    // Method 2: Local model JSON format - use proper JSON parsing for flexibility
+    // Handles: {"cmd":[...]}, {"command":"..."}, {"tool":"shell","arguments":{"command":"..."}}
     if commands.is_empty() {
-        // Match various shell invocation formats in JSON
-        // Format: {"cmd":["shell","flag","command"]}
-        let json_re = Regex::new(r#"\{"cmd"\s*:\s*\["([^"]+)"\s*,\s*"([^"]+)"\s*,\s*"([^"]+)"(?:\s*,\s*"[^"]*")*\]\}"#).unwrap();
-        if let Some(cap) = json_re.captures(response) {
-            if let (Some(shell), Some(_flag), Some(cmd_match)) = (cap.get(1), cap.get(2), cap.get(3)) {
-                let shell_name = shell.as_str();
-                let cmd = cmd_match.as_str().trim();
-
-                // Check if this is a shell invocation (bash, sh, powershell, cmd)
-                if ["bash", "sh", "powershell", "pwsh", "cmd"].contains(&shell_name) {
-                    if !cmd.is_empty() && looks_like_shell_command(cmd) {
-                        commands.push(cmd.to_string());
-                        return commands;
-                    }
-                }
-            }
-        }
-
-        // Also try simpler format: {"cmd":["command"]} (single element)
-        let simple_json_re = Regex::new(r#"\{"cmd"\s*:\s*\["([^"]+)"\]\}"#).unwrap();
-        if let Some(cap) = simple_json_re.captures(response) {
-            if let Some(m) = cap.get(1) {
-                let cmd = m.as_str().trim();
-                if !cmd.is_empty() && looks_like_shell_command(cmd) {
-                    commands.push(cmd.to_string());
-                    return commands;
-                }
+        if let Some(cmd) = extract_command_from_json(response) {
+            if looks_like_shell_command(&cmd) {
+                commands.push(cmd);
+                return commands;
             }
         }
     }
@@ -969,6 +1146,146 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
                     consecutive_failures = 0;
                     continue;
                 }
+            }
+
+            // Special handling for generic shell tools (shell, shell_commands, execute, run, etc.)
+            // Models sometimes call these as if they were MCP tools
+            let shell_tool_names = ["shell", "shell_commands", "execute", "run", "bash", "powershell", "terminal"];
+            let tool_lower = tool_id.to_lowercase();
+            if shell_tool_names.iter().any(|&name| tool_lower == name || tool_lower.ends_with(&format!(":{}", name))) {
+                // Try to extract command from arguments
+                let command = args.get("command")
+                    .or(args.get("cmd"))
+                    .or(args.get("script"))
+                    .or(args.get("code"))
+                    .and_then(|v| v.as_str());
+
+                if let Some(cmd) = command {
+                    println!("{} {} → {}", "⚡".bright_cyan(), tool_id.bright_white(), cmd.dimmed());
+                    let (stdout, stderr, success) = run_shell_command(cmd, &state.working_dir);
+
+                    let output = if !stdout.is_empty() && !stderr.is_empty() {
+                        format!("{}\n{}", stdout, stderr)
+                    } else if !stdout.is_empty() {
+                        stdout
+                    } else {
+                        stderr
+                    };
+
+                    // Print brief output
+                    if !output.is_empty() {
+                        for line in output.lines().take(10) {
+                            println!("  {}", line);
+                        }
+                        if output.lines().count() > 10 {
+                            println!("  ... {} more lines", output.lines().count() - 10);
+                        }
+                    }
+
+                    state.messages.push(Message::assistant(&content));
+                    state.messages.push(Message::user(&format!(
+                        "Command output:\n```\n{}\n```\n\nBriefly describe what you found, then continue if needed.",
+                        output
+                    )));
+                    if success { consecutive_failures = 0; } else { consecutive_failures += 1; }
+                    continue;
+                } else {
+                    // No command found in arguments
+                    state.messages.push(Message::assistant(&content));
+                    state.messages.push(Message::user(
+                        "Tool error: shell tool requires a 'command' argument. Please provide the command to execute."
+                    ));
+                    consecutive_failures += 1;
+                    continue;
+                }
+            }
+
+            // Special handling for repo_browser.* tools (used by some fine-tuned models)
+            // These aren't real MCP tools - convert to shell commands
+            if tool_id.starts_with("repo_browser.") || tool_id.starts_with("repo_browser_") {
+                let tool_name = tool_id.split('.').last().unwrap_or(tool_id);
+
+                let shell_cmd = match tool_name {
+                    "print_tree" | "tree" | "list_files" => {
+                        let path = args.get("path")
+                            .or(args.get("directory"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or(".");
+                        #[cfg(windows)]
+                        { format!("Get-ChildItem -Path '{}' -Recurse -Depth 2 | Select-Object FullName", path) }
+                        #[cfg(not(windows))]
+                        { format!("find {} -maxdepth 3 -type f 2>/dev/null | head -50", path) }
+                    }
+                    "get_file" | "read_file" | "open_file" => {
+                        if let Some(path) = args.get("path").or(args.get("file")).and_then(|v| v.as_str()) {
+                            #[cfg(windows)]
+                            { format!("Get-Content -Path '{}'", path) }
+                            #[cfg(not(windows))]
+                            { format!("cat '{}'", path) }
+                        } else {
+                            // Can't execute without a path
+                            state.messages.push(Message::assistant(&content));
+                            state.messages.push(Message::user(
+                                "Tool error: repo_browser requires a 'path' argument. Try a different approach."
+                            ));
+                            consecutive_failures += 1;
+                            continue;
+                        }
+                    }
+                    "search" | "grep" | "find" => {
+                        let pattern = args.get("pattern")
+                            .or(args.get("query"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("*");
+                        let path = args.get("path")
+                            .or(args.get("directory"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or(".");
+                        #[cfg(windows)]
+                        { format!("Get-ChildItem -Path '{}' -Recurse -File | Select-String -Pattern '{}'", path, pattern) }
+                        #[cfg(not(windows))]
+                        { format!("grep -r '{}' {} 2>/dev/null | head -20", pattern, path) }
+                    }
+                    _ => {
+                        // Unknown repo_browser tool - tell the model it's not available
+                        state.messages.push(Message::assistant(&content));
+                        state.messages.push(Message::user(&format!(
+                            "Tool '{}' is not available. Use shell commands instead (Get-ChildItem, Get-Content, Select-String on Windows).",
+                            tool_id
+                        )));
+                        consecutive_failures += 1;
+                        continue;
+                    }
+                };
+
+                println!("{} {} → {}", "⚡".bright_cyan(), tool_name.bright_white(), shell_cmd.dimmed());
+                let (stdout, stderr, success) = run_shell_command(&shell_cmd, &state.working_dir);
+
+                let output = if !stdout.is_empty() && !stderr.is_empty() {
+                    format!("{}\n{}", stdout, stderr)
+                } else if !stdout.is_empty() {
+                    stdout
+                } else {
+                    stderr
+                };
+
+                // Print brief output
+                if !output.is_empty() {
+                    for line in output.lines().take(10) {
+                        println!("  {}", line);
+                    }
+                    if output.lines().count() > 10 {
+                        println!("  ... {} more lines", output.lines().count() - 10);
+                    }
+                }
+
+                state.messages.push(Message::assistant(&content));
+                state.messages.push(Message::user(&format!(
+                    "Command output:\n```\n{}\n```\n\nBriefly describe what you found, then continue if needed.",
+                    output
+                )));
+                if success { consecutive_failures = 0; } else { consecutive_failures += 1; }
+                continue;
             }
 
             // Show brief tool name (remove server prefix for display)

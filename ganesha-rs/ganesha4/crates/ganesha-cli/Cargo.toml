@@ -71,6 +71,9 @@ anyhow.workspace = true
 # Regex for parsing AI responses
 regex = "1"
 
+# Base64 encoding for PowerShell command escaping
+base64 = "0.22"
+
 # HTTP client for provider setup
 reqwest = { workspace = true, features = ["blocking"] }
 
