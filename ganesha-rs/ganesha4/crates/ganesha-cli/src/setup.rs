@@ -22,6 +22,7 @@ pub struct ProviderConfig {
 pub enum ProviderType {
     Anthropic,
     OpenAI,
+    Gemini,
     OpenRouter,
     Local,
 }
@@ -31,6 +32,7 @@ impl ProviderType {
         match self {
             ProviderType::Anthropic => "Anthropic (Claude)",
             ProviderType::OpenAI => "OpenAI (GPT-4)",
+            ProviderType::Gemini => "Google (Gemini)",
             ProviderType::OpenRouter => "OpenRouter (Multi-provider)",
             ProviderType::Local => "Local Server (Ollama/LM Studio/etc)",
         }
@@ -40,6 +42,7 @@ impl ProviderType {
         match self {
             ProviderType::Anthropic => Some("https://api.anthropic.com"),
             ProviderType::OpenAI => Some("https://api.openai.com/v1"),
+            ProviderType::Gemini => Some("https://generativelanguage.googleapis.com/v1beta/openai"),
             ProviderType::OpenRouter => Some("https://openrouter.ai/api/v1"),
             ProviderType::Local => None, // User must specify
         }
@@ -48,7 +51,7 @@ impl ProviderType {
     #[allow(dead_code)]
     pub fn requires_api_key(&self) -> bool {
         match self {
-            ProviderType::Anthropic | ProviderType::OpenAI | ProviderType::OpenRouter => true,
+            ProviderType::Anthropic | ProviderType::OpenAI | ProviderType::Gemini | ProviderType::OpenRouter => true,
             ProviderType::Local => false,
         }
     }
@@ -113,19 +116,21 @@ pub fn run_setup_wizard() -> anyhow::Result<Option<ProviderConfig>> {
     println!();
     println!("  {} Anthropic (Claude) - Best for coding tasks", "1.".bright_cyan());
     println!("  {} OpenAI (GPT-4)      - Widely supported", "2.".bright_cyan());
-    println!("  {} OpenRouter          - Access multiple providers", "3.".bright_cyan());
-    println!("  {} Local Server        - Ollama, LM Studio, vLLM, etc.", "4.".bright_cyan());
-    println!("  {} Skip for now", "5.".dimmed());
+    println!("  {} Google (Gemini)     - Large context, multimodal", "3.".bright_cyan());
+    println!("  {} OpenRouter          - Access multiple providers", "4.".bright_cyan());
+    println!("  {} Local Server        - Ollama, LM Studio, vLLM, etc.", "5.".bright_cyan());
+    println!("  {} Skip for now", "6.".dimmed());
     println!();
 
-    let choice = prompt("  Select [1-5]: ")?;
+    let choice = prompt("  Select [1-6]: ")?;
 
     let provider_type = match choice.trim() {
         "1" => ProviderType::Anthropic,
         "2" => ProviderType::OpenAI,
-        "3" => ProviderType::OpenRouter,
-        "4" => ProviderType::Local,
-        "5" | "" => {
+        "3" => ProviderType::Gemini,
+        "4" => ProviderType::OpenRouter,
+        "5" => ProviderType::Local,
+        "6" | "" => {
             println!();
             println!("  {}", "Skipped. You can run 'ganesha config' later to set up providers.".dimmed());
             return Ok(None);
@@ -143,6 +148,7 @@ pub fn run_setup_wizard() -> anyhow::Result<Option<ProviderConfig>> {
     let config = match provider_type {
         ProviderType::Anthropic => setup_cloud_provider(provider_type, "ANTHROPIC_API_KEY")?,
         ProviderType::OpenAI => setup_cloud_provider(provider_type, "OPENAI_API_KEY")?,
+        ProviderType::Gemini => setup_cloud_provider(provider_type, "GEMINI_API_KEY")?,
         ProviderType::OpenRouter => setup_cloud_provider(provider_type, "OPENROUTER_API_KEY")?,
         ProviderType::Local => setup_local_provider()?,
     };
@@ -352,6 +358,7 @@ fn get_signup_url(provider_type: ProviderType) -> &'static str {
     match provider_type {
         ProviderType::Anthropic => "https://console.anthropic.com/",
         ProviderType::OpenAI => "https://platform.openai.com/api-keys",
+        ProviderType::Gemini => "https://aistudio.google.com/apikey",
         ProviderType::OpenRouter => "https://openrouter.ai/keys",
         ProviderType::Local => "",
     }

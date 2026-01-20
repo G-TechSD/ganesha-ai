@@ -75,9 +75,14 @@ static MODEL_TIERS: LazyLock<HashMap<&'static str, ModelTier>> = LazyLock::new(|
 
     // Exceptional tier - best for agentic tasks
     m.insert("claude-3-5-sonnet", ModelTier::Exceptional);
+    m.insert("claude-sonnet-4", ModelTier::Exceptional);
+    m.insert("claude-opus-4", ModelTier::Exceptional);
     m.insert("claude-3-opus", ModelTier::Exceptional);
     m.insert("gpt-4o", ModelTier::Exceptional);
     m.insert("gpt-4-turbo", ModelTier::Exceptional);
+    m.insert("o1", ModelTier::Exceptional);
+    m.insert("o1-preview", ModelTier::Exceptional);
+    m.insert("gemini-2.0-pro", ModelTier::Exceptional);
     m.insert("gemini-1.5-pro", ModelTier::Exceptional);
     m.insert("deepseek-v3", ModelTier::Exceptional);
     m.insert("qwen-2.5-72b", ModelTier::Exceptional);
@@ -85,11 +90,13 @@ static MODEL_TIERS: LazyLock<HashMap<&'static str, ModelTier>> = LazyLock::new(|
 
     // Capable tier
     m.insert("gpt-4o-mini", ModelTier::Capable);
+    m.insert("o3-mini", ModelTier::Capable);
     m.insert("claude-3-5-haiku", ModelTier::Capable);
     m.insert("claude-3-haiku", ModelTier::Capable);
     m.insert("llama-3.1-70b", ModelTier::Capable);
     m.insert("mistral-large", ModelTier::Capable);
     m.insert("qwen-2.5-32b", ModelTier::Capable);
+    m.insert("gemini-2.0-flash", ModelTier::Capable);
     m.insert("gemini-1.5-flash", ModelTier::Capable);
     m.insert("deepseek-coder", ModelTier::Capable);
 

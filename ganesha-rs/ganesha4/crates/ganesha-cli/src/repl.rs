@@ -285,72 +285,27 @@ impl SessionLogger {
 }
 
 /// Parse and detect multiple choice options from AI response
-/// Only returns options if the AI is explicitly asking the user to make a choice
+/// Only returns options if the AI is EXPLICITLY presenting numbered choices for user selection
+/// This is very strict to avoid false positives on informational numbered lists
 /// Returns detected options if any, or None
-fn detect_options(text: &str) -> Option<Vec<String>> {
-    let text_lower = text.to_lowercase();
-
-    // Check if the AI is actually asking for a choice (not just listing information)
-    // Look for choice-indicating phrases BEFORE or NEAR the numbered list
-    let choice_indicators = [
-        "which would you",
-        "which one would you",
-        "would you like",
-        "would you prefer",
-        "choose from",
-        "select from",
-        "pick from",
-        "select one",
-        "choose one",
-        "here are your options",
-        "here are some options",
-        "your options are",
-        "options:",
-        "choose:",
-        "select:",
-        "which do you",
-        "what would you like",
-        "let me know which",
-        "tell me which",
-    ];
-
-    // Must have a choice indicator
-    let has_choice_indicator = choice_indicators.iter().any(|&indicator| text_lower.contains(indicator));
-
-    if !has_choice_indicator {
-        return None;
-    }
-
-    let lines: Vec<&str> = text.lines().collect();
-    let mut options = Vec::new();
-    let mut in_options_section = false;
-
-    // Look for numbered options (1. Option, 2. Option, etc.)
-    let option_pattern = Regex::new(r"^\s*(\d+)[.)]\s+(.+)$").unwrap();
-
-    for line in &lines {
-        if let Some(caps) = option_pattern.captures(line) {
-            let num: i32 = caps.get(1).unwrap().as_str().parse().unwrap_or(0);
-            let option_text = caps.get(2).unwrap().as_str().trim().to_string();
-
-            // Options should start at 1 and be sequential
-            if num == (options.len() + 1) as i32 && !option_text.is_empty() {
-                options.push(option_text);
-                in_options_section = true;
-            }
-        } else if in_options_section && !line.trim().is_empty() && !line.trim().starts_with("```") {
-            // If we hit a non-option line after starting options, stop collecting
-            // (unless it's a code block or empty line)
-            break;
-        }
-    }
-
-    // Only return if we found 2-10 options (reasonable range for choices)
-    if options.len() >= 2 && options.len() <= 10 {
-        Some(options)
-    } else {
-        None
-    }
+fn detect_options(_text: &str) -> Option<Vec<String>> {
+    // DISABLED: This feature was causing too many false positives
+    // (e.g., detecting ingredient lists as choices when AI asks "would you like to know more?")
+    //
+    // The multiple choice UI should only appear when the AI explicitly formats choices like:
+    // "Please select an option:
+    //  1. Option A
+    //  2. Option B"
+    //
+    // But distinguishing this from informational lists like:
+    // "Here are the ingredients:
+    //  1. Malt - provides color
+    //  2. Hops - adds bitterness
+    //  Would you like to learn more?"
+    //
+    // Is too error-prone. Disabling until we can implement a more robust solution
+    // (e.g., having the AI explicitly mark choices with a special format)
+    None
 }
 
 /// Display interactive multiple choice prompt
@@ -1683,7 +1638,7 @@ impl ReplState {
             }
             ChatMode::Help => {
                 "You are Ganesha's help system. Explain Ganesha's features, commands, and capabilities. \
-                Available commands: /help, /mode, /model, /clear, /undo, /diff, /git, /commit, /add, /drop, /ls, /mcp, /session, /exit"
+                Available commands: /help, /mode, /model, /clear, /undo, /diff, /git, /commit, /add, /drop, /ls, /mcp, /session, /provider, /exit"
             }
         };
 
@@ -1772,6 +1727,12 @@ const SLASH_COMMANDS: &[SlashCommand] = &[
         handler: cmd_session,
     },
     SlashCommand {
+        name: "provider",
+        aliases: &["p"],
+        description: "Add or manage AI providers",
+        handler: cmd_provider,
+    },
+    SlashCommand {
         name: "exit",
         aliases: &["quit", "q"],
         description: "Exit Ganesha",
@@ -1825,6 +1786,7 @@ pub async fn run(cli: &Cli) -> anyhow::Result<()> {
                             let env_var = match provider.provider_type {
                                 ProviderType::Anthropic => "ANTHROPIC_API_KEY",
                                 ProviderType::OpenAI => "OPENAI_API_KEY",
+                                ProviderType::Gemini => "GEMINI_API_KEY",
                                 ProviderType::OpenRouter => "OPENROUTER_API_KEY",
                                 ProviderType::Local => continue,
                             };
@@ -1868,6 +1830,7 @@ pub async fn run(cli: &Cli) -> anyhow::Result<()> {
                                 let env_var = match config.provider_type {
                                     ProviderType::Anthropic => "ANTHROPIC_API_KEY",
                                     ProviderType::OpenAI => "OPENAI_API_KEY",
+                                    ProviderType::Gemini => "GEMINI_API_KEY",
                                     ProviderType::OpenRouter => "OPENROUTER_API_KEY",
                                     ProviderType::Local => "",
                                 };
@@ -2736,6 +2699,135 @@ fn cmd_session(args: &str, state: &mut ReplState) -> anyhow::Result<()> {
             println!("  {} - Show current session log path", "path".bright_green());
             println!("  {} - Show total size of all logs", "size".bright_green());
             println!("  {} - Flush current session to disk", "save".bright_green());
+        }
+    }
+    Ok(())
+}
+
+fn cmd_provider(args: &str, _state: &mut ReplState) -> anyhow::Result<()> {
+    use setup::{ProvidersConfig, ProviderType, run_setup_wizard};
+
+    let parts: Vec<&str> = args.split_whitespace().collect();
+    let action = parts.first().map(|s| *s).unwrap_or("");
+
+    match action {
+        "list" | "ls" | "" => {
+            // List configured providers
+            let config = ProvidersConfig::load();
+
+            if config.providers.is_empty() {
+                println!("\n{}\n", "No providers configured".yellow());
+                println!("Run {} to add a provider", "/provider add".bright_green());
+                println!();
+            } else {
+                println!("\n{}\n", "Configured Providers".bright_cyan().bold());
+
+                for (i, provider) in config.providers.iter().enumerate() {
+                    let status = if provider.enabled { "●".green() } else { "○".dimmed() };
+                    let default = if config.default_provider.as_ref() == Some(&provider.name) {
+                        " (default)".bright_yellow()
+                    } else {
+                        "".normal()
+                    };
+
+                    let provider_info = match provider.provider_type {
+                        ProviderType::Local => {
+                            if let Some(ref url) = provider.base_url {
+                                format!("{} @ {}", provider.provider_type.display_name(), url.dimmed())
+                            } else {
+                                provider.provider_type.display_name().to_string()
+                            }
+                        }
+                        _ => provider.provider_type.display_name().to_string(),
+                    };
+
+                    println!(
+                        "  {} {} {} - {}{}",
+                        format!("[{}]", i + 1).dimmed(),
+                        status,
+                        provider.name.bright_white(),
+                        provider_info,
+                        default
+                    );
+                }
+                println!();
+                println!("Config file: {}", ProvidersConfig::config_path().display().to_string().dimmed());
+                println!();
+            }
+        }
+        "add" => {
+            // Run the setup wizard to add a new provider
+            match run_setup_wizard() {
+                Ok(Some(_)) => {
+                    println!("{} Use {} to reload providers", "Tip:".bright_cyan(), "/provider reload".bright_green());
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    println!("{} {}", "Error:".red(), e);
+                }
+            }
+        }
+        "remove" | "rm" | "delete" => {
+            // Remove a provider
+            if let Some(name) = parts.get(1) {
+                let mut config = ProvidersConfig::load();
+                let before_len = config.providers.len();
+                config.providers.retain(|p| p.name != *name);
+
+                if config.providers.len() < before_len {
+                    if let Err(e) = config.save() {
+                        println!("{} Failed to save: {}", "Error:".red(), e);
+                    } else {
+                        println!("{} Removed provider '{}'", "✓".green(), name);
+                    }
+                } else {
+                    println!("{} Provider '{}' not found", "Error:".red(), name);
+                }
+            } else {
+                println!("Usage: /provider remove <name>");
+            }
+        }
+        "default" => {
+            // Set default provider
+            if let Some(name) = parts.get(1) {
+                let mut config = ProvidersConfig::load();
+                if config.providers.iter().any(|p| p.name == *name) {
+                    config.default_provider = Some(name.to_string());
+                    if let Err(e) = config.save() {
+                        println!("{} Failed to save: {}", "Error:".red(), e);
+                    } else {
+                        println!("{} Set '{}' as default provider", "✓".green(), name);
+                    }
+                } else {
+                    println!("{} Provider '{}' not found", "Error:".red(), name);
+                }
+            } else {
+                println!("Usage: /provider default <name>");
+            }
+        }
+        "reload" => {
+            println!("{} Restart Ganesha to reload providers", "Note:".bright_cyan());
+        }
+        _ => {
+            println!("\n{}\n", "Provider Management".bright_cyan().bold());
+            println!("Usage: /provider [action]");
+            println!();
+            println!("  {} - List configured providers", "list".bright_green());
+            println!("  {} - Add a new provider (interactive)", "add".bright_green());
+            println!("  {} - Remove a provider", "remove <name>".bright_green());
+            println!("  {} - Set the default provider", "default <name>".bright_green());
+            println!("  {} - Reload provider configuration", "reload".bright_green());
+            println!();
+            println!("Supported cloud providers:");
+            println!("  • Anthropic (Claude)");
+            println!("  • OpenAI (GPT-4)");
+            println!("  • Google (Gemini)");
+            println!("  • OpenRouter");
+            println!();
+            println!("Local providers:");
+            println!("  • LM Studio, Ollama, vLLM");
+            println!("  • Any OpenAI-compatible server");
+            println!();
         }
     }
     Ok(())
