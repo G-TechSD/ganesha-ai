@@ -468,6 +468,14 @@ fn looks_like_shell_command(s: &str) -> bool {
         }
     }
 
+    // Reject date/time outputs (e.g., "Tuesday, January 20, 2026 11:36:58 AM")
+    let days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+    for day in days {
+        if first_word == day || first_word == &format!("{},", day) {
+            return false;
+        }
+    }
+
     // Reject numbered list items that aren't commands
     if Regex::new(r"^\d+\.?\s+[A-Z]").unwrap().is_match(trimmed) {
         return false;  // "1. Add the user" style
