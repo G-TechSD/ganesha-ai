@@ -29,6 +29,7 @@
 pub mod traits;
 pub mod openai;
 pub mod anthropic;
+pub mod gemini;
 pub mod openrouter;
 pub mod local;
 pub mod manager;
@@ -42,6 +43,7 @@ pub use traits::{
 };
 pub use openai::OpenAiProvider;
 pub use anthropic::AnthropicProvider;
+pub use gemini::GeminiProvider;
 pub use openrouter::OpenRouterProvider;
 pub use local::{LocalProvider, LocalProviderType};
 pub use manager::{ProviderManager, ProviderPriority, ProviderConfig};

@@ -4,7 +4,7 @@
 
 use crate::{
     GenerateOptions, LlmProvider, LocalProvider, Message, ModelInfo, ModelTier,
-    OpenAiProvider, AnthropicProvider, OpenRouterProvider, ProviderError, Response, Result,
+    OpenAiProvider, AnthropicProvider, GeminiProvider, OpenRouterProvider, ProviderError, Response, Result,
 };
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -123,6 +123,18 @@ impl ProviderManager {
                     ProviderPriority::Primary
                 };
                 self.register(OpenAiProvider::new(key), priority).await;
+            }
+        }
+
+        if let Ok(key) = std::env::var("GEMINI_API_KEY") {
+            if !key.is_empty() {
+                info!("Found Gemini API key");
+                let priority = if self.local_first {
+                    ProviderPriority::Secondary
+                } else {
+                    ProviderPriority::Primary
+                };
+                self.register(GeminiProvider::new(key), priority).await;
             }
         }
 
