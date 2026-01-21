@@ -3,7 +3,8 @@
 //! Interactive setup for LLM providers when none are configured.
 
 use colored::Colorize;
-use std::io::{self, Write};
+use crossterm::terminal;
+use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 
 /// Provider configuration that gets saved
@@ -374,22 +375,49 @@ fn mask_api_key(key: &str) -> String {
 }
 
 /// Prompt for user input
+/// Temporarily disables raw mode if active to allow normal line reading
 fn prompt(msg: &str) -> anyhow::Result<String> {
     print!("{}", msg);
     io::stdout().flush()?;
 
+    // Check if terminal is in raw mode and temporarily disable it
+    let was_raw = terminal::is_raw_mode_enabled().unwrap_or(false);
+    if was_raw {
+        let _ = terminal::disable_raw_mode();
+    }
+
     let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
+    let result = io::stdin().lock().read_line(&mut input);
+
+    // Restore raw mode if it was enabled
+    if was_raw {
+        let _ = terminal::enable_raw_mode();
+    }
+
+    result?;
     Ok(input.trim().to_string())
 }
 
 /// Prompt for secret input (API key)
+/// Temporarily disables raw mode if active to allow normal line reading
 fn prompt_secret(msg: &str) -> anyhow::Result<String> {
     print!("{}", msg);
     io::stdout().flush()?;
 
-    // For now, just read normally. Could use rpassword for hidden input.
+    // Check if terminal is in raw mode and temporarily disable it
+    let was_raw = terminal::is_raw_mode_enabled().unwrap_or(false);
+    if was_raw {
+        let _ = terminal::disable_raw_mode();
+    }
+
     let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
+    let result = io::stdin().lock().read_line(&mut input);
+
+    // Restore raw mode if it was enabled
+    if was_raw {
+        let _ = terminal::enable_raw_mode();
+    }
+
+    result?;
     Ok(input.trim().to_string())
 }

@@ -3146,13 +3146,13 @@ fn cmd_provider(args: &str, _state: &mut ReplState) -> anyhow::Result<()> {
     let action = parts.first().map(|s| *s).unwrap_or("");
 
     match action {
-        "list" | "ls" | "" => {
+        "list" | "ls" => {
             // List configured providers
             let config = ProvidersConfig::load();
 
             if config.providers.is_empty() {
                 println!("\n{}\n", "No providers configured".yellow());
-                println!("Run {} to add a provider", "/provider add".bright_green());
+                println!("Run {} to add a provider", "/provider".bright_green());
                 println!();
             } else {
                 println!("\n{}\n", "Configured Providers".bright_cyan().bold());
@@ -3190,7 +3190,7 @@ fn cmd_provider(args: &str, _state: &mut ReplState) -> anyhow::Result<()> {
                 println!();
             }
         }
-        "add" => {
+        "" | "add" => {
             // Run the setup wizard to add a new provider
             match run_setup_wizard() {
                 Ok(Some(_)) => {
