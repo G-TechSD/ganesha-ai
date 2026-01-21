@@ -2183,25 +2183,69 @@ pub async fn run(cli: &Cli) -> anyhow::Result<()> {
     // Show brief startup spinner
     print!("{} Starting Ganesha...", "🐘".bright_green());
 
-    // Auto-discover available providers
+    // Load saved provider configs FIRST (before auto-discovery)
+    // This ensures API keys are set in env vars before discovery
+    let saved_config = ProvidersConfig::load();
+    if saved_config.has_providers() {
+        for provider in saved_config.enabled_providers() {
+            match provider.provider_type {
+                ProviderType::Local => {
+                    // Local providers are handled after cloud providers
+                }
+                _ => {
+                    // Set env var for cloud providers so auto_discover finds them
+                    if let Some(ref api_key) = provider.api_key {
+                        let env_var = match provider.provider_type {
+                            ProviderType::Anthropic => "ANTHROPIC_API_KEY",
+                            ProviderType::OpenAI => "OPENAI_API_KEY",
+                            ProviderType::Gemini => "GEMINI_API_KEY",
+                            ProviderType::OpenRouter => "OPENROUTER_API_KEY",
+                            ProviderType::Local => continue,
+                        };
+                        std::env::set_var(env_var, api_key);
+                        info!("Set {} from saved config", env_var);
+                    }
+                }
+            }
+        }
+    }
+
+    // Auto-discover available providers (will find cloud providers via env vars we just set)
     if let Err(e) = provider_manager.auto_discover().await {
         warn!("Provider discovery failed: {}", e);
     }
 
-    // Check if any providers are available
+    // Now register local providers from saved config
+    if saved_config.has_providers() {
+        for provider in saved_config.enabled_providers() {
+            if provider.provider_type == ProviderType::Local {
+                if let Some(ref base_url) = provider.base_url {
+                    info!("Loading saved local provider: {} at {}", provider.name, base_url);
+                    let url = if base_url.ends_with("/v1") {
+                        base_url.clone()
+                    } else if base_url.ends_with('/') {
+                        format!("{}v1", base_url)
+                    } else {
+                        format!("{}/v1", base_url)
+                    };
+                    let local = LocalProvider::new(LocalProviderType::OpenAiCompatible)
+                        .with_base_url(url);
+                    provider_manager.register(local, ProviderPriority::Primary).await;
+                }
+            }
+        }
+    }
+
+    // Check if any providers are available, run setup wizard if not
     let providers = provider_manager.list_providers().await;
     if providers.is_empty() {
-        // Check if we have saved provider configs
-        let saved_config = ProvidersConfig::load();
-
-        if saved_config.has_providers() {
-            // Try to set up providers from saved config
-            for provider in saved_config.enabled_providers() {
-                match provider.provider_type {
+        // Run the interactive setup wizard
+        match setup::run_setup_wizard() {
+            Ok(Some(config)) => {
+                // Set up the provider with the new config
+                match config.provider_type {
                     ProviderType::Local => {
-                        // Register local provider with its custom URL
-                        if let Some(ref base_url) = provider.base_url {
-                            info!("Loading saved local provider: {} at {}", provider.name, base_url);
+                        if let Some(ref base_url) = config.base_url {
                             // Ensure /v1 suffix for OpenAI-compatible servers
                             let url = if base_url.ends_with("/v1") {
                                 base_url.clone()
@@ -2216,78 +2260,32 @@ pub async fn run(cli: &Cli) -> anyhow::Result<()> {
                         }
                     }
                     _ => {
-                        // Cloud providers - set env var for discovery
-                        if let Some(ref api_key) = provider.api_key {
-                            let env_var = match provider.provider_type {
+                        if let Some(ref api_key) = config.api_key {
+                            let env_var = match config.provider_type {
                                 ProviderType::Anthropic => "ANTHROPIC_API_KEY",
                                 ProviderType::OpenAI => "OPENAI_API_KEY",
                                 ProviderType::Gemini => "GEMINI_API_KEY",
                                 ProviderType::OpenRouter => "OPENROUTER_API_KEY",
-                                ProviderType::Local => continue,
+                                ProviderType::Local => "",
                             };
-                            std::env::set_var(env_var, api_key);
+                            if !env_var.is_empty() {
+                                std::env::set_var(env_var, api_key);
+                            }
+                        }
+                        // Re-discover providers
+                        if let Err(e) = provider_manager.auto_discover().await {
+                            warn!("Provider setup failed: {}", e);
                         }
                     }
                 }
+                println!();
             }
-
-            // Re-discover cloud providers with the new env vars
-            if let Err(e) = provider_manager.auto_discover().await {
-                warn!("Provider re-discovery failed: {}", e);
+            Ok(None) => {
+                println!("\n{}", "Running without LLM provider. AI features unavailable.".dimmed());
+                println!("Run {} to set up providers later.\n", "ganesha config".bright_cyan());
             }
-        }
-
-        // Still no providers? Run the setup wizard
-        let providers = provider_manager.list_providers().await;
-        if providers.is_empty() {
-            // Run the interactive setup wizard
-            match setup::run_setup_wizard() {
-                Ok(Some(config)) => {
-                    // Set up the provider with the new config
-                    match config.provider_type {
-                        ProviderType::Local => {
-                            if let Some(ref base_url) = config.base_url {
-                                // Ensure /v1 suffix for OpenAI-compatible servers
-                                let url = if base_url.ends_with("/v1") {
-                                    base_url.clone()
-                                } else if base_url.ends_with('/') {
-                                    format!("{}v1", base_url)
-                                } else {
-                                    format!("{}/v1", base_url)
-                                };
-                                let local = LocalProvider::new(LocalProviderType::OpenAiCompatible)
-                                    .with_base_url(url);
-                                provider_manager.register(local, ProviderPriority::Primary).await;
-                            }
-                        }
-                        _ => {
-                            if let Some(ref api_key) = config.api_key {
-                                let env_var = match config.provider_type {
-                                    ProviderType::Anthropic => "ANTHROPIC_API_KEY",
-                                    ProviderType::OpenAI => "OPENAI_API_KEY",
-                                    ProviderType::Gemini => "GEMINI_API_KEY",
-                                    ProviderType::OpenRouter => "OPENROUTER_API_KEY",
-                                    ProviderType::Local => "",
-                                };
-                                if !env_var.is_empty() {
-                                    std::env::set_var(env_var, api_key);
-                                }
-                            }
-                            // Re-discover providers
-                            if let Err(e) = provider_manager.auto_discover().await {
-                                warn!("Provider setup failed: {}", e);
-                            }
-                        }
-                    }
-                    println!();
-                }
-                Ok(None) => {
-                    println!("\n{}", "Running without LLM provider. AI features unavailable.".dimmed());
-                    println!("Run {} to set up providers later.\n", "ganesha config".bright_cyan());
-                }
-                Err(e) => {
-                    warn!("Setup wizard failed: {}", e);
-                }
+            Err(e) => {
+                warn!("Setup wizard failed: {}", e);
             }
         }
     }
@@ -2386,7 +2384,14 @@ pub async fn run(cli: &Cli) -> anyhow::Result<()> {
                     state.history.push((line.clone(), response));
                 }
                 Err(e) => {
-                    eprintln!("{} {}", "Error:".red().bold(), e);
+                    let error_msg = format!("{}", e);
+                    eprintln!("{} {}", "Error:".red().bold(), error_msg);
+                    // Log error to session
+                    let _ = state.session_logger.write_line(&format!(
+                        "[{}] ERROR:\n{}\n\n",
+                        chrono::Local::now().format("%H:%M:%S"),
+                        error_msg
+                    ));
                 }
             }
         }
@@ -2461,14 +2466,27 @@ pub async fn run(cli: &Cli) -> anyhow::Result<()> {
                                         state.history.push((selection, follow_up));
                                     }
                                     Err(e) => {
-                                        eprintln!("{} {}", "Error:".red().bold(), e);
+                                        let error_msg = format!("{}", e);
+                                        eprintln!("{} {}", "Error:".red().bold(), error_msg);
+                                        let _ = state.session_logger.write_line(&format!(
+                                            "[{}] ERROR:\n{}\n\n",
+                                            chrono::Local::now().format("%H:%M:%S"),
+                                            error_msg
+                                        ));
                                     }
                                 }
                             }
                         }
                     }
                     Err(e) => {
-                        eprintln!("{} {}", "Error:".red().bold(), e);
+                        let error_msg = format!("{}", e);
+                        eprintln!("{} {}", "Error:".red().bold(), error_msg);
+                        // Log error to session
+                        let _ = state.session_logger.write_line(&format!(
+                            "[{}] ERROR:\n{}\n\n",
+                            chrono::Local::now().format("%H:%M:%S"),
+                            error_msg
+                        ));
                     }
                 }
             }
