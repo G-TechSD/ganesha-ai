@@ -30,7 +30,7 @@
 //! let skills = engine.find_relevant_skills("open preferences", &screenshot)?;
 //!
 //! // Apply the skill to the current screen
-//! let actions = engine.apply_skill(&skills[0], &screenshot)?;
+//! let actions = engine.apply_skill(&skills[0].skill, &screenshot)?;
 //! ```
 
 use chrono::{DateTime, Utc};
