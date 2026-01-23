@@ -84,8 +84,11 @@ pub use config::{
     KnownApp, SafetyLimits, VisionConfig, VisionModel,
 };
 pub use input::{
-    ClickType, DragOperation, InputError, InputResult, InputSimulator, Key, KeyInput,
-    KeyboardShortcut, Modifier, MouseAction, MouseButton, ScrollAction,
+    ClickType, DragOperation, EasingCurve, InputError, InputPlayer, InputRecorder, InputRecording,
+    InputResult, InputSimulator, Key, KeyActionType, KeyInput, KeyboardShortcut, Modifier,
+    MouseAction, MouseActionType, MouseButton, PlaybackOptions, PlaybackState, RecordedAction,
+    RecordedEvent, RecorderState, RecordingMetadata, ScrollAction, SpeedMode, TimingConfig,
+    smooth_move, smooth_move_default,
 };
 pub use planner::{
     ActionPlan, ConfirmationHandler, ConfirmationRequest, ExecutionContext, ExecutionEvent,
