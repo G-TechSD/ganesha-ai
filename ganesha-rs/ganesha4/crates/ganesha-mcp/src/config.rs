@@ -319,10 +319,11 @@ pub mod presets {
     pub fn puppeteer() -> ServerConfig {
         // Set up environment variables for puppeteer
         let mut env = HashMap::new();
-        // Enable --no-sandbox for Linux compatibility (AppArmor restrictions)
-        env.insert("PUPPETEER_LAUNCH_ARGS".to_string(), "--no-sandbox --disable-setuid-sandbox".to_string());
-        // Also set the chromium args directly
-        env.insert("CHROMIUM_FLAGS".to_string(), "--no-sandbox --disable-setuid-sandbox".to_string());
+
+        // DOCKER_CONTAINER triggers built-in --no-sandbox mode in puppeteer MCP servers
+        // This works on both the original @modelcontextprotocol/server-puppeteer and forks
+        // Required for Ubuntu 23.10+ AppArmor restrictions
+        env.insert("DOCKER_CONTAINER".to_string(), "true".to_string());
 
         ServerConfig {
             name: "Puppeteer".to_string(),
@@ -330,6 +331,8 @@ pub mod presets {
                 command: "npx".to_string(),
                 args: vec![
                     "-y".to_string(),
+                    // Original package works fine, just deprecated (no updates)
+                    // Can switch to @hisma/server-puppeteer if needed
                     "@modelcontextprotocol/server-puppeteer".to_string(),
                 ],
                 env,

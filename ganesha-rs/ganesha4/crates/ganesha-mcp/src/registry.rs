@@ -216,17 +216,17 @@ impl ServerRegistry {
             },
         );
 
-        // Puppeteer
+        // Puppeteer (official package is deprecated but still works)
         servers.insert(
             "puppeteer".to_string(),
             RegistryEntry {
                 name: "Puppeteer".to_string(),
                 description: "Browser automation and web scraping".to_string(),
                 category: ServerCategory::Web,
-                install_command: "npx -y @anthropics/mcp-server-puppeteer".to_string(),
-                npm_package: Some("@anthropics/mcp-server-puppeteer".to_string()),
+                install_command: "npx -y @modelcontextprotocol/server-puppeteer".to_string(),
+                npm_package: Some("@modelcontextprotocol/server-puppeteer".to_string()),
                 required_env: Vec::new(),
-                homepage: Some("https://github.com/anthropics/anthropic-mcp-servers".to_string()),
+                homepage: Some("https://github.com/modelcontextprotocol/servers".to_string()),
                 verified: true,
             },
         );

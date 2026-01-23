@@ -903,19 +903,32 @@ async fn execute_tool_call(
                             result.push_str(text);
                             result.push('\n');
                         }
-                        ganesha_mcp::types::ContentBlock::Resource { text, .. } => {
+                        ganesha_mcp::types::ContentBlock::Resource { text, uri, .. } => {
                             if let Some(t) = text {
                                 result.push_str(t);
                                 result.push('\n');
+                            } else {
+                                result.push_str(&format!("[Resource: {}]\n", uri));
                             }
                         }
-                        ganesha_mcp::types::ContentBlock::Image { data, .. } => {
-                            result.push_str(&format!("[Image: {} bytes]\n", data.len()));
+                        ganesha_mcp::types::ContentBlock::Image { data, mime_type } => {
+                            // Provide more context for screenshots so the model knows what happened
+                            result.push_str(&format!(
+                                "[Screenshot captured: {} bytes, {}. Use puppeteer_evaluate with JavaScript to extract text content from the page.]\n",
+                                data.len(), mime_type
+                            ));
                         }
                     }
                 }
             }
-            Ok(result.trim().to_string())
+            // If result is empty, provide a hint
+            let result = result.trim().to_string();
+            if result.is_empty() {
+                debug!("Tool returned empty response");
+                Ok("(Tool completed with no output)".to_string())
+            } else {
+                Ok(result)
+            }
         }
         Err(e) => {
             Err(anyhow::anyhow!("Tool call failed: {}", e))
