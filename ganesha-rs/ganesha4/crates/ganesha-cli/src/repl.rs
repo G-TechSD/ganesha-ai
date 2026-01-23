@@ -859,6 +859,75 @@ fn extract_tool_calls(response: &str) -> Vec<(String, serde_json::Value)> {
         }
     }
 
+    // Format 5: Raw tool arguments without wrapper (model outputs args directly)
+    // Detect tool from argument signature and match to known tools
+    // This handles models that output {"url": "...", ...} instead of {"name": "...", "arguments": {...}}
+    // Works with both single-line and multi-line JSON
+
+    // First try to find multi-line JSON blocks by finding { and matching }
+    let chars: Vec<char> = response.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '{' {
+            // Found start of JSON, find matching closing brace
+            let start = i;
+            let mut depth = 1;
+            i += 1;
+            while i < chars.len() && depth > 0 {
+                match chars[i] {
+                    '{' => depth += 1,
+                    '}' => depth -= 1,
+                    _ => {}
+                }
+                i += 1;
+            }
+            if depth == 0 {
+                // Found complete JSON block
+                let json_str: String = chars[start..i].iter().collect();
+                // Skip if it has "name" and "arguments" (already handled by Format 3/4)
+                if json_str.contains("\"name\"") && json_str.contains("\"arguments\"") {
+                    continue;
+                }
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                    if let Some(obj) = json.as_object() {
+                        // Puppeteer navigate: has "url" key
+                        if obj.contains_key("url") && (obj.contains_key("launchOptions") || obj.contains_key("allowDangerous") || obj.len() <= 4) {
+                            debug!("Extracted tool call (raw args format): puppeteer_navigate with {:?}", json);
+                            return vec![("puppeteer_navigate".to_string(), json)];
+                        }
+                        // Puppeteer screenshot: has "selector" or "fullPage"
+                        if obj.contains_key("fullPage") || (obj.contains_key("selector") && !obj.contains_key("value")) {
+                            debug!("Extracted tool call (raw args format): puppeteer_screenshot with {:?}", json);
+                            return vec![("puppeteer_screenshot".to_string(), json)];
+                        }
+                        // Puppeteer evaluate: has "script" key
+                        if obj.contains_key("script") {
+                            debug!("Extracted tool call (raw args format): puppeteer_evaluate with {:?}", json);
+                            return vec![("puppeteer_evaluate".to_string(), json)];
+                        }
+                        // Puppeteer click: has "selector" key only
+                        if obj.contains_key("selector") && obj.len() == 1 {
+                            debug!("Extracted tool call (raw args format): puppeteer_click with {:?}", json);
+                            return vec![("puppeteer_click".to_string(), json)];
+                        }
+                        // Puppeteer fill: has "selector" and "value" keys
+                        if obj.contains_key("selector") && obj.contains_key("value") {
+                            debug!("Extracted tool call (raw args format): puppeteer_fill with {:?}", json);
+                            return vec![("puppeteer_fill".to_string(), json)];
+                        }
+                        // Web search: has "query" key
+                        if obj.contains_key("query") && obj.len() <= 2 {
+                            debug!("Extracted tool call (raw args format): web with {:?}", json);
+                            return vec![("web".to_string(), json)];
+                        }
+                    }
+                }
+            }
+        } else {
+            i += 1;
+        }
+    }
+
     calls
 }
 
@@ -1211,7 +1280,7 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
 
             // Special handling for generic shell tools (shell, shell_commands, execute, run, etc.)
             // Models sometimes call these as if they were MCP tools
-            let shell_tool_names = ["shell", "shell_commands", "execute", "run", "bash", "powershell", "terminal"];
+            let shell_tool_names = ["shell", "shell_commands", "execute", "run", "bash", "sh", "powershell", "pwsh", "cmd", "terminal"];
             let tool_lower = tool_id.to_lowercase();
             if shell_tool_names.iter().any(|&name| tool_lower == name || tool_lower.ends_with(&format!(":{}", name))) {
                 // Try to extract command from arguments
