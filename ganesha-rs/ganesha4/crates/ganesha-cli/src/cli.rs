@@ -114,6 +114,12 @@ pub enum Commands {
         #[arg(value_enum)]
         shell: Shell,
     },
+
+    /// Vision and learning-from-demonstration commands
+    Vision {
+        #[command(subcommand)]
+        action: VisionAction,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -173,6 +179,52 @@ pub enum VoiceAction {
     },
     /// Start voice chat mode
     Chat,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum VisionAction {
+    /// Start recording a demonstration
+    Record {
+        /// Application name (e.g., "Blender", "GIMP")
+        app: String,
+        /// Description of what you're demonstrating
+        #[arg(short, long)]
+        description: Option<String>,
+    },
+    /// Stop recording and save the demonstration
+    Stop,
+    /// List saved skills
+    Skills {
+        /// Filter by application
+        #[arg(short, long)]
+        app: Option<String>,
+    },
+    /// Show a specific skill's details
+    Skill {
+        /// Skill ID
+        id: String,
+    },
+    /// Delete a skill
+    Delete {
+        /// Skill ID
+        id: String,
+    },
+    /// Test vision system with a screenshot
+    Test,
+    /// Show vision system status
+    Status,
+    /// Start vision control mode (Ganesha controls the screen)
+    Control {
+        /// Task to accomplish
+        task: String,
+        /// Speed mode: slow, normal, fast, beast
+        #[arg(short, long, default_value = "normal")]
+        speed: String,
+    },
+    /// Capture and analyze current screen
+    Capture,
+    /// Show learning statistics
+    Stats,
 }
 
 #[derive(Subcommand, Debug)]

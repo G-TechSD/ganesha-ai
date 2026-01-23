@@ -10,12 +10,18 @@ description = "Ganesha CLI - The Remover of Obstacles"
 name = "ganesha"
 path = "src/main.rs"
 
+[features]
+default = ["gui-automation"]
+gui-automation = ["ganesha-learning/screen-capture"]
+
 [dependencies]
 # Workspace crates
 ganesha-core = { path = "../ganesha-core" }
 ganesha-providers = { path = "../ganesha-providers" }
 ganesha-mcp = { path = "../ganesha-mcp" }
 ganesha-voice = { path = "../ganesha-voice" }
+ganesha-learning = { path = "../ganesha-learning" }
+ganesha-vision = { path = "../ganesha-vision" }
 
 # Workspace dependencies
 tokio.workspace = true

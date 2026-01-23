@@ -70,6 +70,9 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::Completions { shell }) => {
             cli::generate_completions(shell);
         }
+        Some(Commands::Vision { action }) => {
+            commands::vision::run(action).await?;
+        }
         None => {
             // Default: start interactive REPL
             if cli.tui {
