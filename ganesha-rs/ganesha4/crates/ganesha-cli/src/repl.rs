@@ -2025,8 +2025,17 @@ impl ReplState {
             debug!("No MCP config found: {}", e);
         }
 
-        // Auto-connect to configured servers only (don't auto-add puppeteer - requires npx)
-        // Users can manually add MCP servers with /mcp add <preset>
+        // Check if any servers are configured
+        let configured = self.mcp_manager.list_configured().await;
+
+        // If no servers configured, auto-add puppeteer for browser automation
+        if configured.is_empty() {
+            debug!("No MCP servers configured, adding puppeteer by default");
+            let preset = mcp_presets::puppeteer();
+            self.mcp_manager.add_server_config("puppeteer", preset).await;
+        }
+
+        // Auto-connect to configured servers
         if let Err(e) = self.mcp_manager.auto_connect().await {
             // Only warn if there were configured servers that failed
             let configured = self.mcp_manager.list_configured().await;
