@@ -1693,6 +1693,16 @@ BEHAVIOR RULES:
 - Be resourceful: if one approach fails, try another
 - NEVER ask "what would you like to do" - just observe and report
 
+OUTPUT FORMATTING:
+- Use markdown for readability: headers (##), bullet points (-), numbered lists (1.)
+- For lists of items (search results, models, features): use bullet points or numbered lists
+- Group related information under headers
+- Keep responses concise but well-structured
+- Example format for lists:
+  ## Results
+  1. **Item Name** - Brief description
+  2. **Another Item** - Brief description
+
 The key is to be intelligent and use the right tool for each task."#,
         mode_context = mode_context,
         current_time = current_time,
