@@ -819,6 +819,46 @@ fn extract_tool_calls(response: &str) -> Vec<(String, serde_json::Value)> {
         }
     }
 
+    // Format 3: Raw JSON tool call (OpenAI function call style)
+    // {"name":"tool_name","arguments":{...}} or {"name":"tool_name","arguments":"{...}"}
+    let json_re = Regex::new(r#"\{[^{}]*"name"\s*:\s*"([^"]+)"[^{}]*"arguments"\s*:\s*(\{[^{}]*\}|\{[^{}]*\{[^{}]*\}[^{}]*\}|"[^"]*")[^{}]*\}"#).unwrap();
+    if let Some(cap) = json_re.captures(response) {
+        if let (Some(name_match), Some(args_match)) = (cap.get(1), cap.get(2)) {
+            let tool_name = name_match.as_str().to_string();
+            let args_str = args_match.as_str();
+
+            // Handle both JSON object and stringified JSON
+            let args: serde_json::Value = if args_str.starts_with('"') && args_str.ends_with('"') {
+                // Stringified JSON - parse the inner string
+                let inner = &args_str[1..args_str.len()-1];
+                serde_json::from_str(inner).unwrap_or(serde_json::json!({}))
+            } else {
+                // Direct JSON object
+                serde_json::from_str(args_str).unwrap_or(serde_json::json!({}))
+            };
+
+            debug!("Extracted tool call (JSON format): {} with {:?}", tool_name, args);
+            return vec![(tool_name, args)];
+        }
+    }
+
+    // Format 4: Simple JSON on its own line
+    // Try to find any line that looks like a complete JSON tool call
+    for line in response.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('{') && trimmed.ends_with('}') && trimmed.contains("\"name\"") {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                if let (Some(name), Some(args)) = (json.get("name"), json.get("arguments")) {
+                    if let Some(name_str) = name.as_str() {
+                        let arguments = args.clone();
+                        debug!("Extracted tool call (line JSON format): {} with {:?}", name_str, arguments);
+                        return vec![(name_str.to_string(), arguments)];
+                    }
+                }
+            }
+        }
+    }
+
     calls
 }
 
