@@ -8,6 +8,7 @@ members = [
     "crates/ganesha-voice",
     "crates/ganesha-cli",
     "crates/ganesha-desktop",
+    "crates/ganesha-learning",
 ]
 
 [workspace.package]

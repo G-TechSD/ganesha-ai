@@ -14,7 +14,7 @@
 //!
 //! Note: This example actually moves your mouse cursor!
 
-use ganesha_vision::capture::{CaptureConfig, ScreenCapture, XcapCapture};
+use ganesha_learning::capture::{CaptureConfig, ScreenCapture, XcapCapture};
 use std::process::Command;
 use std::time::Duration;
 

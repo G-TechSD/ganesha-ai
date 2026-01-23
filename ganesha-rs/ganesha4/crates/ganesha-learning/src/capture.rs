@@ -12,7 +12,7 @@
 //! # Example
 //!
 //! ```rust,no_run
-//! use ganesha_vision::capture::{XcapCapture, ScreenCapture, CaptureConfig, ImageFormat};
+//! use ganesha_learning::capture::{XcapCapture, ScreenCapture, CaptureConfig, ImageFormat};
 //!
 //! #[tokio::main]
 //! async fn main() {

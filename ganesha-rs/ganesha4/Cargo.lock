@@ -2014,6 +2014,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "ganesha-learning"
+version = "4.0.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "enigo",
+ "image",
+ "reqwest",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-test",
+ "tracing",
+ "uuid",
+ "xcap",
+]
+
+[[package]]
 name = "ganesha-mcp"
 version = "4.0.0"
 dependencies = [
@@ -2068,6 +2090,7 @@ dependencies = [
  "futures",
  "image",
  "reqwest",
+ "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
@@ -4743,6 +4766,7 @@ dependencies = [
  "fallible-streaming-iterator",
  "hashlink 0.9.1",
  "libsqlite3-sys",
+ "serde_json",
  "smallvec",
 ]
 

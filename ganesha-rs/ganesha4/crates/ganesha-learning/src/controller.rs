@@ -18,12 +18,12 @@
 //! # Example
 //!
 //! ```rust,no_run
-//! use ganesha_vision::controller::{VisionController, VisionControllerConfig, SpeedMode};
+//! use ganesha_learning::controller::{VisionController, VisionControllerConfig, SpeedMode};
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let config = VisionControllerConfig::default();
-//!     let controller = VisionController::new(config, "ganesha_vision.db").await?;
+//!     let controller = VisionController::new(config, "ganesha_learning.db").await?;
 //!
 //!     // Execute a task
 //!     controller.execute_task("Open the settings menu").await?;

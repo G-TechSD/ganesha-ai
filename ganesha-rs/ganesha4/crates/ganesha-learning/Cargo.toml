@@ -1,0 +1,42 @@
+[package]
+name = "ganesha-learning"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Learning from demonstration system for Ganesha - persistent memory and skill acquisition"
+
+[lib]
+name = "ganesha_learning"
+path = "src/lib.rs"
+
+[features]
+default = ["screen-capture"]
+screen-capture = ["dep:xcap"]
+
+[dependencies]
+# Workspace dependencies
+rusqlite = { workspace = true, features = ["serde_json"] }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+reqwest = { workspace = true, features = ["json"] }
+
+# Image processing
+image = "0.25"
+base64 = "0.22"
+
+# Screen capture (cross-platform)
+xcap = { version = "0.8", optional = true }
+
+# Input simulation (cross-platform)
+enigo = { version = "0.3", optional = true }
+
+[dev-dependencies]
+tokio-test = "0.4"
+tempfile = "3.14"

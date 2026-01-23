@@ -13,7 +13,7 @@
 //! # Example
 //!
 //! ```no_run
-//! use ganesha_vision::model::{VisionClient, VisionModelConfig};
+//! use ganesha_learning::model::{VisionClient, VisionModelConfig};
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {

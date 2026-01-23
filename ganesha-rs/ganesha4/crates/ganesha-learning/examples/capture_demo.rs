@@ -4,7 +4,7 @@
 //!
 //! Run with: cargo run --example capture_demo --features screen-capture
 
-use ganesha_vision::capture::{
+use ganesha_learning::capture::{
     CaptureConfig, CaptureRegion, ImageFormat, ScreenBuffer, ScreenBufferConfig, ScreenCapture,
     XcapCapture,
 };

@@ -7,19 +7,19 @@
 //! Run ignored tests: cargo test --features screen-capture -- --ignored
 //! Run all including ignored: cargo test --features screen-capture -- --include-ignored
 
-use ganesha_vision::capture::{
+use ganesha_learning::capture::{
     CaptureConfig, CaptureRegion, ImageFormat, ScreenBuffer, ScreenBufferConfig,
     ScreenCapture, XcapCapture,
 };
-use ganesha_vision::db::{
+use ganesha_learning::db::{
     ActionDetails, ActionType, Database, Demonstration, MouseButton, Outcome,
     RecordedAction, Skill,
 };
-use ganesha_vision::learning::{
+use ganesha_learning::learning::{
     ExtractionConfig, LearningEngine, MatchConfig, Screenshot as LearningScreenshot,
     SkillExtractor, SkillMatcher,
 };
-use ganesha_vision::model::{ScreenAnalysis, UIElement, VisionClient, VisionModelConfig};
+use ganesha_learning::model::{ScreenAnalysis, UIElement, VisionClient, VisionModelConfig};
 use std::env;
 use std::time::Duration;
 use tempfile::tempdir;

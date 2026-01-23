@@ -7,8 +7,8 @@
 //! # Example
 //!
 //! ```ignore
-//! use ganesha_vision::learning::{LearningEngine, Screenshot};
-//! use ganesha_vision::Database;
+//! use ganesha_learning::learning::{LearningEngine, Screenshot};
+//! use ganesha_learning::Database;
 //!
 //! // Create the learning engine
 //! let db = Database::open("ganesha.db")?;

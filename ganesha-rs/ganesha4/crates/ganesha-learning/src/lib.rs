@@ -23,14 +23,14 @@
 //! the pattern.
 //!
 //! ```no_run
-//! use ganesha_vision::{Database, LearningEngine};
-//! use ganesha_vision::learning::Screenshot as LearningScreenshot;
-//! use ganesha_vision::db::MouseButton;
+//! use ganesha_learning::{Database, LearningEngine};
+//! use ganesha_learning::learning::Screenshot as LearningScreenshot;
+//! use ganesha_learning::db::MouseButton;
 //!
 //! #[tokio::main]
-//! async fn main() -> Result<(), ganesha_vision::Error> {
+//! async fn main() -> Result<(), ganesha_learning::Error> {
 //!     // Initialize the learning engine
-//!     let db = Database::open("ganesha_vision.db")?;
+//!     let db = Database::open("ganesha_learning.db")?;
 //!     let engine = LearningEngine::new(db);
 //!
 //!     // Start recording a demonstration
@@ -67,7 +67,7 @@
 //! # Vision Model Integration
 //!
 //! ```no_run
-//! use ganesha_vision::model::{VisionClient, VisionModelConfig, Screenshot};
+//! use ganesha_learning::model::{VisionClient, VisionModelConfig, Screenshot};
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {

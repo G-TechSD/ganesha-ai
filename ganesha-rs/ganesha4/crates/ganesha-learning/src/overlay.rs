@@ -13,7 +13,7 @@
 //! # Example
 //!
 //! ```rust,no_run
-//! use ganesha_vision::overlay::{ControlOverlay, OverlayConfig, ScreenBorder};
+//! use ganesha_learning::overlay::{ControlOverlay, OverlayConfig, ScreenBorder};
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
