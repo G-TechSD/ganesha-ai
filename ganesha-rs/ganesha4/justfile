@@ -1,0 +1,43 @@
+# Ganesha build automation
+# Install just with: cargo install just
+
+# Default: build and install
+default: install
+
+# Build debug
+build:
+    cargo build
+
+# Build release
+release:
+    cargo build --release
+
+# Build and install to ~/.local/bin (takes precedence in PATH)
+install:
+    cargo build --release -p ganesha-cli
+    cp target/release/ganesha ~/.local/bin/ganesha
+    @echo "Installed ganesha to ~/.local/bin/ganesha"
+
+# Run tests
+test:
+    cargo test --workspace
+
+# Run clippy
+lint:
+    cargo clippy --workspace
+
+# Clean build artifacts
+clean:
+    cargo clean
+
+# Run ganesha directly from build (without installing)
+run *ARGS:
+    cargo run -p ganesha-cli --release -- {{ARGS}}
+
+# Watch for changes and rebuild (requires cargo-watch)
+watch:
+    cargo watch -x "build -p ganesha-cli"
+
+# Install and run vision test
+vision-test: install
+    DISPLAY=:1 ganesha vision test
