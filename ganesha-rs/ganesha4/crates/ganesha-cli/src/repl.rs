@@ -1428,6 +1428,28 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
         let commands = extract_commands(&content);
         let tool_calls = extract_tool_calls(&content);
 
+        // SANITY CHECK: Detect when model uses puppeteer for simple shell commands
+        // If user typed a simple shell command but model responded with puppeteer, correct it
+        if !tool_calls.is_empty() {
+            let (tool_id, _) = &tool_calls[0];
+            let simple_shell_commands = ["ls", "pwd", "cd", "cat", "head", "tail", "mkdir", "rm", "cp", "mv", "touch", "echo", "whoami", "date", "df", "du", "ps", "top", "htop", "free", "uname"];
+            let user_first_word = user_message.split_whitespace().next().unwrap_or("");
+            let is_simple_shell = simple_shell_commands.contains(&user_first_word);
+            let is_puppeteer = tool_id.contains("puppeteer");
+
+            if is_simple_shell && is_puppeteer {
+                // Model confused a shell command for a web browse - correct it
+                println!("{} Model tried to browse web for shell command, correcting...", "⚠".yellow());
+                state.messages.push(Message::assistant(&content));
+                state.messages.push(Message::user(&format!(
+                    "ERROR: '{}' is a SHELL COMMAND, not a web task. Execute it with:\n```shell\n{}\n```",
+                    user_message, user_message
+                )));
+                consecutive_failures += 1;
+                continue;
+            }
+        }
+
         // Handle tool calls first (if any)
         if !tool_calls.is_empty() {
             let (tool_id, args) = &tool_calls[0];
@@ -1978,6 +2000,11 @@ When asked to create a website based on another site:
 
 ## HOW TO USE YOUR POWERS
 
+**IMPORTANT: Choose the right tool for the task:**
+- **Shell commands** for file operations, system tasks, running programs: `ls`, `cat`, `pwd`, `mkdir`, `git`, `npm`, etc.
+- **Puppeteer tools** ONLY for web browsing: navigating to URLs, extracting web content, taking screenshots
+- If the user types a simple command like `ls` or `pwd`, execute it as a SHELL COMMAND, not a web browse!
+
 **CRITICAL: You MUST use these EXACT formats. Never output raw code.**
 
 **Shell Commands** - Use a code block with shell/bash tag:
@@ -1985,7 +2012,7 @@ When asked to create a website based on another site:
 {list_example}
 ```
 
-**MCP Tools** - Use the tool block format:
+**MCP Tools** - Use the tool block format (ONLY for web browsing):
 ```tool
 tool_name: puppeteer_navigate
 arguments:
