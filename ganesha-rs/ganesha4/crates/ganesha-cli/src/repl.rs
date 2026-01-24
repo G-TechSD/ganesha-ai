@@ -1002,11 +1002,78 @@ fn extract_tool_calls(response: &str) -> Vec<(String, serde_json::Value)> {
                             debug!("Extracted tool call (raw args format): web with {:?}", json);
                             return vec![("web".to_string(), json)];
                         }
+
+                        // Format with "tool_name" field instead of "name"
+                        if obj.contains_key("tool_name") {
+                            if let Some(name) = obj.get("tool_name").and_then(|v| v.as_str()) {
+                                let tool_name = name.split(':').last().unwrap_or(name).to_string();
+                                let args = obj.get("arguments").cloned().unwrap_or(serde_json::json!({}));
+                                debug!("Extracted tool call (tool_name format): {} with {:?}", tool_name, args);
+                                return vec![(tool_name, args)];
+                            }
+                        }
                     }
                 }
             }
         } else {
             i += 1;
+        }
+    }
+
+    // Format 6: Bare tool call without code fences (YAML-like)
+    // puppeteer_navigate:
+    //   url: https://...
+    let bare_tool_re = Regex::new(r"(?m)^(puppeteer_navigate|puppeteer_evaluate|puppeteer_screenshot|puppeteer_click|brave_search):\s*$").unwrap();
+    if let Some(cap) = bare_tool_re.captures(response) {
+        if let Some(tool_match) = cap.get(1) {
+            let tool_name = tool_match.as_str().to_string();
+            let start_pos = cap.get(0).unwrap().end();
+            let rest = &response[start_pos..];
+
+            // Parse indented arguments
+            let mut args = serde_json::Map::new();
+            for line in rest.lines() {
+                if line.trim().is_empty() || (!line.starts_with(' ') && !line.starts_with('\t')) {
+                    break; // End of indented block
+                }
+                if let Some((key, value)) = line.trim().split_once(':') {
+                    let key = key.trim().to_string();
+                    let value = value.trim().to_string();
+                    args.insert(key, serde_json::Value::String(value));
+                }
+            }
+
+            if !args.is_empty() {
+                debug!("Extracted tool call (bare YAML format): {} with {:?}", tool_name, args);
+                return vec![(tool_name, serde_json::Value::Object(args))];
+            }
+        }
+    }
+
+    // Format 7: JSON prefixed with "json" (common LLM quirk)
+    // json{"tool_name":"...","arguments":{...}}
+    let json_prefix_re = Regex::new(r"json\s*(\{.+\})").unwrap();
+    if let Some(cap) = json_prefix_re.captures(response) {
+        if let Some(json_match) = cap.get(1) {
+            let json_str = json_match.as_str();
+            // Try to parse and extract tool info
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(json_str) {
+                if let Some(obj) = json.as_object() {
+                    // Check for tool_name field
+                    if let Some(name) = obj.get("tool_name").and_then(|v| v.as_str()) {
+                        let tool_name = name.split(':').last().unwrap_or(name).to_string();
+                        let args = obj.get("arguments").cloned().unwrap_or(serde_json::json!({}));
+                        debug!("Extracted tool call (json-prefixed format): {} with {:?}", tool_name, args);
+                        return vec![(tool_name, args)];
+                    }
+                    // Check for name field
+                    if let Some(name) = obj.get("name").and_then(|v| v.as_str()) {
+                        let args = obj.get("arguments").cloned().unwrap_or(serde_json::json!({}));
+                        debug!("Extracted tool call (json-prefixed name format): {} with {:?}", name, args);
+                        return vec![(name.to_string(), args)];
+                    }
+                }
+            }
         }
     }
 
@@ -1551,6 +1618,32 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
         }
 
         if commands.is_empty() {
+            // Check for raw JavaScript/code output that should have been formatted properly
+            // This catches cases where the model outputs puppeteer code directly
+            let raw_code_patterns = [
+                "const page", "await browser", "await page", "document.querySelector",
+                "page.goto", "page.evaluate", "browser.newPage", "puppeteer.launch",
+                "fs.writeFile", "fs.readFile", "require('"
+            ];
+
+            let looks_like_raw_code = raw_code_patterns.iter().any(|p| content.contains(p));
+
+            if looks_like_raw_code && consecutive_failures < MAX_CONSECUTIVE_FAILURES {
+                // Model output raw code instead of using proper format - ask for retry
+                println!("{} {}", "⚠".yellow(), "Invalid output format detected, requesting retry...".yellow());
+                state.messages.push(Message::assistant(&content));
+                state.messages.push(Message::user(
+                    "ERROR: You output raw JavaScript code instead of using the correct format.\n\
+                    You MUST use:\n\
+                    - ```tool ... ``` blocks for MCP tools like puppeteer\n\
+                    - ```shell ... ``` blocks for shell commands\n\
+                    - ```bash ... ``` blocks for heredocs\n\n\
+                    Please retry with the CORRECT format. Do not output raw JavaScript."
+                ));
+                consecutive_failures += 1;
+                continue;
+            }
+
             // No commands or tools - this is the final response
             // Clean the response to remove any control tokens from local models
             let cleaned = clean_response(&content);
@@ -1818,18 +1911,30 @@ When asked to create a website based on another site:
 
 ## HOW TO USE YOUR POWERS
 
-**Shell Commands** - Execute {shell_type} commands:
+**CRITICAL: You MUST use these EXACT formats. Never output raw code.**
+
+**Shell Commands** - Use a code block with shell/bash tag:
 ```{code_block_lang}
 {list_example}
 ```
-Rules: One command per response. Non-interactive only (no editors/password prompts).
 
-**MCP Tools** - External tools for browsing, searching, and more:
+**MCP Tools** - Use the tool block format:
 ```tool
-tool_name: tool_name_here
+tool_name: puppeteer_navigate
 arguments:
-  key: value
+  url: https://example.com
 ```
+
+**WRONG (never do this):**
+- Raw JavaScript: `const page = await browser.newPage()...`
+- Unformatted commands: `cat > file.html`
+- Code without fences: just typing commands as plain text
+
+**RIGHT (always do this):**
+- Shell commands inside ```{code_block_lang} ... ``` blocks
+- MCP tools inside ```tool ... ``` blocks
+- Heredocs with complete content inside code blocks
+
 {tools_prompt}
 
 ## OUTPUT FORMATTING
