@@ -827,11 +827,12 @@ fn extract_commands(response: &str) -> Vec<String> {
 
     // Method 5: Plain shell commands on their own line (no code fences)
     // Look for common shell commands like curl, wget, ls, cat, etc.
+    // NOTE: Excludes echo/printf as they're often output as garbage by confused models
     if commands.is_empty() {
         let shell_cmd_prefixes = [
             "curl ", "wget ", "ls ", "cat ", "head ", "tail ", "grep ",
             "find ", "mkdir ", "rm ", "cp ", "mv ", "chmod ", "chown ",
-            "echo ", "printf ", "touch ", "cd ", "pwd ", "tar ", "zip ",
+            "touch ", "cd ", "pwd ", "tar ", "zip ",
             "unzip ", "git ", "npm ", "yarn ", "pip ", "python ", "node ",
             "make ", "cargo ", "rustc ", "go ", "java ", "javac ",
         ];
@@ -1145,8 +1146,12 @@ async fn execute_tool_call(
     state: &ReplState
 ) -> anyhow::Result<String> {
     // First, clean up common prefixes the model might add
+    // Handle various confused formats: puppeteer_puppeteer_navigate, tool_puppeteer_navigate, etc.
     let cleaned_id = tool_id
-        .strip_prefix("tool_")
+        .strip_prefix("puppeteer_puppeteer_")  // Model confused: puppeteer_puppeteer_navigate -> navigate
+        .or_else(|| tool_id.strip_prefix("puppeteer:puppeteer_"))  // Model confused: puppeteer:puppeteer_navigate -> navigate
+        .or_else(|| tool_id.strip_prefix("tool_puppeteer_"))  // tool_puppeteer_navigate -> navigate
+        .or_else(|| tool_id.strip_prefix("tool_"))
         .or_else(|| tool_id.strip_prefix("tool."))
         .or_else(|| tool_id.strip_prefix("tool:"))
         .unwrap_or(tool_id);
@@ -1746,6 +1751,29 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
 
         // Only execute the first command (extract_commands already limits this)
         let cmd = &commands[0];
+
+        // Check for meaningless echo commands (model is confused)
+        if cmd.starts_with("echo ") {
+            let echo_content = cmd.strip_prefix("echo ").unwrap_or("").trim();
+            let meaningless_words = ["start", "ready", "done", "browsing", "starting", "none", "ok", "begin", "end"];
+            let is_meaningless = meaningless_words.iter().any(|w| {
+                echo_content.trim_matches('\'').trim_matches('"').to_lowercase() == *w
+            });
+
+            if is_meaningless {
+                println!("{} {}", "⚠".yellow(), "Ignoring meaningless echo command...".yellow());
+                state.messages.push(Message::assistant(&content));
+                state.messages.push(Message::user(
+                    "ERROR: Do not output meaningless echo commands like 'echo start' or 'echo ready'.\n\
+                    If you need to browse a website, use:\n\
+                    ```tool\ntool_name: puppeteer_navigate\narguments:\n  url: https://example.com\n```\n\
+                    If you need to run a shell command, use:\n\
+                    ```shell\nls -la\n```"
+                ));
+                consecutive_failures += 1;
+                continue;
+            }
+        }
 
         // Check for interactive commands that won't work
         if let Some(hint) = is_interactive_command(cmd) {
