@@ -743,18 +743,73 @@ fn extract_commands(response: &str) -> Vec<String> {
     // Only try if no commands found yet
     if commands.is_empty() {
         let unmarked_re = Regex::new(r"```\n([\s\S]*?)```").unwrap();
+        let heredoc_re = Regex::new(r"<<\s*'?(\w+)'?").unwrap();
+
         for cap in unmarked_re.captures_iter(response) {
             if let Some(m) = cap.get(1) {
-                let block_content = m.as_str().trim();
-                // Only consider single-line blocks that look like commands
-                let lines: Vec<&str> = block_content.lines().collect();
-                if lines.len() <= 3 {
-                    for line in lines {
-                        let trimmed = line.trim();
-                        if !trimmed.is_empty() && !trimmed.starts_with('#') && looks_like_shell_command(trimmed) {
-                            commands.push(trimmed.to_string());
-                            return commands;
+                let block_content = m.as_str();
+                let mut lines_iter = block_content.lines().peekable();
+
+                // Check first non-empty line for heredoc
+                while let Some(line) = lines_iter.next() {
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() || trimmed.starts_with('#') {
+                        continue;
+                    }
+
+                    // Check if this is a heredoc
+                    if let Some(heredoc_cap) = heredoc_re.captures(trimmed) {
+                        let delimiter = heredoc_cap.get(1).map(|m| m.as_str()).unwrap_or("EOF");
+
+                        let mut heredoc_cmd = trimmed.to_string();
+                        heredoc_cmd.push('\n');
+
+                        while let Some(content_line) = lines_iter.next() {
+                            heredoc_cmd.push_str(content_line);
+                            heredoc_cmd.push('\n');
+                            if content_line.trim() == delimiter {
+                                break;
+                            }
                         }
+
+                        commands.push(heredoc_cmd.trim_end().to_string());
+                        return commands;
+                    }
+
+                    // For non-heredoc, only accept short blocks
+                    let lines: Vec<&str> = block_content.lines().collect();
+                    if lines.len() <= 3 && looks_like_shell_command(trimmed) {
+                        commands.push(trimmed.to_string());
+                        return commands;
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    // Method 4: Bare heredoc without code fences - local models sometimes output these directly
+    if commands.is_empty() {
+        // Look for heredoc start pattern: cat > file << 'EOF' or similar
+        let heredoc_start_re = Regex::new(r"(?m)^((?:cat|tee)\s*>+\s*\S+\s*<<\s*'?(\w+)'?)").unwrap();
+
+        if let Some(cap) = heredoc_start_re.captures(response) {
+            if let (Some(start_match), Some(delim_match)) = (cap.get(1), cap.get(2)) {
+                let start_line = start_match.as_str();
+                let delimiter = delim_match.as_str();
+                let start_pos = start_match.end();
+
+                // Find the closing delimiter
+                let rest = &response[start_pos..];
+                let delim_pattern = format!("\n{}\n", delimiter);
+                let delim_pattern_end = format!("\n{}", delimiter);
+
+                if let Some(end_pos) = rest.find(&delim_pattern).or_else(|| rest.find(&delim_pattern_end)) {
+                    let content = &rest[1..end_pos]; // Skip leading newline
+                    let full_cmd = format!("{}\n{}\n{}", start_line, content, delimiter);
+                    if looks_like_shell_command(start_line) {
+                        commands.push(full_cmd);
+                        return commands;
                     }
                 }
             }
