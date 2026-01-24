@@ -679,8 +679,12 @@ fn extract_commands(response: &str) -> Vec<String> {
         if let Some(m) = cap.get(1) {
             let block_content = m.as_str();
 
-            // Process each line in the code block
-            for line in block_content.lines() {
+            // Check if this is a heredoc - capture the entire block
+            // Heredoc pattern: command << 'DELIMITER' or command <<DELIMITER
+            let heredoc_re = Regex::new(r"<<\s*'?(\w+)'?").unwrap();
+
+            let mut lines_iter = block_content.lines().peekable();
+            while let Some(line) = lines_iter.next() {
                 let trimmed = line.trim();
 
                 // Skip empty lines and comment-only lines
@@ -688,7 +692,30 @@ fn extract_commands(response: &str) -> Vec<String> {
                     continue;
                 }
 
-                // Strip inline comments
+                // Check if this line starts a heredoc
+                if let Some(heredoc_cap) = heredoc_re.captures(trimmed) {
+                    let delimiter = heredoc_cap.get(1).map(|m| m.as_str()).unwrap_or("EOF");
+
+                    // Capture the entire heredoc: start line + content + delimiter
+                    let mut heredoc_cmd = trimmed.to_string();
+                    heredoc_cmd.push('\n');
+
+                    // Collect all lines until we hit the closing delimiter
+                    while let Some(content_line) = lines_iter.next() {
+                        heredoc_cmd.push_str(content_line);
+                        heredoc_cmd.push('\n');
+
+                        // Check if this line is the closing delimiter
+                        if content_line.trim() == delimiter {
+                            break;
+                        }
+                    }
+
+                    commands.push(heredoc_cmd.trim_end().to_string());
+                    return commands;
+                }
+
+                // Strip inline comments for non-heredoc commands
                 let cmd = strip_shell_comment(trimmed).trim();
 
                 // Validate it looks like a command
