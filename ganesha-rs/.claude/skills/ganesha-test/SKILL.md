@@ -1,3 +1,9 @@
+---
+name: ganesha-test
+description: Use this skill when working on Ganesha CLI, debugging session logs, testing Ganesha capabilities, or when user mentions "ganesha", "session logs", "test ganesha", or vision/learning systems. Knows log locations, expected behaviors, failure patterns, and testing methodology.
+version: 1.0.0
+---
+
 # /ganesha-test - Ganesha Development & Testing Skill
 
 Use this skill whenever working on Ganesha CLI development, debugging, or testing. This skill knows how to find logs, what behaviors to expect, and how to properly test Ganesha's capabilities.
