@@ -668,8 +668,10 @@ fn extract_command_from_json(response: &str) -> Option<String> {
 
 /// Extract bash/shell code blocks from AI response
 /// CONSERVATIVE: Limits to first command only, validates command-like structure
+/// PREFERENCE: Heredocs (file creation) are preferred over simple commands
 fn extract_commands(response: &str) -> Vec<String> {
     let mut commands = Vec::new();
+    let mut simple_command: Option<String> = None;
 
     // Method 1: Standard markdown code blocks with explicit language tag
     // Support bash/sh/shell for Unix, powershell/pwsh/cmd for Windows
@@ -692,7 +694,7 @@ fn extract_commands(response: &str) -> Vec<String> {
                     continue;
                 }
 
-                // Check if this line starts a heredoc
+                // Check if this line starts a heredoc - PREFER these
                 if let Some(heredoc_cap) = heredoc_re.captures(trimmed) {
                     let delimiter = heredoc_cap.get(1).map(|m| m.as_str()).unwrap_or("EOF");
 
@@ -711,6 +713,7 @@ fn extract_commands(response: &str) -> Vec<String> {
                         }
                     }
 
+                    // Found a heredoc - return it immediately (preferred over simple commands)
                     commands.push(heredoc_cmd.trim_end().to_string());
                     return commands;
                 }
@@ -718,14 +721,20 @@ fn extract_commands(response: &str) -> Vec<String> {
                 // Strip inline comments for non-heredoc commands
                 let cmd = strip_shell_comment(trimmed).trim();
 
-                // Validate it looks like a command
+                // Validate it looks like a command - but don't return yet, keep looking for heredocs
                 if !cmd.is_empty() && looks_like_shell_command(cmd) {
-                    commands.push(cmd.to_string());
-                    // LIMIT: Only take the FIRST valid command
-                    return commands;
+                    if simple_command.is_none() {
+                        simple_command = Some(cmd.to_string());
+                    }
                 }
             }
         }
+    }
+
+    // If we found a simple command but no heredoc, use the simple command
+    if let Some(cmd) = simple_command {
+        commands.push(cmd);
+        return commands;
     }
 
     // Method 2: Local model JSON format - use proper JSON parsing for flexibility
@@ -816,6 +825,38 @@ fn extract_commands(response: &str) -> Vec<String> {
         }
     }
 
+    // Method 5: Plain shell commands on their own line (no code fences)
+    // Look for common shell commands like curl, wget, ls, cat, etc.
+    if commands.is_empty() {
+        let shell_cmd_prefixes = [
+            "curl ", "wget ", "ls ", "cat ", "head ", "tail ", "grep ",
+            "find ", "mkdir ", "rm ", "cp ", "mv ", "chmod ", "chown ",
+            "echo ", "printf ", "touch ", "cd ", "pwd ", "tar ", "zip ",
+            "unzip ", "git ", "npm ", "yarn ", "pip ", "python ", "node ",
+            "make ", "cargo ", "rustc ", "go ", "java ", "javac ",
+        ];
+
+        for line in response.lines() {
+            let trimmed = line.trim();
+
+            // Skip empty lines, comments, and lines that look like prose
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+
+            // Check if this line starts with a known shell command
+            let is_shell_cmd = shell_cmd_prefixes.iter().any(|p| trimmed.starts_with(p));
+
+            if is_shell_cmd && looks_like_shell_command(trimmed) {
+                // Make sure it's not part of prose (check it's relatively short and command-like)
+                if trimmed.len() < 500 && !trimmed.contains(". ") && !trimmed.ends_with('.') {
+                    commands.push(trimmed.to_string());
+                    return commands;
+                }
+            }
+        }
+    }
+
     commands
 }
 
@@ -859,15 +900,29 @@ fn extract_tool_calls(response: &str) -> Vec<(String, serde_json::Value)> {
             let mut tool_name = String::new();
             let mut args = serde_json::Map::new();
             let mut in_arguments = false;
+            let mut first_line = true;
 
             for line in content.lines() {
                 let trimmed = line.trim();
 
                 if trimmed.starts_with("tool_name:") {
                     tool_name = trimmed.strip_prefix("tool_name:").unwrap().trim().to_string();
+                    first_line = false;
                 } else if trimmed == "arguments:" {
                     in_arguments = true;
-                } else if in_arguments && trimmed.contains(':') {
+                    first_line = false;
+                } else if first_line && trimmed.ends_with(':') && !trimmed.contains(' ') {
+                    // Simple format: tool name on first line with colon (e.g., "puppeteer_navigate:")
+                    tool_name = trimmed.strip_suffix(':').unwrap().to_string();
+                    in_arguments = true; // Arguments follow directly
+                    first_line = false;
+                } else if first_line && !trimmed.contains(' ') && (trimmed.contains(':') || trimmed.starts_with("puppeteer") || trimmed.starts_with("brave")) {
+                    // Tool name on first line without trailing colon (e.g., "puppeteer:puppeteer_navigate" or "puppeteer_navigate")
+                    // The colon in the middle is server:tool format, not key:value
+                    tool_name = trimmed.to_string();
+                    first_line = false;
+                    // Don't set in_arguments yet, wait for "arguments:" line
+                } else if (in_arguments || !tool_name.is_empty()) && trimmed.contains(':') {
                     // Parse argument line (key: value)
                     if let Some((key, value)) = trimmed.split_once(':') {
                         let key = key.trim().to_string();
@@ -890,6 +945,9 @@ fn extract_tool_calls(response: &str) -> Vec<(String, serde_json::Value)> {
 
                         args.insert(key, json_value);
                     }
+                    first_line = false;
+                } else {
+                    first_line = false;
                 }
             }
 
@@ -1086,25 +1144,32 @@ async fn execute_tool_call(
     arguments: serde_json::Value,
     state: &ReplState
 ) -> anyhow::Result<String> {
+    // First, clean up common prefixes the model might add
+    let cleaned_id = tool_id
+        .strip_prefix("tool_")
+        .or_else(|| tool_id.strip_prefix("tool."))
+        .or_else(|| tool_id.strip_prefix("tool:"))
+        .unwrap_or(tool_id);
+
     // Fix tool ID if it doesn't have proper format (server:tool)
-    let fixed_tool_id = if !tool_id.contains(':') {
+    let fixed_tool_id = if !cleaned_id.contains(':') {
         // Try to find matching tool in available tools
         let matching: Vec<_> = state.mcp_tools.iter()
             .map(|(k, _)| k)
-            .filter(|k| k.ends_with(&format!(":{}", tool_id)) || k.ends_with(&format!("_{}", tool_id)))
+            .filter(|k| k.ends_with(&format!(":{}", cleaned_id)) || k.ends_with(&format!("_{}", cleaned_id)))
             .collect();
 
         if matching.len() == 1 {
             matching[0].clone()
-        } else if tool_id.starts_with("puppeteer") {
+        } else if cleaned_id.starts_with("puppeteer") {
             // Common case: puppeteer tools
-            format!("puppeteer:{}", tool_id)
+            format!("puppeteer:{}", cleaned_id)
         } else {
-            tool_id.to_string()
+            cleaned_id.to_string()
         }
     } else {
-        // Clean up any remaining issues (e.g., tool_puppeteer -> puppeteer)
-        tool_id.replace("tool_", "").replace("tool.", "")
+        // Already has server:tool format, just use as-is
+        cleaned_id.to_string()
     };
 
     info!("Executing MCP tool: {} with args: {:?}", fixed_tool_id, arguments);
@@ -1861,16 +1926,18 @@ When asked to create a website based on another site:
 1. Use puppeteer to navigate to the source site
 2. Extract content: text, images, links, structure using puppeteer_evaluate
 3. CREATE A BRAND NEW HTML/CSS/JS website with YOUR OWN modern design
-4. Write COMPLETE files - include ALL the HTML/CSS/JS content in one command:
-   ```
+4. Write COMPLETE files IN THE CURRENT DIRECTORY - include ALL the HTML/CSS/JS content in one command:
+   ```bash
    cat > index.html << 'EOF'
    <!DOCTYPE html>
    <html>... FULL CONTENT HERE ...</html>
    EOF
    ```
-5. NEVER send an empty heredoc - always include the complete file content
-6. DO NOT just download/copy the original - REDESIGN it with modern styling
-7. Use the extracted content (text, links, services) in your new layout
+5. CRITICAL: Create files DIRECTLY in the current directory (e.g., `index.html` not `~/something/index.html`)
+6. NEVER send an empty heredoc - always include the complete file content
+7. DO NOT just download/copy the original - REDESIGN it with modern styling
+8. Use the extracted content (text, links, services) in your new layout
+9. Output the COMMAND to create files, do NOT describe or explain the file contents in prose
 
 **GATHER ANY INFORMATION:**
 - Search the web for current information
