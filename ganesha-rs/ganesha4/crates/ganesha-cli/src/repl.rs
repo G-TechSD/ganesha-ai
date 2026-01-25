@@ -7,7 +7,7 @@ use crate::cli::{ChatMode, Cli};
 use crate::setup::{self, ProvidersConfig, ProviderType};
 use colored::Colorize;
 use ganesha_mcp::{McpManager, config::presets as mcp_presets, Tool as McpTool};
-use ganesha_providers::{GenerateOptions, LocalProvider, LocalProviderType, Message, ProviderManager, ProviderPriority};
+use ganesha_providers::{GenerateOptions, LocalProvider, LocalProviderType, Message, ProviderManager, ProviderPriority, AnthropicProvider, OpenAiProvider, GeminiProvider, OpenRouterProvider};
 use rustyline::error::ReadlineError;
 use rustyline::{Config, Editor, history::FileHistory};
 use std::fs::{self, File, OpenOptions};
@@ -2891,56 +2891,71 @@ pub async fn run(cli: &Cli) -> anyhow::Result<()> {
     // Show brief startup spinner
     print!("{} Starting Ganesha...", "🐘".bright_green());
 
-    // Load saved provider configs FIRST (before auto-discovery)
-    // This ensures API keys are set in env vars before discovery
+    // Load saved provider configs
+    // If providers.toml exists with configured providers, use ONLY those in order
+    // This ensures the user's preferred provider order is respected
     let saved_config = ProvidersConfig::load();
-    if saved_config.has_providers() {
-        for provider in saved_config.enabled_providers() {
+    let use_config_providers = saved_config.has_providers();
+
+    if use_config_providers {
+        // Register providers DIRECTLY from config file in order (skip auto_discover)
+        info!("Loading providers from config file in order...");
+        for (idx, provider) in saved_config.enabled_providers().iter().enumerate() {
+            let priority = if idx == 0 {
+                ProviderPriority::Primary
+            } else if idx == 1 {
+                ProviderPriority::Secondary
+            } else {
+                ProviderPriority::Fallback
+            };
+
             match provider.provider_type {
-                ProviderType::Local => {
-                    // Local providers are handled after cloud providers
-                }
-                _ => {
-                    // Set env var for cloud providers so auto_discover finds them
+                ProviderType::Anthropic => {
                     if let Some(ref api_key) = provider.api_key {
-                        let env_var = match provider.provider_type {
-                            ProviderType::Anthropic => "ANTHROPIC_API_KEY",
-                            ProviderType::OpenAI => "OPENAI_API_KEY",
-                            ProviderType::Gemini => "GEMINI_API_KEY",
-                            ProviderType::OpenRouter => "OPENROUTER_API_KEY",
-                            ProviderType::Local => continue,
+                        info!("Registering Anthropic from config (priority {:?})", priority);
+                        provider_manager.register(AnthropicProvider::new(api_key.clone()), priority).await;
+                    }
+                }
+                ProviderType::OpenAI => {
+                    if let Some(ref api_key) = provider.api_key {
+                        info!("Registering OpenAI from config (priority {:?})", priority);
+                        provider_manager.register(OpenAiProvider::new(api_key.clone()), priority).await;
+                    }
+                }
+                ProviderType::Gemini => {
+                    if let Some(ref api_key) = provider.api_key {
+                        info!("Registering Gemini from config (priority {:?})", priority);
+                        provider_manager.register(GeminiProvider::new(api_key.clone()), priority).await;
+                    }
+                }
+                ProviderType::OpenRouter => {
+                    if let Some(ref api_key) = provider.api_key {
+                        info!("Registering OpenRouter from config (priority {:?})", priority);
+                        provider_manager.register(OpenRouterProvider::new(api_key.clone()), priority).await;
+                    }
+                }
+                ProviderType::Local => {
+                    if let Some(ref base_url) = provider.base_url {
+                        info!("Registering Local provider from config: {} at {}", provider.name, base_url);
+                        let url = if base_url.ends_with("/v1") {
+                            base_url.clone()
+                        } else if base_url.ends_with('/') {
+                            format!("{}v1", base_url)
+                        } else {
+                            format!("{}/v1", base_url)
                         };
-                        std::env::set_var(env_var, api_key);
-                        info!("Set {} from saved config", env_var);
+                        let local = LocalProvider::new(LocalProviderType::OpenAiCompatible)
+                            .with_base_url(url);
+                        provider_manager.register(local, priority).await;
                     }
                 }
             }
         }
-    }
-
-    // Auto-discover available providers (will find cloud providers via env vars we just set)
-    if let Err(e) = provider_manager.auto_discover().await {
-        warn!("Provider discovery failed: {}", e);
-    }
-
-    // Now register local providers from saved config
-    if saved_config.has_providers() {
-        for provider in saved_config.enabled_providers() {
-            if provider.provider_type == ProviderType::Local {
-                if let Some(ref base_url) = provider.base_url {
-                    info!("Loading saved local provider: {} at {}", provider.name, base_url);
-                    let url = if base_url.ends_with("/v1") {
-                        base_url.clone()
-                    } else if base_url.ends_with('/') {
-                        format!("{}v1", base_url)
-                    } else {
-                        format!("{}/v1", base_url)
-                    };
-                    let local = LocalProvider::new(LocalProviderType::OpenAiCompatible)
-                        .with_base_url(url);
-                    provider_manager.register(local, ProviderPriority::Primary).await;
-                }
-            }
+    } else {
+        // No config file - fall back to auto-discovery from environment variables
+        info!("No providers.toml found, using auto-discovery from environment...");
+        if let Err(e) = provider_manager.auto_discover().await {
+            warn!("Provider discovery failed: {}", e);
         }
     }
 
