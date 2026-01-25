@@ -1286,9 +1286,27 @@ fn clean_response(response: &str) -> String {
     // Replace escaped newlines with actual newlines
     cleaned = cleaned.replace("\\n", "\n");
 
-    // Remove JSON artifacts
+    // Remove JSON artifacts that leak from tool calls
     cleaned = cleaned.replace("\"], \"timeout\":", "");
     cleaned = cleaned.replace("EOF\"], ", "");
+    cleaned = cleaned.replace("EOF\"]}", "");
+    cleaned = cleaned.replace("\"]}\"", "");
+    cleaned = cleaned.replace("\"}]", "");
+
+    // Remove lines that start with JSON-like artifacts
+    let lines: Vec<&str> = cleaned.lines().collect();
+    let cleaned_lines: Vec<String> = lines.iter()
+        .map(|line| {
+            let trimmed = line.trim();
+            // Remove lines that are pure JSON artifacts
+            if trimmed.starts_with(": \\") || trimmed == ":" || trimmed.starts_with("{\"") {
+                String::new()
+            } else {
+                line.to_string()
+            }
+        })
+        .collect();
+    cleaned = cleaned_lines.join("\n");
 
     // Clean up multiple spaces and whitespace
     let space_re = Regex::new(r"  +").unwrap();
