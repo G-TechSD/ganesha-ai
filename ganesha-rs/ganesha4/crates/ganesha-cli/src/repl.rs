@@ -2042,13 +2042,15 @@ When asked to create a website based on another site:
 8. Use the extracted content (text, links, services) in your new layout
 9. Output the COMMAND to create files, do NOT describe or explain the file contents in prose
 
-**MULTI-PAGE WEBSITES:**
-When asked to create multiple pages (e.g., "make a 5 page website"):
-- Create ALL pages one after another WITHOUT stopping between files
-- After each `cat > file.html` command completes, IMMEDIATELY output the next file
-- Do NOT provide explanations or summaries between files
-- Only provide a final summary AFTER ALL files have been created
-- Example flow: create page1.html → create page2.html → create page3.html → then summarize
+**MULTI-PAGE/MULTI-FILE CREATION (CRITICAL):**
+When asked to create multiple files (e.g., "make a 5 page website" or "create files 1-5"):
+- You MUST create files IN SEQUENCE: page1 → page2 → page3 → page4 → page5
+- NEVER skip numbers! If asked for page1-page5, create page1, then page2, then page3, then page4, then page5
+- After each file is created, create the NEXT file in sequence immediately
+- Do NOT jump from page1 to page5 - that skips 3 files!
+- Only provide a summary AFTER verifying ALL requested files exist
+- If you created page1.html, the next file MUST be page2.html, not page5.html
+- Example: "create 5 pages" means you output 5 separate cat commands in order
 
 **GATHER ANY INFORMATION:**
 - Search the web for current information

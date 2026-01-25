@@ -1,0 +1,3 @@
+A → B : SYN
+B ← A : SYN+ACK
+A → B : ACK

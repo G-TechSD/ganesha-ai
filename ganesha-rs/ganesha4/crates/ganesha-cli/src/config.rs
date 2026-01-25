@@ -222,7 +222,7 @@ fn default_meaningless_echo_words() -> Vec<String> {
 }
 
 fn default_continuation_prompt() -> String {
-    "Execute the next command now. Do NOT say 'no further actions' or provide a summary unless the ENTIRE task is complete. If the user asked for multiple files, create the next one immediately.".to_string()
+    "CONTINUE: If you were asked to create multiple files (e.g., 5 pages), list what you've created so far and create the NEXT one in sequence. Do NOT skip files or provide a final summary until ALL requested files exist. If task is truly complete, verify by listing what was created.".to_string()
 }
 
 fn default_max_iterations() -> usize {
