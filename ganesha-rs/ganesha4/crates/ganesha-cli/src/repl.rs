@@ -1423,7 +1423,7 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
 
     let mut iteration = 0;
     let mut consecutive_failures = 0;
-    let mut last_command: Option<String> = None;
+    let mut last_command: Option<(String, bool)> = None;  // (command, failed)
 
     loop {
         iteration += 1;
@@ -1841,13 +1841,13 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
         }
 
         // Check for repeated command (AI might be stuck in a loop)
-        if let Some(ref last) = last_command {
-            if last == cmd {
+        // But allow retry if previous command failed (might be recovering from error)
+        if let Some((ref last, last_failed)) = last_command {
+            if last == cmd && !last_failed {
                 state.messages.push(Message::assistant(&content));
                 return Ok(format!("Stopping: repeated command detected. Last output shown above."));
             }
         }
-        last_command = Some(cmd.clone());
 
         // Print the command being executed
         println!("{} {}", "→".bright_blue(), cmd.dimmed());
@@ -1934,12 +1934,25 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
                 || user_message.starts_with("ls ") || user_message == "what files"
                 || user_message.contains("files are here") || user_message.contains("what is here"));
 
+        // Detect directory-related errors and provide helpful hints
+        let dir_error_hint = if !success && (stderr.contains("Directory nonexistent")
+            || stderr.contains("No such file or directory")
+            || stderr.contains("cannot create"))
+            && (cmd.contains("/") || cmd.contains(">")) {
+            "\n\nHINT: The directory doesn't exist. Create it first with mkdir -p, then create the file. Example: mkdir -p dirname && cat > dirname/file.txt"
+        } else {
+            ""
+        };
+
         // Use appropriate follow-up prompt
         let followup = if is_simple_nav && user_is_simple {
-            "Briefly summarize what was shown. Do NOT run additional commands unless the user asks."
+            "Briefly summarize what was shown. Do NOT run additional commands unless the user asks.".to_string()
         } else {
-            &state.agentic_config.continuation_prompt
+            format!("{}{}", state.agentic_config.continuation_prompt, dir_error_hint)
         };
+
+        // Track last command for repeat detection
+        last_command = Some((cmd.to_string(), !success));
 
         // Add AI response and command output to conversation
         state.messages.push(Message::assistant(&content));
@@ -2064,6 +2077,14 @@ When asked to create multiple files (e.g., "make a 5 page website" or "create fi
 - Git operations - clone, commit, push, manage repos
 - Process files - parse JSON, CSV, XML, process images
 - Network operations - downloads, API calls, web requests
+
+**DIRECTORY OPERATIONS (CRITICAL):**
+- If asked to "create a directory and put files in it", you MUST run `mkdir` FIRST
+- Example: "create myproject directory with main.py" requires:
+  1. First: `mkdir -p myproject`
+  2. Then: `cat > myproject/main.py << 'EOF' ... EOF`
+- NEVER create files in current directory when asked to put them in a subdirectory
+- Always use the FULL PATH when creating files in subdirectories
 
 **SOLVE ANY PROBLEM:**
 - Debug code by examining files and running tests
