@@ -669,7 +669,7 @@ fn extract_command_from_json(response: &str) -> Option<String> {
 /// Extract bash/shell code blocks from AI response
 /// CONSERVATIVE: Limits to first command only, validates command-like structure
 /// PREFERENCE: Heredocs (file creation) are preferred over simple commands
-fn extract_commands(response: &str) -> Vec<String> {
+fn extract_commands(response: &str, shell_cmd_prefixes: &[String]) -> Vec<String> {
     let mut commands = Vec::new();
     let mut simple_command: Option<String> = None;
 
@@ -828,15 +828,7 @@ fn extract_commands(response: &str) -> Vec<String> {
     // Method 5: Plain shell commands on their own line (no code fences)
     // Look for common shell commands like curl, wget, ls, cat, etc.
     // NOTE: Excludes echo/printf as they're often output as garbage by confused models
-    if commands.is_empty() {
-        let shell_cmd_prefixes = [
-            "curl ", "wget ", "ls ", "cat ", "head ", "tail ", "grep ",
-            "find ", "mkdir ", "rm ", "cp ", "mv ", "chmod ", "chown ",
-            "touch ", "cd ", "pwd ", "tar ", "zip ",
-            "unzip ", "git ", "npm ", "yarn ", "pip ", "python ", "node ",
-            "make ", "cargo ", "rustc ", "go ", "java ", "javac ",
-        ];
-
+    if commands.is_empty() && !shell_cmd_prefixes.is_empty() {
         for line in response.lines() {
             let trimmed = line.trim();
 
@@ -845,8 +837,8 @@ fn extract_commands(response: &str) -> Vec<String> {
                 continue;
             }
 
-            // Check if this line starts with a known shell command
-            let is_shell_cmd = shell_cmd_prefixes.iter().any(|p| trimmed.starts_with(p));
+            // Check if this line starts with a known shell command (from config)
+            let is_shell_cmd = shell_cmd_prefixes.iter().any(|p| trimmed.starts_with(p.as_str()));
 
             if is_shell_cmd && looks_like_shell_command(trimmed) {
                 // Make sure it's not part of prose (check it's relatively short and command-like)
@@ -1145,16 +1137,15 @@ async fn execute_tool_call(
     arguments: serde_json::Value,
     state: &ReplState
 ) -> anyhow::Result<String> {
-    // First, clean up common prefixes the model might add
+    // First, clean up common prefixes the model might add (from config)
     // Handle various confused formats: puppeteer_puppeteer_navigate, tool_puppeteer_navigate, etc.
-    let cleaned_id = tool_id
-        .strip_prefix("puppeteer_puppeteer_")  // Model confused: puppeteer_puppeteer_navigate -> navigate
-        .or_else(|| tool_id.strip_prefix("puppeteer:puppeteer_"))  // Model confused: puppeteer:puppeteer_navigate -> navigate
-        .or_else(|| tool_id.strip_prefix("tool_puppeteer_"))  // tool_puppeteer_navigate -> navigate
-        .or_else(|| tool_id.strip_prefix("tool_"))
-        .or_else(|| tool_id.strip_prefix("tool."))
-        .or_else(|| tool_id.strip_prefix("tool:"))
-        .unwrap_or(tool_id);
+    let mut cleaned_id = tool_id;
+    for prefix in &state.agentic_config.tool_id_prefixes {
+        if let Some(stripped) = tool_id.strip_prefix(prefix.as_str()) {
+            cleaned_id = stripped;
+            break;
+        }
+    }
 
     // Fix tool ID if it doesn't have proper format (server:tool)
     let fixed_tool_id = if !cleaned_id.contains(':') {
@@ -1368,7 +1359,7 @@ fn handle_cd_command(command: &str, state: &mut ReplState) -> Option<(String, Op
 /// Agentic chat - sends message to AI and handles command execution loop
 async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Result<String> {
     // Allow many iterations for complex tasks (coding, research, web scraping)
-    const MAX_ITERATIONS: usize = 50;
+    let max_iterations = state.agentic_config.max_iterations;
     const MAX_CONSECUTIVE_FAILURES: usize = 3;
 
     // Check if we have a provider
@@ -1397,7 +1388,7 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
 
     loop {
         iteration += 1;
-        if iteration > MAX_ITERATIONS {
+        if iteration > max_iterations {
             return Ok("Reached maximum iterations. Please ask a follow-up question if you need more.".to_string());
         }
 
@@ -1430,16 +1421,16 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
         let content = response.content.clone();
 
         // Extract any commands or tool calls from the response
-        let commands = extract_commands(&content);
+        let commands = extract_commands(&content, &state.agentic_config.shell_cmd_prefixes);
         let tool_calls = extract_tool_calls(&content);
 
         // SANITY CHECK: Detect when model uses puppeteer for simple shell commands
         // If user typed a simple shell command but model responded with puppeteer, correct it
-        if !tool_calls.is_empty() {
+        if !tool_calls.is_empty() && state.agentic_config.detect_system_status_queries {
             let (tool_id, args) = &tool_calls[0];
-            let simple_shell_commands = ["ls", "pwd", "cd", "cat", "head", "tail", "mkdir", "rm", "cp", "mv", "touch", "echo", "whoami", "date", "df", "du", "ps", "top", "htop", "free", "uname", "systemctl", "service"];
             let user_first_word = user_message.split_whitespace().next().unwrap_or("");
-            let is_simple_shell = simple_shell_commands.contains(&user_first_word);
+            let is_simple_shell = state.agentic_config.simple_shell_commands.iter()
+                .any(|cmd| cmd == user_first_word);
             let is_puppeteer = tool_id.contains("puppeteer");
 
             // Also detect system status queries like "is apache running"
@@ -1531,8 +1522,9 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
 
                     state.messages.push(Message::assistant(&content));
                     state.messages.push(Message::user(&format!(
-                        "Command output:\n```\n{}\n```\n\nIf there are more steps, execute the next command immediately. Only summarize when ALL steps are done.",
-                        output
+                        "Command output:\n```\n{}\n```\n\n{}",
+                        output,
+                        state.agentic_config.continuation_prompt
                     )));
                     consecutive_failures = 0;
                     continue;
@@ -1575,8 +1567,9 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
 
                     state.messages.push(Message::assistant(&content));
                     state.messages.push(Message::user(&format!(
-                        "Command output:\n```\n{}\n```\n\nIf there are more steps, execute the next command immediately. Only summarize when ALL steps are done.",
-                        output
+                        "Command output:\n```\n{}\n```\n\n{}",
+                        output,
+                        state.agentic_config.continuation_prompt
                     )));
                     if success { consecutive_failures = 0; } else { consecutive_failures += 1; }
                     continue;
@@ -1672,8 +1665,9 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
 
                 state.messages.push(Message::assistant(&content));
                 state.messages.push(Message::user(&format!(
-                    "Command output:\n```\n{}\n```\n\nIf there are more steps, execute the next command immediately. Only summarize when ALL steps are done.",
-                    output
+                    "Command output:\n```\n{}\n```\n\n{}",
+                    output,
+                    state.agentic_config.continuation_prompt
                 )));
                 if success { consecutive_failures = 0; } else { consecutive_failures += 1; }
                 continue;
@@ -1775,10 +1769,9 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
         // Check for meaningless echo commands (model is confused)
         if cmd.starts_with("echo ") {
             let echo_content = cmd.strip_prefix("echo ").unwrap_or("").trim();
-            let meaningless_words = ["start", "ready", "done", "browsing", "starting", "none", "ok", "begin", "end"];
-            let is_meaningless = meaningless_words.iter().any(|w| {
-                echo_content.trim_matches('\'').trim_matches('"').to_lowercase() == *w
-            });
+            let echo_lower = echo_content.trim_matches('\'').trim_matches('"').to_lowercase();
+            let is_meaningless = state.agentic_config.meaningless_echo_words.iter()
+                .any(|w| echo_lower == w.to_lowercase());
 
             if is_meaningless {
                 println!("{} {}", "⚠".yellow(), "Ignoring meaningless echo command...".yellow());
@@ -1848,7 +1841,11 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
             }
 
             state.messages.push(Message::assistant(&content));
-            state.messages.push(Message::user(&format!("Command output:\n```\n{}\n```\n\nIf there are more steps to complete the task, execute the next command immediately. Only provide a summary when ALL steps are done.", output)));
+            state.messages.push(Message::user(&format!(
+                "Command output:\n```\n{}\n```\n\n{}",
+                output,
+                state.agentic_config.continuation_prompt
+            )));
             continue;
         }
 
@@ -1914,7 +1911,11 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
 
         // Add AI response and command output to conversation
         state.messages.push(Message::assistant(&content));
-        state.messages.push(Message::user(&format!("Command output:\n```\n{}\n```\n\nIf there are more steps to complete the task, execute the next command immediately. Only provide a summary when ALL steps are done.", result)));
+        state.messages.push(Message::user(&format!(
+            "Command output:\n```\n{}\n```\n\n{}",
+            result,
+            state.agentic_config.continuation_prompt
+        )));
     }
 }
 
@@ -2509,13 +2510,19 @@ pub struct ReplState {
     pub mcp_manager: Arc<McpManager>,
     /// Cached MCP tools (refreshed on connect/disconnect)
     pub mcp_tools: Vec<(String, McpTool)>,
+    /// Agentic behavior configuration
+    pub agentic_config: crate::config::AgenticConfig,
 }
 
 impl ReplState {
-    pub fn new(cli: &Cli, provider_manager: Arc<ProviderManager>) -> Self {
-        // Default logging settings - can be overridden by config
-        let logging_enabled = true;
-        let max_log_size = 512 * 1024 * 1024; // 512 MB
+    pub fn new(cli: &Cli, provider_manager: Arc<ProviderManager>, config: &crate::config::CliConfig) -> Self {
+        // Get logging settings from config
+        let logging_enabled = config.session.logging_enabled;
+        let max_log_size = config.session.max_log_size;
+
+        // Get agentic config with env overrides
+        let mut agentic_config = config.agentic.clone();
+        agentic_config.apply_env_overrides();
 
         Self {
             mode: cli.mode,
@@ -2536,6 +2543,7 @@ impl ReplState {
             is_first_message: true,
             mcp_manager: Arc::new(McpManager::new()),
             mcp_tools: Vec::new(),
+            agentic_config,
         }
     }
 
@@ -2747,6 +2755,10 @@ const SLASH_COMMANDS: &[SlashCommand] = &[
 
 /// Run the interactive REPL
 pub async fn run(cli: &Cli) -> anyhow::Result<()> {
+    // Load configuration
+    let mut config = crate::config::CliConfig::load().await.unwrap_or_default();
+    config.apply_env_overrides();
+
     // Initialize provider manager
     let provider_manager = Arc::new(ProviderManager::new());
 
@@ -2864,7 +2876,7 @@ pub async fn run(cli: &Cli) -> anyhow::Result<()> {
     let providers = provider_manager.list_providers().await;
     let provider_names: Vec<_> = providers.iter().map(|p| p.name.as_str()).collect();
 
-    let mut state = ReplState::new(cli, provider_manager);
+    let mut state = ReplState::new(cli, provider_manager, &config);
 
     // Start session logging immediately to capture any errors
     if let Err(e) = state.session_logger.start_session(Some("startup")) {
