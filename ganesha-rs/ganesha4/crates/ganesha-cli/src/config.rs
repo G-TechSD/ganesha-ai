@@ -184,6 +184,10 @@ pub struct AgenticConfig {
     /// Maximum agentic iterations before stopping
     #[serde(default = "default_max_iterations")]
     pub max_iterations: usize,
+
+    /// Maximum lines to show in terminal output (0 = unlimited)
+    #[serde(default = "default_output_lines_limit")]
+    pub output_lines_limit: usize,
 }
 
 fn default_simple_shell_commands() -> Vec<String> {
@@ -218,11 +222,15 @@ fn default_meaningless_echo_words() -> Vec<String> {
 }
 
 fn default_continuation_prompt() -> String {
-    "If there are more steps to complete the task, execute the next command immediately. Only provide a summary when ALL steps are done.".to_string()
+    "Execute the next command now. Do NOT say 'no further actions' or provide a summary unless the ENTIRE task is complete. If the user asked for multiple files, create the next one immediately.".to_string()
 }
 
 fn default_max_iterations() -> usize {
     50
+}
+
+fn default_output_lines_limit() -> usize {
+    0  // 0 = unlimited (show all output)
 }
 
 impl Default for AgenticConfig {
@@ -237,6 +245,7 @@ impl Default for AgenticConfig {
             detect_system_status_queries: true,
             enable_multi_file_continuation: true,
             max_iterations: default_max_iterations(),
+            output_lines_limit: default_output_lines_limit(),
         }
     }
 }

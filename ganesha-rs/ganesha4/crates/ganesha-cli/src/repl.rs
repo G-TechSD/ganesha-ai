@@ -419,6 +419,27 @@ fn run_shell_command(command: &str, working_dir: &PathBuf) -> (String, String, b
     }
 }
 
+/// Print command output respecting the configured line limit
+fn print_output(output: &str, limit: usize) {
+    if output.is_empty() {
+        return;
+    }
+    if limit == 0 {
+        // No limit - show all
+        for line in output.lines() {
+            println!("  {}", line);
+        }
+    } else {
+        for line in output.lines().take(limit) {
+            println!("  {}", line);
+        }
+        let total_lines = output.lines().count();
+        if total_lines > limit {
+            println!("  ... {} more lines", total_lines - limit);
+        }
+    }
+}
+
 /// Check if a string looks like a valid shell command (basic heuristic)
 fn looks_like_shell_command(s: &str) -> bool {
     let trimmed = s.trim();
@@ -1506,15 +1527,7 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
                         stderr
                     };
 
-                    // Print brief output
-                    if !output.is_empty() {
-                        for line in output.lines().take(10) {
-                            println!("  {}", line);
-                        }
-                        if output.lines().count() > 10 {
-                            println!("  ... {} more lines", output.lines().count() - 10);
-                        }
-                    }
+                    print_output(&output, state.agentic_config.output_lines_limit);
 
                     if let Err(e) = state.session_logger.log_command(&actual_cmd, &output, success) {
                         debug!("Failed to log command: {}", e);
@@ -1555,15 +1568,7 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
                         stderr
                     };
 
-                    // Print brief output
-                    if !output.is_empty() {
-                        for line in output.lines().take(10) {
-                            println!("  {}", line);
-                        }
-                        if output.lines().count() > 10 {
-                            println!("  ... {} more lines", output.lines().count() - 10);
-                        }
-                    }
+                    print_output(&output, state.agentic_config.output_lines_limit);
 
                     state.messages.push(Message::assistant(&content));
                     state.messages.push(Message::user(&format!(
@@ -1653,15 +1658,7 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
                     stderr
                 };
 
-                // Print brief output
-                if !output.is_empty() {
-                    for line in output.lines().take(10) {
-                        println!("  {}", line);
-                    }
-                    if output.lines().count() > 10 {
-                        println!("  ... {} more lines", output.lines().count() - 10);
-                    }
-                }
+                print_output(&output, state.agentic_config.output_lines_limit);
 
                 state.messages.push(Message::assistant(&content));
                 state.messages.push(Message::user(&format!(
@@ -1852,36 +1849,15 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
         // Execute the command
         let (stdout, stderr, success) = run_shell_command(cmd, &state.working_dir);
 
-        // Print brief output summary (not the full content for readability)
-        let combined_len = stdout.len() + stderr.len();
-        if combined_len > 200 {
-            // Show brief summary for long output
-            let first_lines: Vec<&str> = stdout.lines().take(3).collect();
-            if !first_lines.is_empty() {
-                for line in &first_lines {
-                    println!("  {}", line.dimmed());
-                }
-                if stdout.lines().count() > 3 {
-                    println!("  {} more lines...", "...".dimmed());
-                }
-            }
-            if !stderr.is_empty() {
-                let err_first = stderr.lines().next().unwrap_or("");
-                eprintln!("  {} {}", "⚠".yellow(), err_first.red());
-            }
+        // Print output (respecting configured line limit)
+        let combined = if !stdout.is_empty() && !stderr.is_empty() {
+            format!("{}\n{}", stdout, stderr)
+        } else if !stdout.is_empty() {
+            stdout.clone()
         } else {
-            // Short output - show all
-            if !stdout.is_empty() {
-                for line in stdout.lines() {
-                    println!("  {}", line.dimmed());
-                }
-            }
-            if !stderr.is_empty() {
-                for line in stderr.lines() {
-                    eprintln!("  {}", line.red());
-                }
-            }
-        }
+            stderr.clone()
+        };
+        print_output(&combined, state.agentic_config.output_lines_limit);
 
         // Log the command execution
         let combined_output = format!("{}{}", stdout, stderr);
