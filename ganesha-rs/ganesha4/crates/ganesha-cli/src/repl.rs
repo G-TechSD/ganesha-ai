@@ -1531,7 +1531,7 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
 
                     state.messages.push(Message::assistant(&content));
                     state.messages.push(Message::user(&format!(
-                        "Command output:\n```\n{}\n```\n\nBriefly describe what you found, then continue if needed.",
+                        "Command output:\n```\n{}\n```\n\nIf there are more steps, execute the next command immediately. Only summarize when ALL steps are done.",
                         output
                     )));
                     consecutive_failures = 0;
@@ -1575,7 +1575,7 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
 
                     state.messages.push(Message::assistant(&content));
                     state.messages.push(Message::user(&format!(
-                        "Command output:\n```\n{}\n```\n\nBriefly describe what you found, then continue if needed.",
+                        "Command output:\n```\n{}\n```\n\nIf there are more steps, execute the next command immediately. Only summarize when ALL steps are done.",
                         output
                     )));
                     if success { consecutive_failures = 0; } else { consecutive_failures += 1; }
@@ -1672,7 +1672,7 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
 
                 state.messages.push(Message::assistant(&content));
                 state.messages.push(Message::user(&format!(
-                    "Command output:\n```\n{}\n```\n\nBriefly describe what you found, then continue if needed.",
+                    "Command output:\n```\n{}\n```\n\nIf there are more steps, execute the next command immediately. Only summarize when ALL steps are done.",
                     output
                 )));
                 if success { consecutive_failures = 0; } else { consecutive_failures += 1; }
@@ -1848,7 +1848,7 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
             }
 
             state.messages.push(Message::assistant(&content));
-            state.messages.push(Message::user(&format!("Command output:\n```\n{}\n```\n\nBriefly describe the result.", output)));
+            state.messages.push(Message::user(&format!("Command output:\n```\n{}\n```\n\nIf there are more steps to complete the task, execute the next command immediately. Only provide a summary when ALL steps are done.", output)));
             continue;
         }
 
@@ -1914,7 +1914,7 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
 
         // Add AI response and command output to conversation
         state.messages.push(Message::assistant(&content));
-        state.messages.push(Message::user(&format!("Command output:\n```\n{}\n```\n\nBriefly describe the result.", result)));
+        state.messages.push(Message::user(&format!("Command output:\n```\n{}\n```\n\nIf there are more steps to complete the task, execute the next command immediately. Only provide a summary when ALL steps are done.", result)));
     }
 }
 
@@ -2009,6 +2009,14 @@ When asked to create a website based on another site:
 8. Use the extracted content (text, links, services) in your new layout
 9. Output the COMMAND to create files, do NOT describe or explain the file contents in prose
 
+**MULTI-PAGE WEBSITES:**
+When asked to create multiple pages (e.g., "make a 5 page website"):
+- Create ALL pages one after another WITHOUT stopping between files
+- After each `cat > file.html` command completes, IMMEDIATELY output the next file
+- Do NOT provide explanations or summaries between files
+- Only provide a final summary AFTER ALL files have been created
+- Example flow: create page1.html → create page2.html → create page3.html → then summarize
+
 **GATHER ANY INFORMATION:**
 - Search the web for current information
 - Scrape websites for data
@@ -2035,6 +2043,7 @@ When asked to create a website based on another site:
 3. **Be resourceful.** If one approach fails, try another. Use all your tools.
 4. **Be thorough.** Complete tasks fully. Don't leave things half-done.
 5. **Be confident.** You have the power to accomplish anything in this terminal.
+6. **CONTINUE UNTIL DONE.** If asked to create multiple files, create ALL of them one after another without stopping. After each command, immediately output the NEXT command until the task is complete. Only provide a summary AFTER all files are created.
 
 ## SYSTEM CONTEXT
 
