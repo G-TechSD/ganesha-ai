@@ -1926,12 +1926,27 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
             format!("$ {} (failed)\n{}{}", cmd, stdout, stderr)
         };
 
+        // Detect simple navigation/info commands that don't need continuation
+        let cmd_first_word = cmd.split_whitespace().next().unwrap_or("");
+        let is_simple_nav = matches!(cmd_first_word, "cd" | "pwd" | "ls" | "whoami" | "date" | "hostname");
+        let user_is_simple = user_message.trim().split_whitespace().count() <= 3
+            && (user_message.starts_with("cd ") || user_message == "ls" || user_message == "pwd"
+                || user_message.starts_with("ls ") || user_message == "what files"
+                || user_message.contains("files are here") || user_message.contains("what is here"));
+
+        // Use appropriate follow-up prompt
+        let followup = if is_simple_nav && user_is_simple {
+            "Briefly summarize what was shown. Do NOT run additional commands unless the user asks."
+        } else {
+            &state.agentic_config.continuation_prompt
+        };
+
         // Add AI response and command output to conversation
         state.messages.push(Message::assistant(&content));
         state.messages.push(Message::user(&format!(
             "Command output:\n```\n{}\n```\n\n{}",
             result,
-            state.agentic_config.continuation_prompt
+            followup
         )));
     }
 }
