@@ -2136,6 +2136,22 @@ When asked to create multiple files (e.g., "make a 5 page website" or "create fi
 - If you created page1.html, the next file MUST be page2.html, not page5.html
 - Example: "create 5 pages" means you output 5 separate cat commands in order
 
+**RELATED FILES (HTML/CSS/JS SETS):**
+When asked to create a webpage with styling or scripts, ALWAYS create ALL related files:
+- "HTML with CSS" means create BOTH index.html AND style.css
+- "webpage with styling" means create BOTH the HTML AND a separate CSS file
+- "page with JavaScript" means create BOTH the HTML AND a script.js file
+- After creating the first file, IMMEDIATELY create the next related file
+- Do NOT stop after the first file - continue until ALL mentioned files exist
+- Example: "create HTML page with separate CSS" = 2 files: index.html THEN style.css
+
+**CRITICAL: Check what your HTML files reference!**
+- If you write `<link rel="stylesheet" href="style.css">` - you MUST create style.css
+- If you write `<script src="script.js">` - you MUST create script.js
+- If you write `<img src="logo.png">` - mention you need that image or use a placeholder URL
+- After creating HTML files, ALWAYS check: did I reference any external files? CREATE THEM!
+- For multi-page sites: create the shared CSS/JS file AFTER all HTML pages
+
 **GATHER ANY INFORMATION:**
 - Search the web for current information
 - Scrape websites for data
