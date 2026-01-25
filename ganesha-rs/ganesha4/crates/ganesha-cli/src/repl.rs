@@ -1189,9 +1189,23 @@ async fn execute_tool_call(
         cleaned_id.to_string()
     };
 
+    // For puppeteer_screenshot, ensure encoded=true to get image data returned
+    let arguments = if fixed_tool_id.contains("screenshot") {
+        let mut args = arguments.as_object().cloned().unwrap_or_default();
+        args.insert("encoded".to_string(), serde_json::json!(true));
+        // Ensure name is set for screenshot
+        if !args.contains_key("name") {
+            let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
+            args.insert("name".to_string(), serde_json::json!(format!("screenshot_{}", timestamp)));
+        }
+        serde_json::Value::Object(args)
+    } else {
+        arguments
+    };
+
     info!("Executing MCP tool: {} with args: {:?}", fixed_tool_id, arguments);
 
-    match state.mcp_manager.call_tool(&fixed_tool_id, arguments).await {
+    match state.mcp_manager.call_tool(&fixed_tool_id, arguments.clone()).await {
         Ok(response) => {
             // Format the response content
             let mut result = String::new();
@@ -1212,11 +1226,39 @@ async fn execute_tool_call(
                             }
                         }
                         ganesha_mcp::types::ContentBlock::Image { data, mime_type } => {
-                            // Provide more context for screenshots so the model knows what happened
-                            result.push_str(&format!(
-                                "[Screenshot captured: {} bytes, {}. Use puppeteer_evaluate with JavaScript to extract text content from the page.]\n",
-                                data.len(), mime_type
-                            ));
+                            // Save screenshot to file
+                            let extension = if mime_type.contains("png") { "png" } else { "jpg" };
+                            let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
+                            let filename = format!("screenshot_{}.{}", timestamp, extension);
+                            let filepath = std::env::current_dir()
+                                .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                                .join(&filename);
+
+                            // Decode base64 and save
+                            use base64::Engine;
+                            match base64::engine::general_purpose::STANDARD.decode(data) {
+                                Ok(bytes) => {
+                                    match std::fs::write(&filepath, &bytes) {
+                                        Ok(_) => {
+                                            result.push_str(&format!(
+                                                "[Screenshot saved to: {}]\n",
+                                                filepath.display()
+                                            ));
+                                        }
+                                        Err(e) => {
+                                            result.push_str(&format!(
+                                                "[Screenshot captured ({} bytes) but failed to save: {}]\n",
+                                                data.len(), e
+                                            ));
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    result.push_str(&format!(
+                                        "[Screenshot captured but failed to decode: {}]\n", e
+                                    ));
+                                }
+                            }
                         }
                     }
                 }
