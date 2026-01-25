@@ -1424,6 +1424,7 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
     let mut iteration = 0;
     let mut consecutive_failures = 0;
     let mut last_command: Option<(String, bool)> = None;  // (command, failed)
+    let mut same_command_failures = 0;  // Track how many times the SAME command has failed
 
     loop {
         iteration += 1;
@@ -1841,11 +1842,25 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
         }
 
         // Check for repeated command (AI might be stuck in a loop)
-        // But allow retry if previous command failed (might be recovering from error)
+        // Track how many times the same command has failed consecutively
         if let Some((ref last, last_failed)) = last_command {
-            if last == cmd && !last_failed {
-                state.messages.push(Message::assistant(&content));
-                return Ok(format!("Stopping: repeated command detected. Last output shown above."));
+            if last == cmd {
+                if !last_failed {
+                    // Success followed by same command = infinite loop
+                    state.messages.push(Message::assistant(&content));
+                    return Ok(format!("Stopping: repeated command detected. Last output shown above."));
+                } else {
+                    // Same command failed again
+                    same_command_failures += 1;
+                    if same_command_failures >= 2 {
+                        // Stop after 2 failures of the same command
+                        state.messages.push(Message::assistant(&content));
+                        return Ok(format!("Stopping: same command failed {} times. The command needs to be modified to work.", same_command_failures));
+                    }
+                }
+            } else {
+                // Different command, reset counter
+                same_command_failures = 0;
             }
         }
 
@@ -1887,8 +1902,44 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
             continue;
         }
 
+        // Auto-create directory if command writes to a path with directories
+        // This handles commands like: cat > dir/file.txt, echo > dir/file
+        let cmd_to_run = if (cmd.contains(" > ") || cmd.contains(" >> ") || cmd.starts_with("cat >") || cmd.contains("cat >"))
+            && cmd.contains("/") {
+            // Extract the output file path
+            let parts: Vec<&str> = if cmd.contains(" >> ") {
+                cmd.splitn(2, " >> ").collect()
+            } else {
+                cmd.splitn(2, " > ").collect()
+            };
+            if parts.len() == 2 {
+                let file_part = parts[1].split_whitespace().next().unwrap_or("");
+                if file_part.contains("/") {
+                    // Extract directory from path
+                    if let Some(last_slash) = file_part.rfind('/') {
+                        let dir = &file_part[..last_slash];
+                        if !dir.is_empty() {
+                            // Check if directory exists in working dir
+                            let full_dir = if dir.starts_with('/') {
+                                PathBuf::from(dir)
+                            } else {
+                                state.working_dir.join(dir)
+                            };
+                            if !full_dir.exists() {
+                                println!("{} {} {}", "→".bright_blue(), "mkdir -p".dimmed(), dir.dimmed());
+                                let _ = run_shell_command(&format!("mkdir -p {}", dir), &state.working_dir);
+                            }
+                        }
+                    }
+                }
+            }
+            cmd.to_string()
+        } else {
+            cmd.to_string()
+        };
+
         // Execute the command
-        let (stdout, stderr, success) = run_shell_command(cmd, &state.working_dir);
+        let (stdout, stderr, success) = run_shell_command(&cmd_to_run, &state.working_dir);
 
         // Print output (respecting configured line limit)
         let combined = if !stdout.is_empty() && !stderr.is_empty() {
@@ -1934,21 +1985,41 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
                 || user_message.starts_with("ls ") || user_message == "what files"
                 || user_message.contains("files are here") || user_message.contains("what is here"));
 
-        // Detect directory-related errors and provide helpful hints
+        // Detect directory-related errors and provide corrective instructions
         let dir_error_hint = if !success && (stderr.contains("Directory nonexistent")
             || stderr.contains("No such file or directory")
             || stderr.contains("cannot create"))
             && (cmd.contains("/") || cmd.contains(">")) {
-            "\n\nHINT: The directory doesn't exist. Create it first with mkdir -p, then create the file. Example: mkdir -p dirname && cat > dirname/file.txt"
+            // Extract the directory path from the command
+            let dir_path = if let Some(pos) = cmd.rfind('/') {
+                let before_slash = &cmd[..pos];
+                // Find the start of the path (after > or space)
+                if let Some(start) = before_slash.rfind(|c: char| c == '>' || c == ' ') {
+                    before_slash[start+1..].trim()
+                } else {
+                    before_slash
+                }
+            } else {
+                ""
+            };
+
+            if !dir_path.is_empty() {
+                format!("\n\nERROR FIX REQUIRED: The directory '{}' does not exist. You MUST run `mkdir -p {}` FIRST, then create the file. Do NOT repeat the failing command without creating the directory first.", dir_path, dir_path)
+            } else {
+                "\n\nERROR FIX REQUIRED: The directory does not exist. You MUST run `mkdir -p <directory>` FIRST to create it, then create the file inside.".to_string()
+            }
         } else {
-            ""
+            String::new()
         };
 
         // Use appropriate follow-up prompt
         let followup = if is_simple_nav && user_is_simple {
             "Briefly summarize what was shown. Do NOT run additional commands unless the user asks.".to_string()
+        } else if !dir_error_hint.is_empty() {
+            // Put the error fix FIRST and make it very prominent
+            format!("⚠️ COMMAND FAILED - FIX REQUIRED:\n{}\n\nYour NEXT command MUST be `mkdir -p <directory>`. Only AFTER that succeeds, create the file.\n\n{}", dir_error_hint, state.agentic_config.continuation_prompt)
         } else {
-            format!("{}{}", state.agentic_config.continuation_prompt, dir_error_hint)
+            state.agentic_config.continuation_prompt.clone()
         };
 
         // Track last command for repeat detection
