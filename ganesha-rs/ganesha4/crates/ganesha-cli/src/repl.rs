@@ -3079,11 +3079,13 @@ pub async fn run(cli: &Cli) -> anyhow::Result<()> {
 
     // Read piped input IMMEDIATELY before any async operations to prevent data loss
     // This is important because async MCP init can cause stdin timing issues
+    // Use read_to_string for reliability instead of line-by-line reading
     let piped_input: Option<Vec<String>> = if !std::io::stdin().is_terminal() {
-        use std::io::BufRead;
-        let stdin = std::io::stdin();
-        let lines: Vec<String> = stdin.lock().lines()
-            .filter_map(|l| l.ok())
+        use std::io::Read;
+        let mut input = String::new();
+        let _ = std::io::stdin().read_to_string(&mut input);
+        let lines: Vec<String> = input
+            .lines()
             .map(|l| l.trim().to_string())
             .filter(|l| !l.is_empty())
             .collect();
