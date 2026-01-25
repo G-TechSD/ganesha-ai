@@ -1436,19 +1436,39 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
         // SANITY CHECK: Detect when model uses puppeteer for simple shell commands
         // If user typed a simple shell command but model responded with puppeteer, correct it
         if !tool_calls.is_empty() {
-            let (tool_id, _) = &tool_calls[0];
-            let simple_shell_commands = ["ls", "pwd", "cd", "cat", "head", "tail", "mkdir", "rm", "cp", "mv", "touch", "echo", "whoami", "date", "df", "du", "ps", "top", "htop", "free", "uname"];
+            let (tool_id, args) = &tool_calls[0];
+            let simple_shell_commands = ["ls", "pwd", "cd", "cat", "head", "tail", "mkdir", "rm", "cp", "mv", "touch", "echo", "whoami", "date", "df", "du", "ps", "top", "htop", "free", "uname", "systemctl", "service"];
             let user_first_word = user_message.split_whitespace().next().unwrap_or("");
             let is_simple_shell = simple_shell_commands.contains(&user_first_word);
             let is_puppeteer = tool_id.contains("puppeteer");
 
-            if is_simple_shell && is_puppeteer {
+            // Also detect system status queries like "is apache running"
+            let user_lower = user_message.to_lowercase();
+            let is_system_status_query = (user_lower.starts_with("is ") && user_lower.contains(" running"))
+                || user_lower.contains("check if")
+                || user_lower.contains("status of")
+                || (user_lower.starts_with("is ") && user_lower.contains(" installed"));
+
+            // Check if puppeteer is navigating to localhost (checking local service)
+            let is_localhost_check = if let Some(url) = args.get("url").and_then(|v| v.as_str()) {
+                url.contains("localhost") || url.contains("127.0.0.1")
+            } else {
+                false
+            };
+
+            if (is_simple_shell || (is_system_status_query && is_localhost_check)) && is_puppeteer {
                 // Model confused a shell command for a web browse - correct it
-                println!("{} Model tried to browse web for shell command, correcting...", "⚠".yellow());
+                println!("{} Model tried to browse web for system check, correcting...", "⚠".yellow());
                 state.messages.push(Message::assistant(&content));
+
+                let suggestion = if is_system_status_query {
+                    "Use shell commands to check system status:\n```shell\nsystemctl status apache2\n# or\npgrep -x apache2 && echo 'running' || echo 'not running'\n```"
+                } else {
+                    &format!("Execute it with:\n```shell\n{}\n```", user_message)
+                };
+
                 state.messages.push(Message::user(&format!(
-                    "ERROR: '{}' is a SHELL COMMAND, not a web task. Execute it with:\n```shell\n{}\n```",
-                    user_message, user_message
+                    "ERROR: This is a SYSTEM CHECK, not a web browse task. {}", suggestion
                 )));
                 consecutive_failures += 1;
                 continue;
@@ -2201,9 +2221,20 @@ fn print_ganesha_box(content: &str) {
 
     // Process content with markdown-aware rendering
     let mut in_code_block = false;
+    let mut last_was_empty = false;
 
     for line in content.lines() {
         let trimmed = line.trim();
+
+        // Collapse multiple consecutive empty lines into one
+        if trimmed.is_empty() && !in_code_block {
+            if last_was_empty {
+                continue; // Skip consecutive empty lines
+            }
+            last_was_empty = true;
+        } else {
+            last_was_empty = false;
+        }
 
         // Handle code blocks
         if trimmed.starts_with("```") {
