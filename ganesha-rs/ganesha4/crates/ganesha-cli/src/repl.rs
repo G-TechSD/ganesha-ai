@@ -3077,6 +3077,21 @@ pub async fn run(cli: &Cli) -> anyhow::Result<()> {
 
     let mut state = ReplState::new(cli, provider_manager, &config);
 
+    // Read piped input IMMEDIATELY before any async operations to prevent data loss
+    // This is important because async MCP init can cause stdin timing issues
+    let piped_input: Option<Vec<String>> = if !std::io::stdin().is_terminal() {
+        use std::io::BufRead;
+        let stdin = std::io::stdin();
+        let lines: Vec<String> = stdin.lock().lines()
+            .filter_map(|l| l.ok())
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect();
+        if lines.is_empty() { None } else { Some(lines) }
+    } else {
+        None
+    };
+
     // Start session logging immediately to capture any errors
     if let Err(e) = state.session_logger.start_session(Some("startup")) {
         warn!("Failed to start session logging: {}", e);
@@ -3119,26 +3134,10 @@ pub async fn run(cli: &Cli) -> anyhow::Result<()> {
 
     println!();
 
-    // Check if stdin is a terminal (interactive) or piped
-    let stdin_is_tty = std::io::stdin().is_terminal();
-
     // Handle piped input (non-interactive mode)
-    if !stdin_is_tty {
-        debug!("Detected piped input - running in non-interactive mode");
-
-        // Read all lines from stdin
-        let stdin = std::io::stdin();
-        let lines: Vec<String> = stdin.lock().lines()
-            .filter_map(|l| l.ok())
-            .map(|l| l.trim().to_string())
-            .filter(|l| !l.is_empty())
-            .collect();
-
-        if lines.is_empty() {
-            // No input provided - show brief usage
-            println!("Usage: echo 'your request' | ganesha");
-            return Ok(());
-        }
+    // piped_input was captured at the very start before any async operations
+    if let Some(lines) = piped_input {
+        debug!("Processing {} lines of piped input", lines.len());
 
         // Process each line as a separate request
         for line in lines {
@@ -3177,6 +3176,10 @@ pub async fn run(cli: &Cli) -> anyhow::Result<()> {
             }
         }
 
+        return Ok(());
+    } else if !std::io::stdin().is_terminal() {
+        // Piped input was detected but was empty
+        println!("Usage: echo 'your request' | ganesha");
         return Ok(());
     }
 
