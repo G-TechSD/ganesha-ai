@@ -1486,6 +1486,29 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
                 false
             };
 
+            // Check if navigating to example.com (model copied from system prompt examples)
+            let is_example_com = if let Some(url) = args.get("url").and_then(|v| v.as_str()) {
+                url.contains("example.com")
+            } else {
+                false
+            };
+            let user_wants_web = user_lower.contains("http") || user_lower.contains("www.")
+                || user_lower.contains(".com") || user_lower.contains(".org")
+                || user_lower.contains("website") || user_lower.contains("browse")
+                || user_lower.contains("navigate") || user_lower.contains("web page");
+
+            // Skip spurious example.com navigation if user didn't ask for web browsing
+            if is_puppeteer && is_example_com && !user_wants_web {
+                println!("{} Skipping spurious example.com navigation...", "⚠".yellow());
+                state.messages.push(Message::assistant(&content));
+                state.messages.push(Message::user(
+                    "ERROR: Do not navigate to example.com. That URL was just an example in your instructions. \
+                    Continue with the actual task without browsing."
+                ));
+                consecutive_failures += 1;
+                continue;
+            }
+
             if (is_simple_shell || (is_system_status_query && is_localhost_check)) && is_puppeteer {
                 // Model confused a shell command for a web browse - correct it
                 println!("{} Model tried to browse web for system check, correcting...", "⚠".yellow());
