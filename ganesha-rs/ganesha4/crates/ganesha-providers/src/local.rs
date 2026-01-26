@@ -256,44 +256,82 @@ impl LocalProvider {
             );
         }
 
+        // Use temperature from options, or check env var, or default to 0.7 (matches OpenAI)
+        let temperature = options.temperature.or_else(|| {
+            std::env::var("LOCAL_LLM_TEMPERATURE")
+                .ok()
+                .and_then(|t| t.parse().ok())
+        }).or(Some(0.7));
+
+        // Reasoning effort: check env var LM_STUDIO_REASONING (low/medium/high), default to None
+        // Only send if explicitly configured to avoid compatibility issues
+        let reasoning_effort = std::env::var("LM_STUDIO_REASONING")
+            .ok()
+            .filter(|r| ["low", "medium", "high"].contains(&r.as_str()));
+
+        debug!(
+            "Local provider request: model={}, temp={:?}, reasoning={:?}, messages={}",
+            model,
+            temperature,
+            reasoning_effort,
+            oai_messages.len()
+        );
+
         let request = OpenAiCompatRequest {
             model: model.clone(),
             messages: oai_messages,
-            temperature: options.temperature,
+            temperature,
             max_tokens: options.max_tokens,
             stop: options.stop.clone(),
+            reasoning_effort,
         };
 
         let url = format!("{}/chat/completions", self.base_url);
-        let response = self.client.post(&url).json(&request).send().await?;
 
-        if !response.status().is_success() {
-            let status = response.status().as_u16();
-            let body = response.text().await.unwrap_or_default();
-            return Err(ProviderError::ApiError {
-                status,
-                message: body,
+        // Retry up to 2 times for empty responses (common with local models)
+        let max_retries = 2;
+        for attempt in 0..=max_retries {
+            let response = self.client.post(&url).json(&request).send().await?;
+
+            if !response.status().is_success() {
+                let status = response.status().as_u16();
+                let body = response.text().await.unwrap_or_default();
+                return Err(ProviderError::ApiError {
+                    status,
+                    message: body,
+                });
+            }
+
+            let chat_response: OpenAiCompatResponse = response.json().await?;
+
+            let choice = chat_response
+                .choices
+                .into_iter()
+                .next()
+                .ok_or_else(|| ProviderError::InvalidResponse("No choices in response".to_string()))?;
+
+            let content = choice.message.content.unwrap_or_default();
+
+            // If content is empty or too short, retry (local models sometimes return empty)
+            if content.trim().is_empty() && attempt < max_retries {
+                debug!("Empty response from local model, retrying (attempt {}/{})", attempt + 1, max_retries);
+                continue;
+            }
+
+            return Ok(Response {
+                content,
+                model,
+                finish_reason: choice.finish_reason,
+                usage: chat_response.usage.map(|u| Usage {
+                    prompt_tokens: u.prompt_tokens,
+                    completion_tokens: u.completion_tokens,
+                    total_tokens: u.total_tokens,
+                }),
             });
         }
 
-        let chat_response: OpenAiCompatResponse = response.json().await?;
-
-        let choice = chat_response
-            .choices
-            .into_iter()
-            .next()
-            .ok_or_else(|| ProviderError::InvalidResponse("No choices in response".to_string()))?;
-
-        Ok(Response {
-            content: choice.message.content.unwrap_or_default(),
-            model,
-            finish_reason: choice.finish_reason,
-            usage: chat_response.usage.map(|u| Usage {
-                prompt_tokens: u.prompt_tokens,
-                completion_tokens: u.completion_tokens,
-                total_tokens: u.total_tokens,
-            }),
-        })
+        // Should not reach here, but return empty response if all retries failed
+        Err(ProviderError::InvalidResponse("Local model returned empty response after retries".to_string()))
     }
 }
 
@@ -467,6 +505,8 @@ struct OpenAiCompatRequest {
     max_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     stop: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_effort: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
