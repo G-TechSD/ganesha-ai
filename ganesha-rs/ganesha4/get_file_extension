@@ -1,5 +1,0 @@
-get_file_extension() {
-  local filename="$1"
-  local extension="${filename##*.}"
-  echo "$extension"
-}
