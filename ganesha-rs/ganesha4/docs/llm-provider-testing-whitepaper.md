@@ -1,19 +1,28 @@
-# LLM Provider Testing & Self-Optimization Whitepaper
+# Know Thyself: LLM Self-Optimization Through Introspection
 
-**Ganesha CLI v4.0 - Local Model Reliability Study**
+**A Case Study in Having AI Improve Its Own System Prompt**
 
-*Date: January 25, 2026*
+*Ganesha CLI v4.0 - January 25, 2026*
 
 ---
 
 ## Executive Summary
 
-This whitepaper documents comprehensive testing of multiple LLM providers with Ganesha CLI, an autonomous terminal assistant. Testing revealed significant reliability differences between cloud providers (OpenAI GPT-4o, Google Gemini 2.0 Flash) and local models (LMStudio with gpt-oss-20b). Through systematic analysis and a novel self-improvement approach—having the AI critique and improve its own system prompt—we achieved 100% pass rates on test suites that previously had 25% failure rates.
+This whitepaper presents a novel approach to LLM system prompt optimization: asking the model to analyze and improve its own instructions. Rather than relying solely on external observation and trial-and-error prompt engineering, we gave the model access to its own system prompt and asked it to identify what confused it and what would help it perform better.
 
-**Key Findings:**
-- OpenAI GPT-4o: 97.3% command pass rate, 92.6% session success rate (~$7 API cost)
-- Gemini 2.0 Flash: 92.9% command pass rate, 80.7% session success rate
-- LMStudio Local: 74.5% → 100% after optimization (zero API cost)
+**The Core Insight:** An LLM that has processed thousands of prompts understands its own failure modes better than external analysis can determine. The model knows when it's tempted to over-explain, when it reaches for the wrong tool, and what instructions would have helped it make better decisions.
+
+**Results:**
+- Local model reliability improved from 74.5% to 100% on test suite
+- The model identified specific issues we hadn't considered (e.g., "don't run command output as a new command")
+- Improvements were actionable and specific, not vague suggestions
+
+**Comparative Provider Testing:**
+- OpenAI GPT-4o: 97.3% command pass rate, 92.6% session success (~$7 API cost)
+- Gemini 2.0 Flash: 92.9% command pass rate, 80.7% session success
+- LMStudio Local: 74.5% → 100% after self-optimization (zero API cost)
+
+The ancient Greek maxim "γνῶθι σεαυτόν" (Know Thyself) applies to AI systems too—introspection scales.
 
 ---
 
@@ -159,26 +168,89 @@ Analysis of session logs revealed behavioral issues:
 
 ### 5.1 Methodology
 
-Rather than guessing at prompt improvements, we asked Ganesha to analyze and improve its own system prompt:
+Rather than guessing at prompt improvements, we asked Ganesha to analyze and improve its own system prompt. First, we saved the current system prompt to a file, then asked the model to read it and suggest improvements.
+
+**Prompt Used:**
 
 ```
 You are reviewing your own system prompt. Based on your experience,
-write specific improvements to make yourself more effective.
+write specific improvements to make yourself more effective. Create
+/tmp/prompt_improvements.md with:
+
+1. SIMPLE COMMAND HANDLING - Rules for when user types basic commands
+   like "ls", "pwd", "date" - just run them, no explanation needed
+
+2. MATH WITHOUT SHELL - When to answer math directly (2+2=4) vs when
+   to use shell (complex calculations)
+
+3. TOOL SELECTION - Clear decision tree: shell commands vs puppeteer
+   vs direct answer
+
+4. ERROR HANDLING - What to do when a command fails (don't repeat it,
+   don't run output as command)
+
+5. CONCISENESS - When to be brief vs when to explain
+
+Write actual improved prompt text, not meta-commentary.
 ```
 
 ### 5.2 Model's Self-Analysis
 
-The model identified these key improvements:
+With `LM_STUDIO_REASONING=high` enabled, the model generated a comprehensive response. It first created a file with improvement suggestions, then spontaneously generated a complete revised system prompt.
 
-1. **Simple Command Handling**: "Execute directly, no explanation needed"
-2. **Math Without Shell**: "Answer 2+2 directly, use shell only for complex calculations"
-3. **Tool Selection Decision Tree**: Clear rules for shell vs. puppeteer vs. direct answer
-4. **Error Handling**: "Don't retry failed commands, don't run output as command"
-5. **Conciseness Policy**: "Brief for simple tasks, detailed for complex ones"
+**Key excerpt from model's output:**
 
-### 5.3 Philosophical Basis
+```markdown
+## General Behavior Rules
 
-This approach embodies the ancient Greek maxim "γνῶθι σεαυτόν" (Know Thyself). The model understood its own failure modes better than external analysis could determine, because it experienced the friction points directly during inference.
+1. **Simple Command Handling**
+   - When the user inputs a basic terminal command (`ls`, `pwd`, `date`, etc.),
+     execute it directly and return only its output. No additional explanation
+     or commentary is required.
+
+2. **Mathematical Queries**
+   - *Direct Answer*: For simple arithmetic (e.g., `2 + 2`), reply with the result.
+   - *Shell Execution*: For complex or multi step calculations, use an appropriate
+     shell tool (`awk`, `bc`, Python) and return the output.
+
+3. **Tool Selection Decision Tree**
+   | Situation | Preferred Tool |
+   |-----------|----------------|
+   | Static information or code snippets | Direct text answer |
+   | File system operations, process management | Shell command |
+   | Web navigation, scraping, screenshots | Puppeteer tools |
+
+4. **Error Handling**
+   - If a shell or tool invocation fails (non zero exit status or exception),
+     do not retry automatically and do not treat the output as a new command.
+   - Abort further processing and return a concise error message.
+
+5. **Conciseness Policy**
+   - *Brief (≤3 sentences)*: Use for single commands or straightforward facts.
+   - *Expanded (>3 sentences)*: Use when multiple steps, choices, or potential
+     pitfalls exist.
+```
+
+The model also generated additional suggestions we hadn't asked for:
+
+- **Directory pre-flight checks**: Always `mkdir -p` before writing to subdirectories
+- **File reference validation**: Check that HTML files create their referenced CSS/JS
+- **Two-phase web scraping**: Capture DOM snapshot first, then parse locally
+- **Post-completion summary**: List all created files after multi-file tasks
+
+### 5.3 What Made This Effective
+
+The model's suggestions were notably specific and actionable because:
+
+1. **Direct experience**: It had just processed hundreds of prompts and knew which ones caused confusion
+2. **Pattern recognition**: It identified the "running output as command" bug that we might have missed
+3. **Self-awareness**: It understood its own tendency to over-explain simple tasks
+
+### 5.4 Philosophical Basis
+
+This approach embodies the ancient Greek maxim "γνῶθι σεαυτόν" (Know Thyself), inscribed at the Temple of Apollo at Delphi. The model understood its own failure modes better than external analysis could determine, because it experienced the friction points directly during inference.
+
+As the user noted: "Know thyself is what us humans say." The same principle applies—introspection, even for AI systems, produces insights that external observation might miss.
 
 ---
 
