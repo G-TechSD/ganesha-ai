@@ -1,0 +1,16 @@
+digraph SimpleFlow {
+    rankdir=LR;
+    node [shape=box, style="rounded,filled", fillcolor="#E0F7FA"];
+    
+    Start [label="Start", shape=circle, style=filled, fillcolor="#B2EBF2"];
+    Process1 [label="Process 1\n(Do something)"];
+    Decision [label="Decision?\nYes / No", shape=diamond];
+    Process2 [label="Process 2\n(If Yes)"];
+    End [label="End", shape=circle, style=filled, fillcolor="#FFCDD2"];
+
+    Start -> Process1;
+    Process1 -> Decision;
+    Decision -> Process2 [label="Yes"];
+    Decision -> End [label="No"];
+    Process2 -> End;
+}

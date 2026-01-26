@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Product Page</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="product-image-gallery">
+            <img src="image1.jpg" alt="Product Image 1" class="active">
+            <img src="image2.jpg" alt="Product Image 2">
+            <img src="image3.jpg" alt="Product Image 3">
+        </div>
+
+        <div class="product-details">
+            <h1>Product Title</h1>
+            <p class="description">Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+            <div class="price">$99.99</div>
+
+            <div class="quantity-selector">
+                <label for="quantity">Quantity:</label>
+                <button class="quantity-btn" data-action="decrease">-</button>
+                <input type="number" id="quantity" value="1" min="1">
+                <button class="quantity-btn" data-action="increase">+</button>
+            </div>
+
+            <button class="add-to-cart-btn">Add to Cart</button>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

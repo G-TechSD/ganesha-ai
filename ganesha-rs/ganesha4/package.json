@@ -1,0 +1,12 @@
+{
+  "name": "express-skeleton",
+  "version": "1.0.0",
+  "description": "Basic Express.js server skeleton",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js"
+  },
+  "dependencies": {
+    "express": "^4.17.1"
+  }
+}
