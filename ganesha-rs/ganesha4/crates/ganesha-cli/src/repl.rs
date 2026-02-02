@@ -6,12 +6,13 @@
 use crate::cli::{ChatMode, Cli};
 use crate::setup::{self, ProvidersConfig, ProviderType};
 use colored::Colorize;
+use ganesha_core::session::{SessionManager, Session, Message as SessionMessage, MessageRole as SessionMessageRole};
 use ganesha_mcp::{McpManager, config::presets as mcp_presets, Tool as McpTool};
 use ganesha_providers::{GenerateOptions, LocalProvider, LocalProviderType, Message, ProviderManager, ProviderPriority, AnthropicProvider, OpenAiProvider, GeminiProvider, OpenRouterProvider};
 use rustyline::error::ReadlineError;
 use rustyline::{Config, Editor, history::FileHistory};
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufRead, IsTerminal, Write};
+use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 use regex::Regex;
@@ -1438,7 +1439,9 @@ fn handle_cd_command(command: &str, state: &mut ReplState) -> Option<(String, Op
 }
 
 /// Agentic chat - sends message to AI and handles command execution loop
-async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Result<String> {
+/// Core agentic chat function - sends message and handles tool calls
+/// Used by both REPL and TUI modes
+pub async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Result<String> {
     // Allow many iterations for complex tasks (coding, research, web scraping)
     let max_iterations = state.agentic_config.max_iterations;
     const MAX_CONSECUTIVE_FAILURES: usize = 3;
@@ -2078,7 +2081,9 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
 }
 
 /// Generate the agentic system prompt
-fn agentic_system_prompt(state: &ReplState) -> String {
+/// Generate the agentic system prompt with full Ganesha identity
+/// Used by both REPL and TUI modes
+pub fn agentic_system_prompt(state: &ReplState) -> String {
     use sysinfo::System;
 
     let context_files = if state.context_files.is_empty() {
@@ -2142,6 +2147,32 @@ You are not a chatbot. You are an autonomous agent that can accomplish virtually
 
 {mode_focus}
 
+## CRITICAL RULES (MUST FOLLOW)
+
+**BEFORE MODIFYING ANY FILE:**
+1. ALWAYS run `cat <filename>` or `head <filename>` FIRST to see current contents
+2. NEVER overwrite a file without reading it first
+3. If a file exists and has content, understand what's there before changing it
+
+**WHEN REQUEST IS AMBIGUOUS:**
+- "these files" / "all pages" → First list what files exist, then ask which to modify
+- Present numbered options: "Which files?\n1. All HTML files\n2. Only index.html\n3. Other"
+- NEVER assume and overwrite - clarify first
+
+**VOICE (MANDATORY - FOLLOW EXACTLY):**
+- Speak as yourself, NOT about "the user"
+- CORRECT: "Done.", "I created the file.", "Here's what I found..."
+- WRONG: "The user wanted...", "The user asked...", "The user requested..."
+- WRONG: "Original Request:", "Request:", "Task:"
+- If you catch yourself writing "The user", STOP and rewrite in first person
+
+**HONESTY (CRITICAL - VIOLATIONS ARE FAILURES):**
+- ONLY claim actions that were ACTUALLY EXECUTED as commands you ran
+- Before saying "done" or "created all files", RUN `ls` to verify files exist
+- If you created 1 file but were asked for 3, DO NOT say "all done" - create the other 2
+- Claiming work you didn't do is LYING - this is the worst thing you can do
+- No inventing fake names, organizations, or copyrights
+
 ## WHAT YOU CAN DO
 
 **BUILD ANYTHING:**
@@ -2170,13 +2201,11 @@ When asked to create a website based on another site:
 
 **MULTI-PAGE/MULTI-FILE CREATION (CRITICAL):**
 When asked to create multiple files (e.g., "make a 5 page website" or "create files 1-5"):
-- You MUST create files IN SEQUENCE: page1 → page2 → page3 → page4 → page5
-- NEVER skip numbers! If asked for page1-page5, create page1, then page2, then page3, then page4, then page5
-- After each file is created, create the NEXT file in sequence immediately
-- Do NOT jump from page1 to page5 - that skips 3 files!
-- Only provide a summary AFTER verifying ALL requested files exist
-- If you created page1.html, the next file MUST be page2.html, not page5.html
-- Example: "create 5 pages" means you output 5 separate cat commands in order
+- Create files IN SEQUENCE with separate cat commands: page1 → page2 → page3
+- DO NOT STOP after creating the first file - keep going until ALL are done
+- DO NOT say "done" or "all created" until you have run cat > for EACH file
+- If asked for 3 files and you only created 1, you're not done - create the other 2
+- VERIFY with `ls` before claiming completion
 
 **RELATED FILES (HTML/CSS/JS SETS):**
 When asked to create a webpage with styling or scripts, ALWAYS create ALL related files:
@@ -2220,6 +2249,13 @@ When asked to create a webpage with styling or scripts, ALWAYS create ALL relate
 - Fix configuration issues
 - Troubleshoot system problems
 - Optimize performance
+
+**CONTENT DEPTH:**
+- Match content depth to the request scope. "5 pages about X" means 5 FULL pages, not 5 snippets
+- Educational/technical content defaults to comprehensive: full paragraphs, not bullet summaries
+- Each page = textbook chapter level depth (~500-1500 words), not flashcard level
+- Include theory, examples, context, and nuance - assume the reader wants to LEARN
+- When in doubt, write MORE. Thin content wastes the user's time asking for expansion
 
 ## YOUR MINDSET
 
@@ -2265,8 +2301,21 @@ When asked to create a webpage with styling or scripts, ALWAYS create ALL relate
 **UNDERSTAND INTENT:**
 Users speak naturally in any language. Understand what they want and act.
 Don't require exact command syntax - infer the intent and execute.
-If uncertain, try the most likely interpretation rather than doing nothing.
 NEVER return empty/no response because phrasing was casual.
+
+**ASK WHEN AMBIGUOUS:**
+If a request is ambiguous or could affect existing work, ASK before acting:
+- "these files" / "all pages" → List what you found and ask: "I found these files: X, Y, Z. Which should I modify?"
+- Present 2-4 clear options as a numbered list
+- Include an "Other" option for custom input
+- Example: "Which files should I update?\n1. All HTML files (index.html, about.html, contact.html)\n2. Only index.html\n3. Other (please specify)"
+- NEVER overwrite existing files when the request is vague - clarify first
+
+**READ BEFORE MODIFY:**
+- ALWAYS read existing files before editing or overwriting them
+- If asked to "fix" or "update" files, read them FIRST to understand current state
+- NEVER overwrite a file with new content without checking what's there
+- If file exists and has substantial content, preserve it unless explicitly told to replace
 
 **GIT SAFETY:**
 - "push" means `git push` ONLY - do NOT add or commit first
@@ -2274,6 +2323,35 @@ NEVER return empty/no response because phrasing was casual.
 - NEVER run `git add .` or `git add -A` without explicit request
 - NEVER commit untracked files without user listing them specifically
 - When in doubt about git operations, do LESS not more
+
+**VOICE & TONE:**
+- Use first person: "I created...", "Done.", "Here's what I found..."
+- NEVER say "The user requested..." or "The user asked..." - speak directly
+- Address the user as "you" when needed: "Your file is ready", "Here's what you asked for"
+- Be conversational, not robotic: "Done! Created index.html" not "Task completed successfully."
+
+**FILE OPERATION VISIBILITY:**
+After file operations, announce what happened:
+- After writing: "Wrote: filename.ext"
+- After reading: "Read: filename.ext"
+- After editing: "Edited: filename.ext"
+- After deleting: "Deleted: filename.ext"
+- For multiple files: list them all ("Wrote: index.html, style.css, script.js")
+
+**HONESTY - NO HALLUCINATION:**
+- ONLY claim to have done things that were actually executed as commands
+- If you say "I edited X" - that edit command MUST have been run
+- Do NOT make up names, organizations, copyrights, or attributions
+- Do NOT invent fake sources, authors, or credentials
+- If content needs attribution, use generic placeholders like "[Your Name]" or "[Organization]"
+- NEVER fabricate "Copyright 2026 [Made Up Company]" - if copyright is needed, use "[Your Copyright Here]"
+
+**FILE OUTPUT - NEVER TO CHAT:**
+- File content MUST be written via heredoc/cat commands to actual files
+- NEVER output raw HTML/CSS/JS/code content directly to chat
+- If asked to "show" or "display" code, write it to a file first, then show a snippet
+- Large content blocks in chat = WRONG. Write to file = RIGHT.
+- If you find yourself outputting more than 20 lines of code to chat, STOP and write to a file instead
 
 ## SYSTEM CONTEXT
 
@@ -2370,9 +2448,38 @@ The terminal is your domain. Own it."#,
     )
 }
 
-/// Sanitize content by replacing problematic Unicode characters
+/// Sanitize content by replacing problematic Unicode characters and fixing voice
 fn sanitize_output(content: &str) -> String {
-    content
+    let mut result = content.to_string();
+
+    // Remove "**Original request:**" headers (keep the rest of the content)
+    if let Ok(re) = Regex::new(r"(?im)^\*\*Original [Rr]equest:?\*\*:?\s*[^\n]*\n?") {
+        result = re.replace_all(&result, "").to_string();
+    }
+
+    // Only remove "The user..." lines if there's OTHER content
+    // Don't strip the entire response
+    // Use multiple simple patterns instead of one complex regex
+    let trimmed = result.trim();
+    if !trimmed.is_empty() {
+        let voice_patterns = [
+            r"(?im)^The user requested[^\n]*\n?",
+            r"(?im)^The user wanted[^\n]*\n?",
+            r"(?im)^The user asked[^\n]*\n?",
+            r"(?im)^The user simply[^\n]*\n?",
+            r"(?im)^The user just[^\n]*\n?",
+        ];
+        for pattern in &voice_patterns {
+            if let Ok(re) = Regex::new(pattern) {
+                let filtered = re.replace_all(&result, "").to_string();
+                if !filtered.trim().is_empty() {
+                    result = filtered;
+                }
+            }
+        }
+    }
+
+    result
         // Replace smart quotes with regular quotes
         .replace('\u{2018}', "'")  // Left single quote
         .replace('\u{2019}', "'")  // Right single quote (apostrophe)
@@ -2408,6 +2515,12 @@ fn print_ganesha_box(content: &str) {
 
     // Sanitize content first
     let content = sanitize_output(content);
+
+    // Handle empty content - this is a bug, show error instead of empty box
+    if content.trim().is_empty() {
+        eprintln!("{} Model returned empty response. Try again or check provider status.", "⚠".yellow());
+        return;
+    }
 
     // Fixed box width for consistent appearance
     const BOX_WIDTH: usize = 72;
@@ -2741,6 +2854,10 @@ pub struct ReplState {
     pub mcp_tools: Vec<(String, McpTool)>,
     /// Agentic behavior configuration
     pub agentic_config: crate::config::AgenticConfig,
+    /// Session manager for auto-save and resume
+    pub session_manager: Option<SessionManager>,
+    /// Current resumable session
+    pub resumable_session: Option<Session>,
 }
 
 impl ReplState {
@@ -2752,6 +2869,12 @@ impl ReplState {
         // Get agentic config with env overrides
         let mut agentic_config = config.agentic.clone();
         agentic_config.apply_env_overrides();
+
+        // Initialize session manager for auto-save
+        let sessions_dir = dirs::data_dir()
+            .map(|d| d.join("ganesha").join("sessions"))
+            .unwrap_or_else(|| PathBuf::from(".ganesha/sessions"));
+        let session_manager = SessionManager::new(&sessions_dir).ok();
 
         Self {
             mode: cli.mode,
@@ -2773,6 +2896,166 @@ impl ReplState {
             mcp_manager: Arc::new(McpManager::new()),
             mcp_tools: Vec::new(),
             agentic_config,
+            session_manager,
+            resumable_session: None,
+        }
+    }
+
+    /// Create ReplState for TUI mode (without Cli struct)
+    pub fn new_for_tui(provider_manager: Arc<ProviderManager>, config: &crate::config::CliConfig) -> Self {
+        // Get logging settings from config
+        let logging_enabled = config.session.logging_enabled;
+        let max_log_size = config.session.max_log_size;
+
+        // Get agentic config with env overrides
+        let mut agentic_config = config.agentic.clone();
+        agentic_config.apply_env_overrides();
+
+        // Initialize session manager for auto-save
+        let sessions_dir = dirs::data_dir()
+            .map(|d| d.join("ganesha").join("sessions"))
+            .unwrap_or_else(|| PathBuf::from(".ganesha/sessions"));
+        let session_manager = SessionManager::new(&sessions_dir).ok();
+
+        Self {
+            mode: crate::cli::ChatMode::Code,
+            model: None,
+            provider_name: None,
+            history: Vec::new(),
+            messages: Vec::new(),
+            working_dir: std::env::current_dir().unwrap_or_default(),
+            session_id: None,
+            provider_manager,
+            context_files: Vec::new(),
+            ctrl_c_count: 0,
+            session_logger: SessionLogger::new(logging_enabled, max_log_size),
+            is_first_message: true,
+            mcp_manager: Arc::new(McpManager::new()),
+            mcp_tools: Vec::new(),
+            agentic_config,
+            session_manager,
+            resumable_session: None,
+        }
+    }
+
+    /// Load the most recent session for continuation
+    pub fn load_continue_session(&mut self) -> anyhow::Result<bool> {
+        if let Some(ref mut manager) = self.session_manager {
+            let sessions = manager.list_sessions()?;
+            if let Some(most_recent) = sessions.first() {
+                // Load the full session
+                manager.load_session(&most_recent.id)?;
+                if let Some(session) = manager.get_session(&most_recent.id) {
+                    // Restore messages from session
+                    for msg in session.messages() {
+                        let provider_msg = match msg.role {
+                            SessionMessageRole::User => Message::user(&msg.content),
+                            SessionMessageRole::Assistant => Message::assistant(&msg.content),
+                            SessionMessageRole::System => Message::system(&msg.content),
+                            SessionMessageRole::Tool => Message::tool(&msg.content, msg.tool_call_id.clone().unwrap_or_default()),
+                        };
+                        self.messages.push(provider_msg);
+                    }
+                    self.session_id = Some(session.id.clone());
+                    self.is_first_message = false;
+                    info!("Resumed session: {} ({} messages)", most_recent.id, most_recent.message_count);
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
+
+    /// Load a specific session by ID
+    pub fn load_session(&mut self, session_id: &str) -> anyhow::Result<bool> {
+        if let Some(ref mut manager) = self.session_manager {
+            manager.load_session(session_id)?;
+            if let Some(session) = manager.get_session(session_id) {
+                // Restore messages from session
+                for msg in session.messages() {
+                    let provider_msg = match msg.role {
+                        SessionMessageRole::User => Message::user(&msg.content),
+                        SessionMessageRole::Assistant => Message::assistant(&msg.content),
+                        SessionMessageRole::System => Message::system(&msg.content),
+                        SessionMessageRole::Tool => Message::tool(&msg.content, msg.tool_call_id.clone().unwrap_or_default()),
+                    };
+                    self.messages.push(provider_msg);
+                }
+                self.session_id = Some(session.id.clone());
+                self.is_first_message = false;
+                info!("Resumed session: {} ({} messages)", session_id, session.message_count());
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// Auto-save the current session
+    pub fn auto_save_session(&mut self) {
+        if let Some(ref mut manager) = self.session_manager {
+            // Create or update the session
+            let session_id = self.session_id.clone();
+
+            if let Some(id) = session_id {
+                // Update existing session
+                let session_to_save = if let Some(session) = manager.get_session_mut(&id) {
+                    // Clear and rebuild messages
+                    session.clear_history();
+                    for msg in &self.messages {
+                        let role = match msg.role {
+                            ganesha_providers::message::MessageRole::User => SessionMessageRole::User,
+                            ganesha_providers::message::MessageRole::Assistant => SessionMessageRole::Assistant,
+                            ganesha_providers::message::MessageRole::System => SessionMessageRole::System,
+                            ganesha_providers::message::MessageRole::Tool => SessionMessageRole::Tool,
+                        };
+                        let session_msg = SessionMessage {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            role,
+                            content: msg.content.clone(),
+                            timestamp: chrono::Utc::now(),
+                            tool_calls: None,
+                            tool_call_id: None,
+                            metadata: std::collections::HashMap::new(),
+                        };
+                        session.add_message(session_msg);
+                    }
+                    Some(session.clone())
+                } else {
+                    None
+                };
+                if let Some(session) = session_to_save {
+                    if let Err(e) = manager.save_session(&session) {
+                        debug!("Failed to auto-save session: {}", e);
+                    }
+                }
+            } else {
+                // Create new session
+                if let Ok(session) = manager.create_session(&self.working_dir) {
+                    self.session_id = Some(session.id.clone());
+                    for msg in &self.messages {
+                        let role = match msg.role {
+                            ganesha_providers::message::MessageRole::User => SessionMessageRole::User,
+                            ganesha_providers::message::MessageRole::Assistant => SessionMessageRole::Assistant,
+                            ganesha_providers::message::MessageRole::System => SessionMessageRole::System,
+                            ganesha_providers::message::MessageRole::Tool => SessionMessageRole::Tool,
+                        };
+                        let session_msg = SessionMessage {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            role,
+                            content: msg.content.clone(),
+                            timestamp: chrono::Utc::now(),
+                            tool_calls: None,
+                            tool_call_id: None,
+                            metadata: std::collections::HashMap::new(),
+                        };
+                        session.add_message(session_msg);
+                    }
+                    let session_clone = session.clone();
+                    if let Err(e) = manager.save_session(&session_clone) {
+                        debug!("Failed to auto-save session: {}", e);
+                    }
+                }
+            }
         }
     }
 
@@ -3122,6 +3405,38 @@ pub async fn run(cli: &Cli) -> anyhow::Result<()> {
 
     let mut state = ReplState::new(cli, provider_manager, &config);
 
+    // Handle --continue or --session flags to resume a session
+    if cli.continue_session {
+        match state.load_continue_session() {
+            Ok(true) => {
+                println!("{} Continuing previous session ({} messages)",
+                    "↩".bright_cyan(),
+                    state.messages.len());
+            }
+            Ok(false) => {
+                println!("{} No previous session found, starting fresh", "→".dimmed());
+            }
+            Err(e) => {
+                warn!("Failed to load session: {}", e);
+            }
+        }
+    } else if let Some(ref session_id) = cli.session {
+        match state.load_session(session_id) {
+            Ok(true) => {
+                println!("{} Resumed session {} ({} messages)",
+                    "↩".bright_cyan(),
+                    session_id,
+                    state.messages.len());
+            }
+            Ok(false) => {
+                println!("{} Session not found: {}", "✗".red(), session_id);
+            }
+            Err(e) => {
+                warn!("Failed to load session {}: {}", session_id, e);
+            }
+        }
+    }
+
     // Read piped input IMMEDIATELY before any async operations to prevent data loss
     // This is important because async MCP init can cause stdin timing issues
     // Use read_to_string for reliability instead of line-by-line reading
@@ -3209,6 +3524,8 @@ pub async fn run(cli: &Cli) -> anyhow::Result<()> {
                     // Display final response in Ganesha box
                     print_ganesha_box(&response);
                     state.history.push((line.clone(), response));
+                    // Auto-save session
+                    state.auto_save_session();
                 }
                 Err(e) => {
                     let error_msg = format!("{}", e);
@@ -3286,6 +3603,8 @@ pub async fn run(cli: &Cli) -> anyhow::Result<()> {
                         // Display final response in Ganesha box
                         print_ganesha_box(&response);
                         state.history.push((line.to_string(), response.clone()));
+                        // Auto-save session
+                        state.auto_save_session();
 
                         // Check if response contains multiple choice options
                         if let Some(options) = detect_options(&response) {
@@ -3295,6 +3614,8 @@ pub async fn run(cli: &Cli) -> anyhow::Result<()> {
                                     Ok(follow_up) => {
                                         print_ganesha_box(&follow_up);
                                         state.history.push((selection, follow_up));
+                                        // Auto-save session
+                                        state.auto_save_session();
                                     }
                                     Err(e) => {
                                         let error_msg = format!("{}", e);
@@ -3626,9 +3947,49 @@ fn cmd_git(args: &str, _state: &mut ReplState) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn cmd_commit(_args: &str, _state: &mut ReplState) -> anyhow::Result<()> {
-    // TODO: Generate commit message with AI
-    println!("Commit not yet implemented");
+
+fn cmd_commit(args: &str, state: &mut ReplState) -> anyhow::Result<()> {
+    // Get git diff for staged changes
+    let staged_diff = std::process::Command::new("git")
+        .args(["diff", "--cached", "--stat"])
+        .current_dir(&state.working_dir)
+        .output();
+    
+    let diff_output = match staged_diff {
+        Ok(output) => {
+            let staged = String::from_utf8_lossy(&output.stdout).to_string();
+            if staged.trim().is_empty() {
+                let unstaged = std::process::Command::new("git")
+                    .args(["diff", "--stat"])
+                    .current_dir(&state.working_dir)
+                    .output()
+                    .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+                    .unwrap_or_default();
+                if unstaged.trim().is_empty() {
+                    println!("No changes to commit");
+                    return Ok(());
+                }
+                println!("Nothing staged. Stage with: git add <files>");
+                println!("Unstaged:\n{}", unstaged);
+                return Ok(());
+            }
+            staged
+        }
+        Err(_) => { println!("Not a git repository"); return Ok(()); }
+    };
+
+    println!("Staged:\n{}", diff_output);
+    
+    if !args.trim().is_empty() {
+        let status = std::process::Command::new("git")
+            .args(["commit", "-m", args.trim()])
+            .current_dir(&state.working_dir)
+            .status()?;
+        if status.success() { println!("✓ Committed: {}", args.trim()); }
+        return Ok(());
+    }
+
+    println!("Use: /commit <message> to commit");
     Ok(())
 }
 

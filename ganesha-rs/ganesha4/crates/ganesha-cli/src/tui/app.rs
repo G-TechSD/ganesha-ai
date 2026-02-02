@@ -12,17 +12,17 @@ use std::time::{Duration, Instant};
 /// Maximum number of messages to keep in history
 const MAX_MESSAGES: usize = 1000;
 
-/// Input mode (vim-like)
+/// Input mode - simple like Claude Code
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum InputMode {
-    /// Normal mode - navigation and commands
+    /// Typing mode - DEFAULT, just type normally
     #[default]
-    Normal,
-    /// Insert mode - text input
     Insert,
+    /// Navigation mode - scroll through history (press Escape to enter, any key to exit)
+    Normal,
     /// Command mode - slash commands
     Command,
-    /// Visual mode - text selection
+    /// Visual mode - text selection (unused for now)
     Visual,
 }
 
@@ -442,7 +442,7 @@ impl Default for AppState {
             running: true,
             needs_redraw: true,
 
-            input_mode: InputMode::Normal,
+            input_mode: InputMode::Insert,  // Start in insert mode for user-friendly UX
             input_buffer: String::new(),
             input_cursor: 0,
             input_history: VecDeque::with_capacity(100),
@@ -508,7 +508,7 @@ impl AppState {
     pub fn new() -> Self {
         let mut state = Self::default();
         state.messages.push_back(ChatMessage::system(
-            "Welcome to Ganesha 4.0! Type /help for commands or start chatting.",
+            "Welcome to Ganesha 4.0! Start typing to chat. Press Esc for navigation mode, /help for commands.",
         ));
         state.filter_command_palette();
         state
@@ -896,6 +896,32 @@ impl AppState {
         self.command_palette_open = false;
         self.command_palette_input.clear();
         self.needs_redraw = true;
+    }
+
+    /// Move command palette selection up
+    pub fn command_palette_up(&mut self) {
+        if !self.command_palette_filtered.is_empty() {
+            self.command_palette_selected = self
+                .command_palette_selected
+                .saturating_sub(1);
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Move command palette selection down
+    pub fn command_palette_down(&mut self) {
+        if !self.command_palette_filtered.is_empty() {
+            self.command_palette_selected = (self.command_palette_selected + 1)
+                .min(self.command_palette_filtered.len().saturating_sub(1));
+            self.needs_redraw = true;
+        }
+    }
+
+    /// Get the currently selected command
+    pub fn get_selected_command(&self) -> Option<&CommandEntry> {
+        self.command_palette_filtered
+            .get(self.command_palette_selected)
+            .and_then(|&idx| self.command_palette_entries.get(idx))
     }
 
     /// Start thinking animation

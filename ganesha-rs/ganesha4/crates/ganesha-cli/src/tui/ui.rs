@@ -456,12 +456,8 @@ fn render_input(f: &mut Frame, state: &AppState, colors: &ThemeColors, area: Rec
 fn render_status_bar(f: &mut Frame, state: &AppState, colors: &ThemeColors, area: Rect) {
     let message = state.status_message.as_ref().map(|(m, _)| m.as_str());
 
-    let hint = match state.input_mode {
-        super::app::InputMode::Normal => "i: insert | /: command | ?: help | Tab: panels | q: quit",
-        super::app::InputMode::Insert => "Esc: normal | Enter: send | Ctrl+C: quit",
-        super::app::InputMode::Command => "Esc: cancel | Enter: execute | Tab: complete",
-        super::app::InputMode::Visual => "Esc: cancel | y: yank | d: delete",
-    };
+    // Simple controls - no vim modes
+    let hint = "Enter: send | Esc: clear | ↑↓: history | Ctrl+P: commands | F1: help | Ctrl+C: quit";
 
     StatusBar::new(message, hint, colors).render(area, f.buffer_mut());
 }

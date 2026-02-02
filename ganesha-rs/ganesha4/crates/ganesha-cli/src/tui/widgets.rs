@@ -511,43 +511,44 @@ fn get_inline_style(bold: bool, italic: bool, code: bool, colors: &ThemeColors) 
 pub fn help_content() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
     vec![
         (
-            "Input Modes",
+            "Basic Controls",
             vec![
-                ("i", "Enter INSERT mode"),
-                ("v", "Enter VISUAL mode"),
-                ("/ or :", "Enter COMMAND mode"),
-                ("Esc", "Return to NORMAL mode"),
+                ("Enter", "Send message"),
+                ("Esc", "Clear input"),
+                ("Ctrl+C", "Quit"),
             ],
         ),
         (
-            "Navigation",
+            "Input",
             vec![
-                ("j/k or Up/Down", "Scroll up/down"),
-                ("g/G", "Go to top/bottom"),
-                ("Ctrl+D/U", "Page down/up"),
-                ("Tab/Shift+Tab", "Next/prev panel"),
-                ("1-4", "Focus panel by number"),
+                ("Backspace", "Delete character"),
+                ("Delete", "Delete character at cursor"),
+                ("←/→", "Move cursor"),
+                ("Ctrl+← / Home", "Go to start of line"),
+                ("Ctrl+→ / End", "Go to end of line"),
             ],
         ),
         (
-            "Editing",
+            "History & Scrolling",
             vec![
-                ("Backspace", "Delete char before cursor"),
-                ("Ctrl+W", "Delete word before cursor"),
-                ("Ctrl+U", "Clear input"),
-                ("Ctrl+A/E", "Go to start/end of line"),
-                ("Up/Down", "History prev/next"),
+                ("↑/↓ (empty input)", "Browse command history"),
+                ("↑/↓ (with input)", "Scroll conversation"),
+                ("PageUp/PageDown", "Scroll page"),
             ],
         ),
         (
-            "Global",
+            "Panels",
+            vec![
+                ("Tab", "Next panel"),
+                ("Shift+Tab", "Previous panel"),
+                ("F1", "Toggle help"),
+            ],
+        ),
+        (
+            "Shortcuts",
             vec![
                 ("Ctrl+P", "Open command palette"),
-                ("Ctrl+B", "Toggle side panel"),
-                ("Ctrl+T", "Toggle theme"),
                 ("Ctrl+L", "Clear conversation"),
-                ("Ctrl+C/Q", "Quit"),
-                ("?", "Toggle help"),
             ],
         ),
         (
@@ -557,7 +558,6 @@ pub fn help_content() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> 
                 ("/clear", "Clear conversation"),
                 ("/model <name>", "Switch model"),
                 ("/risk <level>", "Set risk level"),
-                ("/theme", "Toggle theme"),
                 ("/quit", "Exit Ganesha"),
             ],
         ),

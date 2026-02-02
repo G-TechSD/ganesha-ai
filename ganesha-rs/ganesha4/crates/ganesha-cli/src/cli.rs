@@ -26,6 +26,14 @@ pub struct Cli {
     #[arg(long)]
     pub tui: bool,
 
+    /// Continue the most recent session
+    #[arg(long, short = 'c')]
+    pub continue_session: bool,
+
+    /// Resume a specific session by ID
+    #[arg(long)]
+    pub session: Option<String>,
+
     /// Enable voice mode (speak responses, accept voice input)
     #[arg(long)]
     pub voice: bool,
