@@ -7,6 +7,8 @@ use crate::cli::{ChatMode, Cli};
 use crate::setup::{self, ProvidersConfig, ProviderType};
 use colored::Colorize;
 use ganesha_core::session::{SessionManager, Session, Message as SessionMessage, MessageRole as SessionMessageRole};
+use ganesha_core::rollback::RollbackManager;
+use chrono;
 use ganesha_mcp::{McpManager, config::presets as mcp_presets, Tool as McpTool};
 use ganesha_providers::{GenerateOptions, LocalProvider, LocalProviderType, Message, ProviderManager, ProviderPriority, AnthropicProvider, OpenAiProvider, GeminiProvider, OpenRouterProvider};
 use rustyline::error::ReadlineError;
@@ -2858,6 +2860,8 @@ pub struct ReplState {
     pub session_manager: Option<SessionManager>,
     /// Current resumable session
     pub resumable_session: Option<Session>,
+    /// Rollback manager for undo functionality
+    pub rollback_manager: RollbackManager,
 }
 
 impl ReplState {
@@ -2876,17 +2880,19 @@ impl ReplState {
             .unwrap_or_else(|| PathBuf::from(".ganesha/sessions"));
         let session_manager = SessionManager::new(&sessions_dir).ok();
 
+        let working_dir = cli
+            .directory
+            .as_ref()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+
         Self {
             mode: cli.mode,
             model: cli.model.clone(),
             provider_name: cli.provider.clone(),
             history: Vec::new(),
             messages: Vec::new(),
-            working_dir: cli
-                .directory
-                .as_ref()
-                .map(PathBuf::from)
-                .unwrap_or_else(|| std::env::current_dir().unwrap_or_default()),
+            working_dir: working_dir.clone(),
             session_id: None,
             provider_manager,
             context_files: Vec::new(),
@@ -2898,6 +2904,7 @@ impl ReplState {
             agentic_config,
             session_manager,
             resumable_session: None,
+            rollback_manager: RollbackManager::new(working_dir),
         }
     }
 
@@ -2917,13 +2924,15 @@ impl ReplState {
             .unwrap_or_else(|| PathBuf::from(".ganesha/sessions"));
         let session_manager = SessionManager::new(&sessions_dir).ok();
 
+        let working_dir = std::env::current_dir().unwrap_or_default();
+
         Self {
             mode: crate::cli::ChatMode::Code,
             model: None,
             provider_name: None,
             history: Vec::new(),
             messages: Vec::new(),
-            working_dir: std::env::current_dir().unwrap_or_default(),
+            working_dir: working_dir.clone(),
             session_id: None,
             provider_manager,
             context_files: Vec::new(),
@@ -2935,6 +2944,7 @@ impl ReplState {
             agentic_config,
             session_manager,
             resumable_session: None,
+            rollback_manager: RollbackManager::new(working_dir),
         }
     }
 
@@ -3924,9 +3934,75 @@ fn cmd_clear(_args: &str, state: &mut ReplState) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn cmd_undo(_args: &str, _state: &mut ReplState) -> anyhow::Result<()> {
-    // TODO: Implement rollback
-    println!("Undo not yet implemented");
+fn cmd_undo(args: &str, state: &mut ReplState) -> anyhow::Result<()> {
+    // Parse optional step count (default 1)
+    let steps: usize = args.trim().parse().unwrap_or(1);
+    
+    // Check for available checkpoints first
+    let checkpoints = state.rollback_manager.list_checkpoints();
+    if checkpoints.is_empty() {
+        println!("No checkpoints available for undo.");
+        println!("Checkpoints are created automatically when files are modified.");
+        return Ok(());
+    }
+    
+    // Show what will be undone
+    println!("\n{}", "Available checkpoints:".bold());
+    for (i, cp) in checkpoints.iter().take(5).enumerate() {
+        let age = chrono::Utc::now().signed_duration_since(cp.created_at);
+        let age_str = if age.num_minutes() < 1 {
+            format!("{}s ago", age.num_seconds())
+        } else if age.num_hours() < 1 {
+            format!("{}m ago", age.num_minutes())
+        } else {
+            format!("{}h ago", age.num_hours())
+        };
+        let marker = if i < steps { "→ " } else { "  " };
+        println!("  {}{}: {} ({})", marker, i + 1, cp.name.cyan(), age_str.dimmed());
+    }
+    
+    if steps > checkpoints.len() {
+        println!("\nOnly {} checkpoint(s) available, cannot undo {} steps.", 
+                 checkpoints.len(), steps);
+        return Ok(());
+    }
+    
+    // Confirm with user
+    print!("\nUndo {} step(s)? This will restore files to checkpoint state. [y/N]: ", steps);
+    std::io::stdout().flush()?;
+    
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+    
+    if !input.trim().eq_ignore_ascii_case("y") {
+        println!("Cancelled.");
+        return Ok(());
+    }
+    
+    // Perform the rollback using block_in_place pattern
+    let result = tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(state.rollback_manager.undo(steps))
+    });
+    
+    match result {
+        Ok(rollback_result) => {
+            println!("\n{}", "✓ Undo successful!".green().bold());
+            println!("  Restored {} file(s)", rollback_result.files_restored.len());
+            for path in &rollback_result.files_restored {
+                println!("    {} {}", "↩".dimmed(), path.display());
+            }
+            if !rollback_result.files_deleted.is_empty() {
+                println!("  Deleted {} file(s)", rollback_result.files_deleted.len());
+            }
+            if rollback_result.git_reset {
+                println!("  Git state reset: {}", "yes".cyan());
+            }
+        }
+        Err(e) => {
+            println!("\n{}: {}", "Undo failed".red().bold(), e);
+        }
+    }
+    
     Ok(())
 }
 
