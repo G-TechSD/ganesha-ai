@@ -1033,6 +1033,177 @@ Return the analysis as JSON with this structure:
 }
 
 /// Create a vision analyzer based on configuration.
+
+/// OmniParser-based vision analyzer for UI element detection.
+/// 
+/// Uses Microsoft's OmniParser V2 for pure vision-based GUI understanding.
+/// OmniParser runs as a local HTTP service (Gradio server) on port 7860.
+pub struct OmniParserAnalyzer {
+    /// OmniParser server URL (default: http://localhost:7860)
+    server_url: String,
+    /// Whether to use interactable element detection
+    detect_interactable: bool,
+    /// Capture settings for image encoding
+    capture_settings: CaptureSettings,
+}
+
+impl OmniParserAnalyzer {
+    /// Create a new OmniParser analyzer.
+    pub fn new(_config: &VisionConfig) -> AnalysisResult<Self> {
+        // Get server URL from env or use default
+        let server_url = std::env::var("OMNIPARSER_URL")
+            .unwrap_or_else(|_| "http://localhost:7860".to_string());
+        
+        Ok(Self {
+            server_url,
+            detect_interactable: true,
+            capture_settings: CaptureSettings::default(),
+        })
+    }
+    
+    /// Parse OmniParser response into UIElements
+    fn parse_omniparser_response(&self, response: &serde_json::Value) -> Vec<UIElement> {
+        let mut elements = Vec::new();
+        
+        // OmniParser returns detected elements in "parsed_content" array
+        if let Some(parsed) = response.get("parsed_content").and_then(|v| v.as_array()) {
+            for (idx, item) in parsed.iter().enumerate() {
+                // Each item has: text, bbox [x1, y1, x2, y2], interactable
+                let text = item.get("text").and_then(|v| v.as_str()).map(String::from);
+                let bbox = item.get("bbox").and_then(|v| v.as_array());
+                let interactable = item.get("interactable").and_then(|v| v.as_bool()).unwrap_or(false);
+                
+                if let Some(bbox) = bbox {
+                    if bbox.len() >= 4 {
+                        let x1 = bbox[0].as_f64().unwrap_or(0.0) as i32;
+                        let y1 = bbox[1].as_f64().unwrap_or(0.0) as i32;
+                        let x2 = bbox[2].as_f64().unwrap_or(0.0) as i32;
+                        let y2 = bbox[3].as_f64().unwrap_or(0.0) as i32;
+                        
+                        // Infer element type from text content
+                        let element_type = if interactable {
+                            if text.as_ref().map(|t| t.to_lowercase().contains("button") || t.to_lowercase().contains("click")).unwrap_or(false) {
+                                ElementType::Button
+                            } else if text.as_ref().map(|t| t.to_lowercase().contains("input") || t.to_lowercase().contains("text field")).unwrap_or(false) {
+                                ElementType::TextField
+                            } else {
+                                ElementType::Button // Default interactable to button
+                            }
+                        } else {
+                            if text.as_ref().map(|t| t.len() > 50).unwrap_or(false) {
+                                ElementType::Label
+                            } else {
+                                ElementType::Icon
+                            }
+                        };
+                        
+                        elements.push(UIElement {
+                            id: format!("omni_{}", idx),
+                            element_type,
+                            bounds: Region { x: x1, y: y1, width: (x2 - x1) as u32, height: (y2 - y1) as u32 },
+                            text,
+                            state: ElementState {
+                                enabled: interactable,
+                                visible: true,
+                                focused: false,
+                                selected: None,
+                                expanded: None,
+                                value: None,
+                            },
+                            confidence: 0.9, // OmniParser V2 is generally high confidence
+                            attributes: std::collections::HashMap::new(),
+                        });
+                    }
+                }
+            }
+        }
+        
+        elements
+    }
+}
+
+#[async_trait]
+impl VisionAnalyzer for OmniParserAnalyzer {
+    async fn analyze(&self, screenshot: &Screenshot, _prompt: Option<&str>) -> AnalysisResult<ScreenAnalysis> {
+        // Encode screenshot to base64
+        let image_data = screenshot.to_base64(&self.capture_settings)
+            .map_err(|e| AnalysisError::ModelError(e.to_string()))?;
+        
+        // Call OmniParser Gradio API
+        let client = reqwest::Client::new();
+        let response = client
+            .post(format!("{}/api/predict", self.server_url))
+            .json(&serde_json::json!({
+                "data": [image_data, self.detect_interactable]
+            }))
+            .send()
+            .await
+            .map_err(|e| AnalysisError::ApiError(e.to_string()))?;
+        
+        if !response.status().is_success() {
+            return Err(AnalysisError::ApiError(format!(
+                "OmniParser returned status {}",
+                response.status()
+            )));
+        }
+        
+        let result: serde_json::Value = response.json().await
+            .map_err(|e| AnalysisError::InvalidResponse(e.to_string()))?;
+        
+        // Parse the response
+        let elements = self.parse_omniparser_response(&result);
+        let num_elements = elements.len();
+        let num_interactive = elements.iter().filter(|e| e.state.enabled).count();
+        
+        let text_blocks: Vec<ExtractedText> = elements.iter()
+            .filter_map(|e| e.text.as_ref().map(|t| ExtractedText {
+                text: t.clone(),
+                bounds: e.bounds.clone(),
+                confidence: e.confidence,
+                is_word: !t.contains(' '),
+            }))
+            .collect();
+        
+        Ok(ScreenAnalysis {
+            elements,
+            text_blocks,
+            description: format!("OmniParser V2: {} elements ({} interactive)", num_elements, num_interactive),
+            app_context: None,
+            raw_response: Some(result.to_string()),
+            timestamp: chrono::Utc::now().timestamp(),
+        })
+    }
+    
+    async fn extract_text(&self, screenshot: &Screenshot) -> AnalysisResult<Vec<ExtractedText>> {
+        // Use analyze and extract text from elements
+        let analysis = self.analyze(screenshot, None).await?;
+        Ok(analysis.text_blocks)
+    }
+    
+    async fn find_element(&self, screenshot: &Screenshot, description: &str) -> AnalysisResult<Option<UIElement>> {
+        let analysis = self.analyze(screenshot, None).await?;
+        let desc_lower = description.to_lowercase();
+        
+        // Find best matching element
+        Ok(analysis.elements.into_iter()
+            .find(|e| e.text.as_ref()
+                .map(|t| t.to_lowercase().contains(&desc_lower))
+                .unwrap_or(false)))
+    }
+    
+    async fn ask(&self, screenshot: &Screenshot, _question: &str) -> AnalysisResult<String> {
+        // OmniParser is primarily for element detection, not Q&A
+        // Fall back to describing what was detected
+        let analysis = self.analyze(screenshot, None).await?;
+        
+        Ok(format!(
+            "OmniParser detected {} UI elements. {} are interactive.",
+            analysis.elements.len(),
+            analysis.elements.iter().filter(|e| e.state.enabled).count()
+        ))
+    }
+}
+
 pub fn create_analyzer(config: &VisionConfig) -> AnalysisResult<Box<dyn VisionAnalyzer>> {
     match config.model {
         VisionModel::Gpt4Vision => Ok(Box::new(Gpt4VisionAnalyzer::new(config)?)),
@@ -1049,6 +1220,7 @@ pub fn create_analyzer(config: &VisionConfig) -> AnalysisResult<Box<dyn VisionAn
                 "Local vision model not yet implemented".to_string(),
             ))
         }
+        VisionModel::OmniParser => Ok(Box::new(OmniParserAnalyzer::new(config)?)),
     }
 }
 

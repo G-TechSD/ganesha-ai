@@ -23,6 +23,8 @@ pub enum VisionModel {
     GeminiVision,
     /// Local model (e.g., LLaVA)
     Local,
+    /// Microsoft OmniParser for UI element detection
+    OmniParser,
 }
 
 impl VisionModel {
@@ -33,6 +35,7 @@ impl VisionModel {
             Self::ClaudeVision => "claude-3-5-sonnet-latest",
             Self::GeminiVision => "gemini-pro-vision",
             Self::Local => "local",
+            Self::OmniParser => "omniparser-v2",
         }
     }
 }
@@ -342,6 +345,7 @@ impl VisionConfig {
             VisionModel::ClaudeVision => "ANTHROPIC_API_KEY",
             VisionModel::GeminiVision => "GOOGLE_API_KEY",
             VisionModel::Local => "LOCAL_VISION_API_KEY",
+            VisionModel::OmniParser => "OMNIPARSER_API_KEY",
         }
         .to_string();
         self
