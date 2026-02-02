@@ -127,6 +127,10 @@ pub mod app_knowledge;
 // Orchestrator - Mini-Me sub-agent architecture for long-horizon tasks
 pub mod orchestrator;
 
+// VLA (Vision-Language-Action) - Closed-loop GUI automation
+#[cfg(all(feature = "vision", feature = "input"))]
+pub mod vla;
+
 pub use core::config::{
     ModelTier, ProviderConfig, GaneshaConfig, ConfigManager,
     ProviderEndpoint, ProviderType, AuthMethod, ModelInfo, OAuth2Config,
@@ -148,6 +152,10 @@ pub use orchestrator::rollback::{RollbackManager, RollbackResult, RollbackRecord
 pub use orchestrator::scheduler::{Scheduler, ScheduledTask, Schedule, TaskAction};
 pub use orchestrator::vision::{VisionAnalyzer, ScreenAnalysis, VisionConfig};
 pub use orchestrator::providers::ProviderManager;
+
+// VLA exports
+#[cfg(all(feature = "vision", feature = "input"))]
+pub use vla::{VlaLoop, VlaGoal, VlaStatus, VlaConfig, PlannedAction, ActionType, ActionResult};
 
 // TUI
 pub use tui::{TuiApp, ChatMessage, MessageRole, StatusBar, run_tui};

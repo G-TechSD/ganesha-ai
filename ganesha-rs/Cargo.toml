@@ -132,9 +132,10 @@ optional = true
 # version = "0.25"
 # optional = true
 
-[dependencies.base64]
-version = "0.21"
-optional = true
+# base64 is provided via base64_lib alias (always available)
+# [dependencies.base64]
+# version = "0.21"
+# optional = true
 
 [dependencies.png]
 version = "0.17"
@@ -182,7 +183,7 @@ daemon = []
 
 # DANGEROUS: Enable computer vision (screenshots, screen reading)
 # Requires explicit opt-in: --features vision
-vision = ["screenshots", "base64", "xcap", "png"]
+vision = ["screenshots", "xcap", "png"]
 
 # DANGEROUS: Enable input control (mouse, keyboard, scroll)
 # Requires explicit opt-in: --features input
@@ -199,4 +200,4 @@ voice = ["cpal", "rubato", "hound", "tokio-tungstenite", "webrtc-vad"]
 
 # Full Ganesha experience (eyes, hands, ears, mouth)
 full = ["computer-use", "voice"]
-base64 = ["dep:base64"]
+# base64 = ["dep:base64"]  # Removed - using base64_lib instead

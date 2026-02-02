@@ -24,6 +24,12 @@ mod voice;
 mod websearch;
 mod workflow;
 
+// Computer use modules (must match lib.rs feature gates)
+#[cfg(any(feature = "vision", feature = "input", feature = "computer-use"))]
+mod vision;
+#[cfg(any(feature = "vision", feature = "input", feature = "computer-use"))]
+mod input;
+
 use clap::{Parser, Subcommand};
 use cli::{print_banner, print_error, print_info, print_warning, print_action_summary, print_success, AutoConsent, CliConsent};
 use console::style;

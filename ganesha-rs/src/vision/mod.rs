@@ -6,7 +6,7 @@
 //! This enables Ganesha to "see" the screen for GUI automation tasks.
 
 #[cfg(feature = "vision")]
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use base64_lib::{engine::general_purpose::STANDARD as BASE64, Engine};
 #[cfg(feature = "vision")]
 use xcap::Monitor;
 #[cfg(feature = "vision")]

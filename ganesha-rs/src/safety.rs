@@ -10,8 +10,7 @@
 use std::collections::HashSet;
 use regex::Regex;
 
-#[cfg(feature = "base64")]
-use base64::Engine;
+use base64_lib::Engine;
 
 /// Safety verdict for an action
 #[derive(Debug, Clone, PartialEq)]
@@ -332,7 +331,6 @@ impl SafetyFilter {
     }
 
     /// Check for Base64 encoded dangerous commands
-    #[cfg(feature = "base64")]
     fn check_base64_encoded(&self, context: &str) -> Option<(u32, String)> {
         // Look for base64-like patterns (alphanumeric + /+ with = padding)
         let base64_pattern = Regex::new(r"[A-Za-z0-9+/]{8,}={0,2}").ok()?;
@@ -340,7 +338,7 @@ impl SafetyFilter {
         for cap in base64_pattern.find_iter(context) {
             let potential_b64 = cap.as_str();
             // Try to decode
-            if let Ok(decoded_bytes) = base64::engine::general_purpose::STANDARD.decode(potential_b64) {
+            if let Ok(decoded_bytes) = base64_lib::engine::general_purpose::STANDARD.decode(potential_b64) {
                 if let Ok(decoded_str) = String::from_utf8(decoded_bytes) {
                     let decoded_lower = decoded_str.to_lowercase();
                     let dangerous = [
@@ -355,12 +353,6 @@ impl SafetyFilter {
                 }
             }
         }
-        None
-    }
-
-    /// Fallback when base64 feature is not enabled
-    #[cfg(not(feature = "base64"))]
-    fn check_base64_encoded(&self, _context: &str) -> Option<(u32, String)> {
         None
     }
 
