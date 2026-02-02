@@ -180,6 +180,27 @@ enum Commands {
         #[arg(default_value = "status")]
         action: String,
     },
+    /// GUI automation via Vision-Language-Action loop (requires --features vision,input)
+    #[cfg(all(feature = "vision", feature = "input"))]
+    Vla {
+        /// Goal to accomplish via GUI automation
+        goal: String,
+        /// Success criteria (comma-separated)
+        #[arg(short, long)]
+        criteria: Option<String>,
+        /// Maximum actions to try
+        #[arg(short, long, default_value = "20")]
+        max_actions: usize,
+        /// Timeout in seconds
+        #[arg(short, long, default_value = "300")]
+        timeout: u64,
+        /// Save screenshots for debugging
+        #[arg(long)]
+        save_screenshots: bool,
+        /// Target app/window (optional)
+        #[arg(long)]
+        app: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -252,6 +273,11 @@ async fn main() {
             }
             Commands::Voice { action } => {
                 handle_voice(&action).await;
+                return;
+            }
+            #[cfg(all(feature = "vision", feature = "input"))]
+            Commands::Vla { goal, criteria, max_actions, timeout, save_screenshots, app } => {
+                handle_vla(goal, criteria, max_actions, timeout, save_screenshots, app).await;
                 return;
             }
         }
@@ -2858,6 +2884,91 @@ async fn handle_voice(_action: &str) {
                 print_error(&format!("Unknown action: {}", action));
                 println!("Available actions: status, enable, disable, listen");
             }
+        }
+    }
+}
+
+/// Handle VLA (Vision-Language-Action) GUI automation command
+#[cfg(all(feature = "vision", feature = "input"))]
+async fn handle_vla(
+    goal: String,
+    criteria: Option<String>,
+    max_actions: usize,
+    timeout: u64,
+    save_screenshots: bool,
+    app: Option<String>,
+) {
+    use vla::{VlaLoop, VlaGoal, VlaConfig};
+    use std::time::Duration;
+
+    println!("{} VLA (Vision-Language-Action) GUI Automation", style("🎯").cyan());
+    println!("{}", style("━".repeat(50)).dim());
+    println!("Goal: {}", style(&goal).green().bold());
+    
+    let success_criteria: Vec<String> = criteria
+        .map(|c| c.split(',').map(|s| s.trim().to_string()).collect())
+        .unwrap_or_else(|| vec!["goal completed".to_string()]);
+    
+    println!("Criteria: {}", style(success_criteria.join(", ")).yellow());
+    println!("Max actions: {}", max_actions);
+    println!("Timeout: {}s", timeout);
+    if let Some(ref a) = app {
+        println!("Target app: {}", a);
+    }
+    println!("{}", style("━".repeat(50)).dim());
+
+    // Build VLA config
+    let mut config = VlaConfig::default();
+    config.save_screenshots = save_screenshots;
+    if save_screenshots {
+        config.screenshot_dir = format!("/tmp/ganesha-vla-{}", chrono::Utc::now().timestamp());
+        println!("Screenshots will be saved to: {}", config.screenshot_dir);
+    }
+
+    // Build VLA goal
+    let vla_goal = VlaGoal {
+        objective: goal,
+        success_criteria,
+        max_actions,
+        timeout: Duration::from_secs(timeout),
+        target_app: app,
+    };
+
+    // Create and run VLA loop
+    let vla = VlaLoop::new(config);
+    
+    println!("\n{} Starting VLA loop...", style("▶").green());
+    println!("{} Press Ctrl+C to stop\n", style("ℹ").blue());
+
+    match vla.execute_goal(vla_goal).await {
+        Ok(status) => {
+            println!("\n{}", style("━".repeat(50)).dim());
+            if status.success {
+                println!("{} Goal achieved!", style("✓").green().bold());
+            } else {
+                println!("{} Goal not achieved", style("✗").red());
+                if let Some(error) = status.error {
+                    println!("Error: {}", error);
+                }
+            }
+            println!("Actions taken: {}", status.actions_taken);
+            println!("Final state: {}", status.current_state);
+            
+            if !status.action_history.is_empty() {
+                println!("\nAction history:");
+                for (i, result) in status.action_history.iter().enumerate() {
+                    let icon = if result.success { "✓" } else { "✗" };
+                    println!("  {}. {} {} ({}ms)", 
+                        i + 1,
+                        if result.success { style(icon).green() } else { style(icon).red() },
+                        result.action.intent,
+                        result.duration_ms
+                    );
+                }
+            }
+        }
+        Err(e) => {
+            println!("{} VLA error: {}", style("✗").red(), e);
         }
     }
 }
