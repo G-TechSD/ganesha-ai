@@ -133,12 +133,12 @@ impl Default for VlaConfig {
     fn default() -> Self {
         Self {
             vision_endpoint: "http://192.168.245.155:1234/v1/chat/completions".into(),
-            vision_model: "ministral-3-14b-reasoning".into(),
+            vision_model: "qwen/qwen2.5-vl-7b".into(),
             planner_endpoint: "http://192.168.245.155:1234/v1/chat/completions".into(),
             planner_model: "gpt-oss-20b".into(),
             action_delay: Duration::from_millis(200),
-            capture_width: 1280,
-            capture_height: 720,
+            capture_width: 640,
+            capture_height: 360,
             max_retries: 3,
             save_screenshots: false,
             screenshot_dir: "/tmp/ganesha-vla".into(),
