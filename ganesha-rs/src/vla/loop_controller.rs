@@ -419,11 +419,60 @@ impl VlaLoop {
                 }
             }
             ActionType::Drag => {
-                // Would need start and end points, simplified for now
-                if let Some(ref target) = action.target {
-                    self.input
-                        .mouse_move(target.x, target.y)
-                        .map_err(|e| VlaError::InputError(e.to_string()))?;
+                // Drag from drag_start to target (or just click-drag at target if no start)
+                let (start_x, start_y) = if let Some(ref start) = action.drag_start {
+                    (start.x, start.y)
+                } else if let Some(ref target) = action.target {
+                    // If no explicit start, start slightly to the left of target
+                    (target.x - 50, target.y)
+                } else {
+                    return Ok(());
+                };
+
+                let (end_x, end_y) = if let Some(ref target) = action.target {
+                    (target.x, target.y)
+                } else {
+                    return Ok(());
+                };
+
+                // Move to start position
+                self.input
+                    .mouse_move(start_x, start_y)
+                    .map_err(|e| VlaError::InputError(e.to_string()))?;
+                tokio::time::sleep(Duration::from_millis(50)).await;
+
+                // Mouse button down
+                self.input
+                    .key_down("--mousebutton-left--")
+                    .ok(); // Fallback below via xdotool
+
+                // Use xdotool for reliable mouse drag on Linux
+                #[cfg(target_os = "linux")]
+                {
+                    let _ = std::process::Command::new("xdotool")
+                        .arg("mousedown")
+                        .arg("1")
+                        .status();
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+
+                    // Move in steps for smoother painting
+                    let steps = 10;
+                    for i in 1..=steps {
+                        let frac = i as f64 / steps as f64;
+                        let ix = start_x as f64 + (end_x as f64 - start_x as f64) * frac;
+                        let iy = start_y as f64 + (end_y as f64 - start_y as f64) * frac;
+                        let _ = std::process::Command::new("xdotool")
+                            .arg("mousemove")
+                            .arg(format!("{}", ix as i32))
+                            .arg(format!("{}", iy as i32))
+                            .status();
+                        tokio::time::sleep(Duration::from_millis(20)).await;
+                    }
+
+                    let _ = std::process::Command::new("xdotool")
+                        .arg("mouseup")
+                        .arg("1")
+                        .status();
                 }
             }
         }

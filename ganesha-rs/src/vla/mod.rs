@@ -30,6 +30,8 @@ pub struct PlannedAction {
     pub text: Option<String>,
     /// Key combination (if key action)
     pub keys: Option<String>,
+    /// Start point for drag actions (target is the end point)
+    pub drag_start: Option<ActionTarget>,
     /// Confidence in this action (0.0-1.0)
     pub confidence: f32,
     /// Expected result description

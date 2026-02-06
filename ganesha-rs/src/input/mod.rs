@@ -351,6 +351,66 @@ impl InputController {
         Ok(())
     }
 
+    /// Normalize key names from LLM output to X11 keysym names for xdotool
+    #[cfg(all(feature = "input", target_os = "linux"))]
+    fn normalize_key_for_xdotool(key: &str) -> String {
+        let lower = key.to_lowercase();
+        match lower.as_str() {
+            "enter" | "return" => "Return".to_string(),
+            "escape" | "esc" => "Escape".to_string(),
+            "tab" => "Tab".to_string(),
+            "space" => "space".to_string(),
+            "backspace" | "back" => "BackSpace".to_string(),
+            "delete" | "del" => "Delete".to_string(),
+            "insert" | "ins" => "Insert".to_string(),
+            "up" | "uparrow" => "Up".to_string(),
+            "down" | "downarrow" => "Down".to_string(),
+            "left" | "leftarrow" => "Left".to_string(),
+            "right" | "rightarrow" => "Right".to_string(),
+            "home" => "Home".to_string(),
+            "end" => "End".to_string(),
+            "pageup" | "pgup" => "Page_Up".to_string(),
+            "pagedown" | "pgdn" => "Page_Down".to_string(),
+            "f1" => "F1".to_string(),
+            "f2" => "F2".to_string(),
+            "f3" => "F3".to_string(),
+            "f4" => "F4".to_string(),
+            "f5" => "F5".to_string(),
+            "f6" => "F6".to_string(),
+            "f7" => "F7".to_string(),
+            "f8" => "F8".to_string(),
+            "f9" => "F9".to_string(),
+            "f10" => "F10".to_string(),
+            "f11" => "F11".to_string(),
+            "f12" => "F12".to_string(),
+            "numpad_0" | "kp_0" => "KP_0".to_string(),
+            "numpad_1" | "kp_1" => "KP_1".to_string(),
+            "numpad_2" | "kp_2" => "KP_2".to_string(),
+            "numpad_3" | "kp_3" => "KP_3".to_string(),
+            "numpad_4" | "kp_4" => "KP_4".to_string(),
+            "numpad_5" | "kp_5" => "KP_5".to_string(),
+            "numpad_6" | "kp_6" => "KP_6".to_string(),
+            "numpad_7" | "kp_7" => "KP_7".to_string(),
+            "numpad_8" | "kp_8" => "KP_8".to_string(),
+            "numpad_9" | "kp_9" => "KP_9".to_string(),
+            "ctrl" | "control" => "ctrl".to_string(),
+            "alt" => "alt".to_string(),
+            "shift" => "shift".to_string(),
+            "super" | "win" | "meta" | "cmd" | "command" => "super".to_string(),
+            _ => key.to_string(),
+        }
+    }
+
+    /// Normalize a combo string like "ctrl+enter" to "ctrl+Return" for xdotool
+    #[cfg(all(feature = "input", target_os = "linux"))]
+    fn normalize_combo_for_xdotool(combo: &str) -> String {
+        combo
+            .split('+')
+            .map(|part| Self::normalize_key_for_xdotool(part.trim()))
+            .collect::<Vec<_>>()
+            .join("+")
+    }
+
     /// Press and release a key
     #[cfg(feature = "input")]
     pub fn key_press(&self, key: &str) -> Result<(), InputError> {
@@ -364,10 +424,11 @@ impl InputController {
         // On Linux, prefer xdotool for single key presses (more reliable with X11/XAUTHORITY)
         #[cfg(target_os = "linux")]
         {
+            let xkey = Self::normalize_key_for_xdotool(key);
             let status = std::process::Command::new("xdotool")
                 .arg("key")
                 .arg("--clearmodifiers")
-                .arg(key)
+                .arg(&xkey)
                 .status();
             match status {
                 Ok(s) if s.success() => {
@@ -440,10 +501,11 @@ impl InputController {
         // On Linux, prefer xdotool for key combos (more reliable with X11/XAUTHORITY)
         #[cfg(target_os = "linux")]
         {
+            let xcombo = Self::normalize_combo_for_xdotool(combo);
             let status = std::process::Command::new("xdotool")
                 .arg("key")
                 .arg("--clearmodifiers")
-                .arg(combo)
+                .arg(&xcombo)
                 .status();
             match status {
                 Ok(s) if s.success() => {

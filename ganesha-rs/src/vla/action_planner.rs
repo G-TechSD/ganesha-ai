@@ -73,11 +73,14 @@ Respond ONLY with valid JSON matching this schema:
   "intent": "what this action accomplishes",
   "action_type": "click|double_click|right_click|type|key_press|scroll|wait|hover|drag",
   "target": {"description": "element description", "x": 0, "y": 0},
+  "drag_start": {"description": "start point for drag", "x": 0, "y": 0},
   "text": "text to type if action_type is type",
   "keys": "key combo if action_type is key_press (e.g., 'ctrl+s')",
   "confidence": 0.9,
   "expected_result": "what should happen after this action"
 }
+
+For DRAG actions: "drag_start" is where the mouse button goes DOWN, "target" is where it goes UP. This creates a brush stroke from drag_start to target in paint applications.
 
 If the goal appears achieved, respond with: {"done": true, "reason": "why goal is complete"}
 If stuck with no viable action, respond with: {"stuck": true, "reason": "why we can't proceed"}
@@ -297,10 +300,23 @@ What is the SINGLE next action to achieve the goal?"#,
             None
         };
 
+        let drag_start = if let Some(ds) = parsed.get("drag_start") {
+            Some(ActionTarget {
+                description: ds["description"].as_str().unwrap_or("drag start").to_string(),
+                x: ds["x"].as_i64().unwrap_or(640) as i32,
+                y: ds["y"].as_i64().unwrap_or(360) as i32,
+                bbox: None,
+                location_confidence: 0.5,
+            })
+        } else {
+            None
+        };
+
         Ok(Some(PlannedAction {
             intent: parsed["intent"].as_str().unwrap_or("").to_string(),
             action_type,
             target,
+            drag_start,
             text: parsed["text"].as_str().map(|s| s.to_string()),
             keys: parsed["keys"].as_str().map(|s| s.to_string()),
             confidence: parsed["confidence"].as_f64().unwrap_or(0.5) as f32,
