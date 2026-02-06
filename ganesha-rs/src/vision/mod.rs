@@ -189,6 +189,22 @@ impl VisionController {
     pub const MIN_SAFE_WIDTH: u32 = 640;
     pub const MIN_SAFE_HEIGHT: u32 = 360;
 
+    /// Get primary screen dimensions
+    #[cfg(feature = "vision")]
+    pub fn get_screen_size(&self) -> Result<(u32, u32), VisionError> {
+        let monitors = Monitor::all().map_err(|e| VisionError::CaptureError(e.to_string()))?;
+        let monitor = monitors
+            .first()
+            .ok_or(VisionError::InvalidMonitor(0))?;
+        Ok((monitor.width(), monitor.height()))
+    }
+
+    /// Get primary screen dimensions (stub when vision feature disabled)
+    #[cfg(not(feature = "vision"))]
+    pub fn get_screen_size(&self) -> Result<(u32, u32), VisionError> {
+        Ok((1024, 768)) // Default fallback
+    }
+
     /// Capture screenshot scaled to specific dimensions
     #[cfg(feature = "vision")]
     pub fn capture_screen_scaled(&self, target_width: u32, target_height: u32) -> Result<Screenshot, VisionError> {
@@ -223,10 +239,13 @@ impl VisionController {
             xcap::image::imageops::FilterType::Nearest
         );
 
-        // Convert to PNG and base64
+        // Convert RGBA to RGB (JPEG doesn't support alpha channel)
+        let rgb_image: xcap::image::RgbImage = xcap::image::DynamicImage::ImageRgba8(resized).to_rgb8();
+
+        // Convert to JPEG for smaller payloads (better for local vision models)
         let mut buffer = Cursor::new(Vec::new());
-        resized
-            .write_to(&mut buffer, xcap::image::ImageFormat::Png)
+        rgb_image
+            .write_to(&mut buffer, xcap::image::ImageFormat::Jpeg)
             .map_err(|e| VisionError::EncodingError(e.to_string()))?;
 
         let data = BASE64.encode(buffer.into_inner());

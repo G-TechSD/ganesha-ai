@@ -11,12 +11,21 @@ pub struct ElementLocator {
     endpoint: String,
     model: String,
     client: reqwest::Client,
+    is_anthropic: bool,
+    api_key: Option<String>,
 }
 
 impl ElementLocator {
     pub fn new(endpoint: String, model: String) -> Self {
+        let is_anthropic = endpoint.contains("anthropic.com");
+        let api_key = if is_anthropic {
+            std::env::var("ANTHROPIC_API_KEY").ok()
+        } else {
+            None
+        };
+
         let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(30))
+            .timeout(Duration::from_secs(60))
             .build()
             .expect("Failed to create HTTP client");
 
@@ -24,6 +33,8 @@ impl ElementLocator {
             endpoint,
             model,
             client,
+            is_anthropic,
+            api_key,
         }
     }
 
@@ -37,7 +48,10 @@ impl ElementLocator {
     ) -> Result<(i32, i32, f32), Box<dyn std::error::Error + Send + Sync>> {
         let system_prompt = r#"You are a UI element locator. Given an image and element description, find the element's center coordinates.
 
-The image is 1280x720 pixels. Respond ONLY with JSON:
+SYSTEM: Ubuntu 24.04 GNOME. Image is 1280x720 pixels.
+IMPORTANT: Left dock occupies x=0-50. Main content starts at x~55.
+
+Respond ONLY with JSON:
 {"x": <center_x>, "y": <center_y>, "confidence": <0.0-1.0>, "found": true}
 
 If element not found:
@@ -46,38 +60,73 @@ If element not found:
 Be precise. Consider:
 - Buttons are usually rectangular, click center
 - Text fields: click left side for cursor
-- Checkboxes/radios: click the box itself
-- Menu items: click center of text
-- Icons: click center of icon"#;
+- Menu items: click center of text (usually x=50-200 for dropdown menus)
+- Application windows typically start at x~30 due to dock
+- Top panel is at y=0-15"#;
 
-        let user_content = json!([
-            {
-                "type": "text",
-                "text": format!("Find the element: {}\n\nReturn coordinates in 1280x720 space.", element_description)
-            },
-            {
-                "type": "image_url",
-                "image_url": {
-                    "url": format!("data:image/png;base64,{}", base64_image)
+        let response = if self.is_anthropic {
+            // Anthropic API format with vision
+            let user_content = json!([
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/jpeg",
+                        "data": base64_image
+                    }
+                },
+                {
+                    "type": "text",
+                    "text": format!("Find the element: {}\n\nReturn coordinates in 1280x720 space.", element_description)
                 }
+            ]);
+
+            let request = json!({
+                "model": self.model,
+                "max_tokens": 1500,
+                "system": system_prompt,
+                "messages": [
+                    {"role": "user", "content": user_content}
+                ]
+            });
+
+            let mut req = self.client.post(&self.endpoint).json(&request);
+            if let Some(ref key) = self.api_key {
+                req = req.header("x-api-key", key)
+                    .header("anthropic-version", "2023-06-01");
             }
-        ]);
+            req.send().await?
+        } else {
+            // OpenAI-compatible format
+            let user_content = json!([
+                {
+                    "type": "text",
+                    "text": format!("Find the element: {}\n\nReturn coordinates in 1280x720 space.", element_description)
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": format!("data:image/jpeg;base64,{}", base64_image)
+                    }
+                }
+            ]);
 
-        let request = json!({
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content}
-            ],
-            "temperature": 0.1,
-            "max_tokens": 100
-        });
+            let request = json!({
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content}
+                ],
+                "temperature": 0.1,
+                "max_tokens": 1500
+            });
 
-        let response = self.client
-            .post(&self.endpoint)
-            .json(&request)
-            .send()
-            .await?;
+            self.client
+                .post(&self.endpoint)
+                .json(&request)
+                .send()
+                .await?
+        };
 
         if !response.status().is_success() {
             let status = response.status();
@@ -86,9 +135,19 @@ Be precise. Consider:
         }
 
         let json: serde_json::Value = response.json().await?;
-        let content = json["choices"][0]["message"]["content"]
-            .as_str()
-            .unwrap_or("{}");
+        let content = if self.is_anthropic {
+            // Anthropic response format
+            json["content"][0]["text"].as_str().unwrap_or("{}")
+        } else {
+            // OpenAI response format - check both content and reasoning_content
+            let msg = &json["choices"][0]["message"];
+            let c = msg["content"].as_str().unwrap_or("");
+            if c.is_empty() {
+                msg["reasoning_content"].as_str().unwrap_or("{}")
+            } else {
+                c
+            }
+        };
 
         self.parse_location(content, element_description)
     }
@@ -126,40 +185,75 @@ Respond ONLY with JSON array:
 ]
 
 Rules:
-- Coordinates in 1280x720 space
+- Coordinates in 1280x720 space (image dimensions)
 - Include clickable buttons, links, inputs, checkboxes, tabs, icons
 - x,y is top-left corner; w,h is size
 - Skip decorative/non-interactive elements
 - Max 20 elements, prioritize by visibility/importance"#;
 
-        let user_content = json!([
-            {
-                "type": "text",
-                "text": "List all interactive elements on this screen."
-            },
-            {
-                "type": "image_url",
-                "image_url": {
-                    "url": format!("data:image/png;base64,{}", base64_image)
+        let response = if self.is_anthropic {
+            // Anthropic API format
+            let user_content = json!([
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/jpeg",
+                        "data": base64_image
+                    }
+                },
+                {
+                    "type": "text",
+                    "text": "List all interactive elements on this screen."
                 }
+            ]);
+
+            let request = json!({
+                "model": self.model,
+                "max_tokens": 2000,
+                "system": system_prompt,
+                "messages": [
+                    {"role": "user", "content": user_content}
+                ]
+            });
+
+            let mut req = self.client.post(&self.endpoint).json(&request);
+            if let Some(ref key) = self.api_key {
+                req = req.header("x-api-key", key)
+                    .header("anthropic-version", "2023-06-01");
             }
-        ]);
+            req.send().await?
+        } else {
+            // OpenAI-compatible format
+            let user_content = json!([
+                {
+                    "type": "text",
+                    "text": "List all interactive elements on this screen."
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": format!("data:image/jpeg;base64,{}", base64_image)
+                    }
+                }
+            ]);
 
-        let request = json!({
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content}
-            ],
-            "temperature": 0.1,
-            "max_tokens": 1000
-        });
+            let request = json!({
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content}
+                ],
+                "temperature": 0.1,
+                "max_tokens": 2000
+            });
 
-        let response = self.client
-            .post(&self.endpoint)
-            .json(&request)
-            .send()
-            .await?;
+            self.client
+                .post(&self.endpoint)
+                .json(&request)
+                .send()
+                .await?
+        };
 
         if !response.status().is_success() {
             let status = response.status();
@@ -168,9 +262,18 @@ Rules:
         }
 
         let json: serde_json::Value = response.json().await?;
-        let content = json["choices"][0]["message"]["content"]
-            .as_str()
-            .unwrap_or("[]");
+        let content = if self.is_anthropic {
+            json["content"][0]["text"].as_str().unwrap_or("[]")
+        } else {
+            // Check both content and reasoning_content for reasoning models
+            let msg = &json["choices"][0]["message"];
+            let c = msg["content"].as_str().unwrap_or("");
+            if c.is_empty() {
+                msg["reasoning_content"].as_str().unwrap_or("[]")
+            } else {
+                c
+            }
+        };
 
         self.parse_interactive_elements(content)
     }

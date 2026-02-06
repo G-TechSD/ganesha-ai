@@ -2898,7 +2898,7 @@ async fn handle_vla(
     save_screenshots: bool,
     app: Option<String>,
 ) {
-    use vla::{VlaLoop, VlaGoal, VlaConfig};
+    use ganesha::vla::{VlaLoop, VlaGoal, VlaConfig};
     use std::time::Duration;
 
     println!("{} VLA (Vision-Language-Action) GUI Automation", style("🎯").cyan());

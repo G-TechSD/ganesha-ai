@@ -3,6 +3,7 @@
 //! The closed-loop system that runs: capture → analyze → plan → act → verify
 
 use super::*;
+use super::task_db::VlaTaskDb;
 use crate::input::{InputController, MouseButton};
 use crate::vision::VisionController;
 use crate::orchestrator::vision::{VisionAnalyzer, VisionConfig};
@@ -20,6 +21,8 @@ pub struct VlaLoop {
     analyzer: VisionAnalyzer,
     planner: ActionPlanner,
     locator: ElementLocator,
+    /// SQLite task tracker for long-horizon context
+    task_db: Option<VlaTaskDb>,
     /// Emergency stop flag
     stop_flag: Arc<AtomicBool>,
     /// Current status
@@ -31,8 +34,11 @@ impl VlaLoop {
         let vision_config = VisionConfig {
             endpoint: config.vision_endpoint.clone(),
             model: config.vision_model.clone(),
-            timeout: Duration::from_secs(30),
+            timeout: Duration::from_secs(90),
         };
+
+        // Open task DB - non-fatal if it fails
+        let task_db = VlaTaskDb::open().ok();
 
         Self {
             vision: VisionController::new(),
@@ -46,6 +52,7 @@ impl VlaLoop {
                 config.vision_endpoint.clone(),
                 config.vision_model.clone(),
             ),
+            task_db,
             config,
             stop_flag: Arc::new(AtomicBool::new(false)),
             status: Arc::new(RwLock::new(None)),
@@ -78,6 +85,10 @@ impl VlaLoop {
         // Reset stop flag
         self.stop_flag.store(false, Ordering::SeqCst);
 
+        // Start task in DB
+        let task_id = self.task_db.as_ref()
+            .and_then(|db| db.start_task(&goal.objective, &goal.success_criteria).ok());
+
         // Initialize status
         let mut status = VlaStatus {
             goal: goal.clone(),
@@ -95,8 +106,10 @@ impl VlaLoop {
         self.input.enable().map_err(|e| VlaError::InputError(e.to_string()))?;
 
         let start_time = Instant::now();
+        let mut prev_screen_summary = String::new();
 
         // Main VLA loop
+        // Architecture: CAPTURE → ANALYZE → PLAN (with context from DB) → ACT → VERIFY → RECORD
         while status.actions_taken < goal.max_actions {
             // Check timeout
             if start_time.elapsed() > goal.timeout {
@@ -110,44 +123,65 @@ impl VlaLoop {
                 break;
             }
 
-            // 1. CAPTURE - Get current screen state
+            // 1. CAPTURE
             let screenshot = self.vision
                 .capture_screen_scaled(self.config.capture_width, self.config.capture_height)
                 .map_err(|e| VlaError::VisionError(e.to_string()))?;
 
-            // Save screenshot if configured
             if self.config.save_screenshots {
                 self.save_screenshot(&screenshot.data, status.actions_taken).await;
             }
 
-            // 2. ANALYZE - Understand what's on screen
+            // 2. ANALYZE - Get screen state
             let analysis = self.analyzer
                 .analyze_image(&screenshot.data)
                 .await
-                .map_err(|e| VlaError::AnalysisError(e.to_string()))?;
+                .ok();
 
-            status.current_state = format!(
-                "App: {}, State: {:?}, Elements: {}",
-                analysis.app,
-                analysis.state,
-                analysis.elements.len()
-            );
+            let screen_summary = if let Some(ref a) = analysis {
+                let summary = format!("App: {}, Title: {}, State: {:?}, Elements: {}, Text: {}",
+                    a.app, a.title, a.state, a.elements.len(),
+                    a.text.join("; "));
+                status.current_state = summary.clone();
+                summary
+            } else {
+                "Unknown".into()
+            };
 
             // 3. CHECK - Are we done?
-            let goal_achieved = self.check_success_criteria(&goal, &analysis).await?;
-            if goal_achieved {
-                status.success = true;
-                status.completed = true;
-                break;
+            if let Some(ref a) = analysis {
+                let goal_achieved = self.check_success_criteria(&goal, a).await?;
+                if goal_achieved {
+                    status.success = true;
+                    status.completed = true;
+                    break;
+                }
             }
 
-            // 4. PLAN - Decide what action to take
+            let dummy_analysis = crate::orchestrator::vision::ScreenAnalysis {
+                app: "Unknown".into(),
+                title: "".into(),
+                elements: vec![],
+                dialogs: vec![],
+                text: vec![],
+                state: crate::orchestrator::vision::ScreenState::Unknown,
+                confidence: 0.0,
+            };
+            let analysis_ref = analysis.as_ref().unwrap_or(&dummy_analysis);
+
+            // 4. GET DB CONTEXT - past actions and known failures for the planner
+            let db_context = if let (Some(db), Some(ref tid)) = (&self.task_db, &task_id) {
+                db.get_planner_context(tid, &analysis_ref.app).unwrap_or_default()
+            } else {
+                String::new()
+            };
+
+            // 5. PLAN - with image + DB context (past actions, known failures)
             let action = self.planner
-                .plan_next_action(&goal, &analysis, &status.action_history)
+                .plan_next_action(&goal, analysis_ref, &status.action_history, Some(&screenshot.data), &db_context)
                 .await
                 .map_err(|e| VlaError::PlanningError(e.to_string()))?;
 
-            // If planner says we're done or stuck
             if action.is_none() {
                 status.current_state = "Planner indicates goal achieved or no viable actions".into();
                 status.completed = true;
@@ -156,58 +190,124 @@ impl VlaLoop {
 
             let mut action = action.unwrap();
 
-            // 5. LOCATE - Find exact coordinates for the target
+            // 6. SCALE coordinates
             if let Some(ref mut target) = action.target {
-                let located = self.locator
-                    .locate_element(&screenshot.data, &target.description)
-                    .await;
-
-                if let Ok((x, y, conf)) = located {
-                    target.x = x;
-                    target.y = y;
-                    target.location_confidence = conf;
-                }
+                let (screen_w, screen_h) = self.vision.get_screen_size().unwrap_or((1920, 1080));
+                let scale_x = screen_w as f32 / self.config.capture_width as f32;
+                let scale_y = screen_h as f32 / self.config.capture_height as f32;
+                target.x = (target.x as f32 * scale_x) as i32;
+                target.y = (target.y as f32 * scale_y) as i32;
             }
 
-            // 6. ACT - Execute the action
+            // 7. RECORD action start in DB
+            let db_action_id = if let (Some(db), Some(ref tid)) = (&self.task_db, &task_id) {
+                db.record_action_start(
+                    tid,
+                    status.actions_taken,
+                    &action.intent,
+                    &format!("{:?}", action.action_type),
+                    action.target.as_ref().map(|t| t.description.as_str()),
+                    action.target.as_ref().map(|t| t.x),
+                    action.target.as_ref().map(|t| t.y),
+                    action.text.as_deref(),
+                    action.keys.as_deref(),
+                    action.confidence,
+                    &action.expected_result,
+                    &screen_summary,
+                ).ok()
+            } else {
+                None
+            };
+
+            // 8. ACT
             let action_start = Instant::now();
             let exec_result = self.execute_action(&action).await;
             let action_duration = action_start.elapsed().as_millis() as u64;
 
-            // 7. WAIT - Give UI time to respond
+            // 9. WAIT for UI
             tokio::time::sleep(self.config.action_delay).await;
 
-            // 8. VERIFY - Check if action had expected effect
+            // 10. VERIFY - capture after state
             let verify_screenshot = self.vision
                 .capture_screen_scaled(self.config.capture_width, self.config.capture_height)
-                .map_err(|e| VlaError::VisionError(e.to_string()))?;
-
-            let verify_analysis = self.analyzer
-                .analyze_image(&verify_screenshot.data)
-                .await
                 .ok();
 
-            let expected_achieved = if let Some(ref analysis) = verify_analysis {
-                // Simple verification: check if state changed as expected
-                self.verify_expected_result(&action, analysis).await
+            let verify_analysis = if let Some(ref vs) = verify_screenshot {
+                self.analyzer.analyze_image(&vs.data).await.ok()
+            } else {
+                None
+            };
+
+            let after_summary = if let Some(ref a) = verify_analysis {
+                format!("App: {}, Title: {}, State: {:?}", a.app, a.title, a.state)
+            } else {
+                "Unknown".into()
+            };
+
+            let screen_changed = after_summary != screen_summary;
+
+            let expected_achieved = if let Some(ref a) = verify_analysis {
+                self.verify_expected_result(&action, a).await
             } else {
                 false
             };
 
-            // Record action result
+            // 11. RECORD action result in DB
+            if let (Some(db), Some(aid)) = (&self.task_db, db_action_id) {
+                let _ = db.record_action_result(
+                    aid,
+                    exec_result.is_ok(),
+                    exec_result.as_ref().err().map(|e| e.to_string()).as_deref(),
+                    action_duration,
+                    &after_summary,
+                    screen_changed,
+                    expected_achieved,
+                );
+
+                // 12. DETECT AND RECORD FAILURES
+                if exec_result.is_ok() && !screen_changed {
+                    let action_desc = format!("{:?} {}", action.action_type,
+                        action.target.as_ref().map(|t| t.description.as_str()).unwrap_or(""));
+                    if let Some(ref tid) = task_id {
+                        let _ = db.record_failure(
+                            Some(tid),
+                            &screen_summary,
+                            &action_desc,
+                            "Screen did not change - action had no visible effect",
+                            &format!("Try a different approach to: {}", action.intent),
+                        );
+                    }
+                } else if exec_result.is_ok() && screen_changed && !expected_achieved {
+                    // Screen changed but not to expected state - wrong result
+                    let action_desc = format!("{:?} {}", action.action_type,
+                        action.keys.as_deref().or(action.text.as_deref())
+                            .unwrap_or(action.target.as_ref().map(|t| t.description.as_str()).unwrap_or("")));
+                    if let Some(ref tid) = task_id {
+                        let _ = db.record_failure(
+                            Some(tid),
+                            &screen_summary,
+                            &action_desc,
+                            &format!("Got: {} (not expected: {})", after_summary, action.expected_result),
+                            &format!("Avoid this approach when in: {}", screen_summary),
+                        );
+                    }
+                }
+            }
+
+            // Record in status history
             let result = ActionResult {
                 action: action.clone(),
                 success: exec_result.is_ok(),
                 error: exec_result.err().map(|e| e.to_string()),
-                screen_state: verify_analysis.map(|a| format!("{:?}", a.state)),
+                screen_state: Some(after_summary.clone()),
                 expected_achieved,
                 duration_ms: action_duration,
             };
 
             status.action_history.push(result);
             status.actions_taken += 1;
+            prev_screen_summary = after_summary;
 
-            // Update shared status
             *self.status.write().await = Some(status.clone());
         }
 
@@ -220,6 +320,15 @@ impl VlaLoop {
             if status.error.is_none() && !status.success {
                 status.error = Some("Max actions reached without achieving goal".into());
             }
+        }
+
+        // End task in DB
+        if let (Some(db), Some(ref tid)) = (&self.task_db, &task_id) {
+            let db_status = if status.success { "success" }
+                else if status.error.as_deref() == Some("Timeout exceeded") { "timeout" }
+                else if status.error.as_deref() == Some("Stopped by user") { "stopped" }
+                else { "failed" };
+            let _ = db.end_task(tid, db_status, status.error.as_deref(), Some(&status.current_state));
         }
 
         *self.status.write().await = Some(status.clone());
@@ -378,7 +487,7 @@ impl VlaLoop {
         use base64_lib::{engine::general_purpose::STANDARD as BASE64, Engine};
 
         let _ = fs::create_dir_all(&self.config.screenshot_dir);
-        let path = format!("{}/action_{:03}.png", self.config.screenshot_dir, action_num);
+        let path = format!("{}/action_{:03}.jpg", self.config.screenshot_dir, action_num);
 
         if let Ok(data) = BASE64.decode(base64_data) {
             let _ = fs::write(path, data);

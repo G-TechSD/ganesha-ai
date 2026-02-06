@@ -8,6 +8,7 @@
 pub mod loop_controller;
 pub mod action_planner;
 pub mod element_locator;
+pub mod task_db;
 
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -132,13 +133,16 @@ pub struct VlaConfig {
 impl Default for VlaConfig {
     fn default() -> Self {
         Self {
+            // Use local LM Studio for speed (~2s vs ~25s per iteration)
+            // ministral-3-14b-reasoning has vision support and runs on 7900XT
+            // Note: reasoning models put output in reasoning_content, not content
             vision_endpoint: "http://192.168.245.155:1234/v1/chat/completions".into(),
-            vision_model: "qwen/qwen2.5-vl-7b".into(),
+            vision_model: "mistralai/ministral-3-14b-reasoning".into(),
             planner_endpoint: "http://192.168.245.155:1234/v1/chat/completions".into(),
-            planner_model: "gpt-oss-20b".into(),
+            planner_model: "mistralai/ministral-3-14b-reasoning".into(),
             action_delay: Duration::from_millis(200),
-            capture_width: 640,
-            capture_height: 360,
+            capture_width: 1280,
+            capture_height: 720,
             max_retries: 3,
             save_screenshots: false,
             screenshot_dir: "/tmp/ganesha-vla".into(),

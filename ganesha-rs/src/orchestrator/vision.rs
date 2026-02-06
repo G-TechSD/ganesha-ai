@@ -90,16 +90,25 @@ impl Default for VisionConfig {
 pub struct VisionAnalyzer {
     config: VisionConfig,
     client: reqwest::Client,
+    is_anthropic: bool,
+    api_key: Option<String>,
 }
 
 impl VisionAnalyzer {
     pub fn new(config: VisionConfig) -> Self {
+        let is_anthropic = config.endpoint.contains("anthropic.com");
+        let api_key = if is_anthropic {
+            std::env::var("ANTHROPIC_API_KEY").ok()
+        } else {
+            None
+        };
+
         let client = reqwest::Client::builder()
             .timeout(config.timeout)
             .build()
             .unwrap();
 
-        Self { config, client }
+        Self { config, client, is_anthropic, api_key }
     }
 
     pub fn with_defaults() -> Self {
@@ -123,46 +132,76 @@ impl VisionAnalyzer {
 
     /// Analyze an image (base64 encoded)
     pub async fn analyze_image(&self, base64_image: &str) -> Result<ScreenAnalysis, Box<dyn std::error::Error + Send + Sync>> {
-        let system_prompt = r#"You are a screen analyzer. Respond ONLY with valid JSON matching this schema:
-{
-  "app": "application name",
-  "title": "window title",
-  "elements": [{"type": "button|input|menu|icon", "label": "text", "position": "tl|tr|bl|br|center", "interactive": true}],
-  "dialogs": [{"type": "alert|confirm|prompt|error", "title": "title", "message": "content", "buttons": ["OK", "Cancel"]}],
-  "text": ["key visible text snippets"],
-  "state": "ready|loading|error|dialog|busy|unknown",
-  "confidence": 0.9
-}
-No explanations. No markdown. Just JSON."#;
+        let system_prompt = r#"OUTPUT ONLY RAW JSON. NO MARKDOWN. NO EXPLANATION. NO CODE BLOCKS.
 
-        let user_content = serde_json::json!([
-            {
-                "type": "text",
-                "text": "Analyze this screen. Return JSON only."
-            },
-            {
-                "type": "image_url",
-                "image_url": {
-                    "url": format!("data:image/png;base64,{}", base64_image)
+Schema:
+{"app":"name","title":"window title","elements":[{"type":"button","label":"text","position":"center","interactive":true}],"dialogs":[],"text":["visible text"],"state":"ready","confidence":0.9}
+
+CRITICAL: Your entire response must be a single JSON object starting with { and ending with }. Nothing else."#;
+
+        let response = if self.is_anthropic {
+            // Anthropic API format with vision
+            let user_content = serde_json::json!([
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/jpeg",
+                        "data": base64_image
+                    }
+                },
+                {
+                    "type": "text",
+                    "text": "Analyze this screen. Return JSON only."
                 }
+            ]);
+
+            let request = serde_json::json!({
+                "model": self.config.model,
+                "max_tokens": 2000,
+                "system": system_prompt,
+                "messages": [
+                    {"role": "user", "content": user_content}
+                ]
+            });
+
+            let mut req = self.client.post(&self.config.endpoint).json(&request);
+            if let Some(ref key) = self.api_key {
+                req = req.header("x-api-key", key)
+                    .header("anthropic-version", "2023-06-01");
             }
-        ]);
+            req.send().await?
+        } else {
+            // OpenAI-compatible format
+            let user_content = serde_json::json!([
+                {
+                    "type": "text",
+                    "text": "Analyze this screen. Return JSON only."
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": format!("data:image/jpeg;base64,{}", base64_image)
+                    }
+                }
+            ]);
 
-        let request = serde_json::json!({
-            "model": self.config.model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content}
-            ],
-            "temperature": 0.1,
-            "max_tokens": 500
-        });
+            let request = serde_json::json!({
+                "model": self.config.model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content}
+                ],
+                "temperature": 0.1,
+                "max_tokens": 2000
+            });
 
-        let response = self.client
-            .post(&self.config.endpoint)
-            .json(&request)
-            .send()
-            .await?;
+            self.client
+                .post(&self.config.endpoint)
+                .json(&request)
+                .send()
+                .await?
+        };
 
         if !response.status().is_success() {
             let status = response.status();
@@ -171,9 +210,20 @@ No explanations. No markdown. Just JSON."#;
         }
 
         let json: serde_json::Value = response.json().await?;
-        let content = json["choices"][0]["message"]["content"]
-            .as_str()
-            .unwrap_or("{}");
+        let content = if self.is_anthropic {
+            // Anthropic response format
+            json["content"][0]["text"].as_str().unwrap_or("{}")
+        } else {
+            // OpenAI response format - check both content and reasoning_content
+            // Reasoning models (e.g. ministral-3-14b-reasoning) put output in reasoning_content
+            let msg = &json["choices"][0]["message"];
+            let c = msg["content"].as_str().unwrap_or("");
+            if c.is_empty() {
+                msg["reasoning_content"].as_str().unwrap_or("{}")
+            } else {
+                c
+            }
+        };
 
         // Parse the JSON response
         self.parse_analysis(content)
@@ -183,34 +233,69 @@ No explanations. No markdown. Just JSON."#;
     pub async fn query_screen(&self, base64_image: &str, query: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         let system_prompt = r#"You are a screen analyzer. Answer the user's question about the screen briefly and precisely. Keep response under 50 words."#;
 
-        let user_content = serde_json::json!([
-            {
-                "type": "text",
-                "text": query
-            },
-            {
-                "type": "image_url",
-                "image_url": {
-                    "url": format!("data:image/png;base64,{}", base64_image)
+        let response = if self.is_anthropic {
+            // Anthropic API format with vision
+            let user_content = serde_json::json!([
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/jpeg",
+                        "data": base64_image
+                    }
+                },
+                {
+                    "type": "text",
+                    "text": query
                 }
+            ]);
+
+            let request = serde_json::json!({
+                "model": self.config.model,
+                "max_tokens": 100,
+                "system": system_prompt,
+                "messages": [
+                    {"role": "user", "content": user_content}
+                ]
+            });
+
+            let mut req = self.client.post(&self.config.endpoint).json(&request);
+            if let Some(ref key) = self.api_key {
+                req = req.header("x-api-key", key)
+                    .header("anthropic-version", "2023-06-01");
             }
-        ]);
+            req.send().await?
+        } else {
+            // OpenAI-compatible format
+            let user_content = serde_json::json!([
+                {
+                    "type": "text",
+                    "text": query
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": format!("data:image/jpeg;base64,{}", base64_image)
+                    }
+                }
+            ]);
 
-        let request = serde_json::json!({
-            "model": self.config.model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content}
-            ],
-            "temperature": 0.1,
-            "max_tokens": 100
-        });
+            let request = serde_json::json!({
+                "model": self.config.model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content}
+                ],
+                "temperature": 0.1,
+                "max_tokens": 100
+            });
 
-        let response = self.client
-            .post(&self.config.endpoint)
-            .json(&request)
-            .send()
-            .await?;
+            self.client
+                .post(&self.config.endpoint)
+                .json(&request)
+                .send()
+                .await?
+        };
 
         if !response.status().is_success() {
             let status = response.status();
@@ -219,10 +304,19 @@ No explanations. No markdown. Just JSON."#;
         }
 
         let json: serde_json::Value = response.json().await?;
-        Ok(json["choices"][0]["message"]["content"]
-            .as_str()
-            .unwrap_or("")
-            .to_string())
+        let content = if self.is_anthropic {
+            json["content"][0]["text"].as_str().unwrap_or("")
+        } else {
+            // Check both content and reasoning_content for reasoning models
+            let msg = &json["choices"][0]["message"];
+            let c = msg["content"].as_str().unwrap_or("");
+            if c.is_empty() {
+                msg["reasoning_content"].as_str().unwrap_or("")
+            } else {
+                c
+            }
+        };
+        Ok(content.to_string())
     }
 
     /// Check if a specific element is visible
@@ -293,12 +387,20 @@ No explanations. No markdown. Just JSON."#;
 
     /// Parse the vision model's JSON response
     fn parse_analysis(&self, content: &str) -> Result<ScreenAnalysis, Box<dyn std::error::Error + Send + Sync>> {
+        // Strip markdown code blocks if present
+        let cleaned = content
+            .trim()
+            .trim_start_matches("```json")
+            .trim_start_matches("```")
+            .trim_end_matches("```")
+            .trim();
+        
         // Try to find JSON in the response
-        let json_str = if content.starts_with('{') {
-            content.to_string()
-        } else if let Some(start) = content.find('{') {
-            if let Some(end) = content.rfind('}') {
-                content[start..=end].to_string()
+        let json_str = if cleaned.starts_with('{') {
+            cleaned.to_string()
+        } else if let Some(start) = cleaned.find('{') {
+            if let Some(end) = cleaned.rfind('}') {
+                cleaned[start..=end].to_string()
             } else {
                 return Err("No valid JSON found in response".into());
             }

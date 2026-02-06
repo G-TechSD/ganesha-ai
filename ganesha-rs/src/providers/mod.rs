@@ -127,6 +127,25 @@ impl OpenAiCompatible {
         }
     }
 
+    pub fn lm_studio_with_model(url: &str, model: &str) -> Self {
+        let name = if url.contains("localhost") || url.contains("127.0.0.1") {
+            "LM Studio Local"
+        } else {
+            "LM Studio"
+        };
+
+        Self {
+            name: name.into(),
+            base_url: url.trim_end_matches('/').into(),
+            api_key: None,
+            model: model.into(),
+            client: Client::builder()
+                .timeout(Duration::from_secs(120))
+                .build()
+                .unwrap(),
+        }
+    }
+
     pub fn openai(api_key: &str) -> Self {
         Self {
             name: "openai".into(),
@@ -530,9 +549,40 @@ impl ProviderChain {
     pub fn default_chain() -> Self {
         let mut chain = Self::new();
 
-        // Local LM Studio - localhost only
-        chain.provider_urls.push(("http://localhost:1234".into(), "default".into()));
-        chain = chain.add(OpenAiCompatible::lm_studio("http://localhost:1234"));
+        // Try to load LM Studio URL and model from config
+        let config_path = dirs::config_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join("ganesha")
+            .join("config.toml");
+
+        let (lm_studio_url, lm_studio_model) = if config_path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&config_path) {
+                // Look for endpoint and model in [[providers]] section
+                let url = content.lines()
+                    .find(|l| l.starts_with("endpoint = "))
+                    .map(|l| l.trim_start_matches("endpoint = ").trim_matches('"').to_string())
+                    .unwrap_or_else(|| "http://localhost:1234".to_string());
+                let model = content.lines()
+                    .find(|l| l.starts_with("model = "))
+                    .map(|l| l.trim_start_matches("model = ").trim_matches('"').to_string())
+                    .unwrap_or_else(|| "default".to_string());
+                (url, model)
+            } else {
+                ("http://localhost:1234".to_string(), "default".to_string())
+            }
+        } else {
+            ("http://localhost:1234".to_string(), "default".to_string())
+        };
+
+        // LM Studio from config (remote or localhost)
+        chain.provider_urls.push((lm_studio_url.clone(), lm_studio_model.clone()));
+        chain = chain.add(OpenAiCompatible::lm_studio_with_model(&lm_studio_url, &lm_studio_model));
+
+        // Also try localhost if config points to remote
+        if !lm_studio_url.contains("localhost") && !lm_studio_url.contains("127.0.0.1") {
+            chain.provider_urls.push(("http://localhost:1234".into(), lm_studio_model.clone()));
+            chain = chain.add(OpenAiCompatible::lm_studio_with_model("http://localhost:1234", &lm_studio_model));
+        }
 
         // Ollama
         chain = chain.add(Ollama::default());

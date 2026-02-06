@@ -318,6 +318,28 @@ impl InputController {
             return Err(InputError::TextTooLong(text.len()));
         }
 
+        // On Linux, prefer xdotool for typing as enigo has key repeat issues on X11
+        #[cfg(target_os = "linux")]
+        {
+            let status = std::process::Command::new("xdotool")
+                .arg("type")
+                .arg("--delay")
+                .arg("80")
+                .arg("--clearmodifiers")
+                .arg(text)
+                .status();
+
+            match status {
+                Ok(s) if s.success() => {
+                    self.apply_delay();
+                    return Ok(());
+                }
+                _ => {
+                    // Fall through to enigo if xdotool not available
+                }
+            }
+        }
+
         let mut enigo_guard = self.enigo.lock().expect("Enigo lock poisoned - unable to access keyboard controller");
         let enigo = enigo_guard.as_mut().ok_or(InputError::NotInitialized)?;
 
@@ -338,6 +360,23 @@ impl InputController {
         }
 
         self.preflight_check()?;
+
+        // On Linux, prefer xdotool for single key presses (more reliable with X11/XAUTHORITY)
+        #[cfg(target_os = "linux")]
+        {
+            let status = std::process::Command::new("xdotool")
+                .arg("key")
+                .arg("--clearmodifiers")
+                .arg(key)
+                .status();
+            match status {
+                Ok(s) if s.success() => {
+                    self.apply_delay();
+                    return Ok(());
+                }
+                _ => { /* Fall through to enigo */ }
+            }
+        }
 
         let mut enigo_guard = self.enigo.lock().expect("Enigo lock poisoned - unable to access keyboard controller");
         let enigo = enigo_guard.as_mut().ok_or(InputError::NotInitialized)?;
@@ -397,6 +436,23 @@ impl InputController {
         }
 
         self.preflight_check()?;
+
+        // On Linux, prefer xdotool for key combos (more reliable with X11/XAUTHORITY)
+        #[cfg(target_os = "linux")]
+        {
+            let status = std::process::Command::new("xdotool")
+                .arg("key")
+                .arg("--clearmodifiers")
+                .arg(combo)
+                .status();
+            match status {
+                Ok(s) if s.success() => {
+                    self.apply_delay();
+                    return Ok(());
+                }
+                _ => { /* Fall through to enigo */ }
+            }
+        }
 
         let keys: Vec<&str> = combo.split('+').map(|s| s.trim()).collect();
 

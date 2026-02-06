@@ -12,10 +12,19 @@ pub struct ActionPlanner {
     endpoint: String,
     model: String,
     client: reqwest::Client,
+    is_anthropic: bool,
+    api_key: Option<String>,
 }
 
 impl ActionPlanner {
     pub fn new(endpoint: String, model: String) -> Self {
+        let is_anthropic = endpoint.contains("anthropic.com");
+        let api_key = if is_anthropic {
+            std::env::var("ANTHROPIC_API_KEY").ok()
+        } else {
+            None
+        };
+        
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(60))
             .build()
@@ -25,17 +34,39 @@ impl ActionPlanner {
             endpoint,
             model,
             client,
+            is_anthropic,
+            api_key,
         }
     }
 
     /// Plan the next action based on current state
+    /// Plan next action with full context:
+    /// - base64_image: screenshot for visual coordinate estimation
+    /// - db_context: past actions, known failures from SQLite task tracker
     pub async fn plan_next_action(
         &self,
         goal: &VlaGoal,
         screen: &ScreenAnalysis,
         history: &[ActionResult],
+        base64_image: Option<&str>,
+        db_context: &str,
     ) -> Result<Option<PlannedAction>, Box<dyn std::error::Error + Send + Sync>> {
-        let system_prompt = r#"You are a GUI automation planner. Given a goal and current screen state, output the SINGLE next action to take.
+        let system_prompt = r#"You are a GUI automation planner. Given a goal, screenshot, and screen state, output the SINGLE next action to take.
+
+SYSTEM CONTEXT:
+- OS: Ubuntu 24.04 with GNOME desktop
+- Screen: 1920x1080 actual, captured as 1280x720 (coordinates in 1280x720 space)
+- Left dock occupies x=0-50. Main content starts at x~55.
+
+KEYBOARD-FIRST STRATEGY (strongly prefer over mouse clicks):
+- Web browser: Ctrl+L (address bar), Ctrl+F (find text), Tab (next element), Enter (activate), Ctrl+T (new tab)
+- To click a link by name: Ctrl+F to find it, Escape to close find, Enter to follow
+- To navigate to URL: Ctrl+L, type URL, Enter
+- GNOME desktop: Super (activities), Alt+Tab (switch windows), Alt+F4 (close)
+- File manager: Ctrl+L (path bar), Type path, Enter
+- General: Ctrl+S (save), Ctrl+Z (undo), Ctrl+C/V (copy/paste)
+
+ONLY use mouse clicks when keyboard navigation is impossible (e.g., clicking specific UI buttons, dock icons, or non-text elements).
 
 Respond ONLY with valid JSON matching this schema:
 {
@@ -53,10 +84,8 @@ If stuck with no viable action, respond with: {"stuck": true, "reason": "why we 
 
 Rules:
 - ONE action at a time
-- Be specific about target elements
-- Estimate x,y coordinates based on element position descriptions
-- Standard screen: 1280x720. Positions: tl=~100,100 tr=~1180,100 center=~640,360 bl=~100,620 br=~1180,620
-- Prefer clicking visible buttons/links over keyboard shortcuts
+- ALWAYS prefer keyboard shortcuts and navigation over mouse clicks
+- For mouse clicks: coordinates are in 1280x720 space. Safe area: x=55-1250, y=30-690
 - Use 'wait' if expecting loading/transition"#;
 
         let history_summary = if history.is_empty() {
@@ -70,6 +99,13 @@ Rules:
                     h.action.expected_result
                 )
             }).collect::<Vec<_>>().join("\n")
+        };
+
+        // Build context section from DB (past actions + known failures)
+        let context_section = if db_context.is_empty() {
+            String::new()
+        } else {
+            format!("\n{}", db_context)
         };
 
         let user_content = format!(
@@ -88,7 +124,7 @@ CURRENT SCREEN STATE:
 
 RECENT ACTIONS:
 {}
-
+{}
 What is the SINGLE next action to achieve the goal?"#,
             goal.objective,
             goal.success_criteria.join("\n- "),
@@ -106,24 +142,81 @@ What is the SINGLE next action to achieve the goal?"#,
                     format!("{}: {} [{}]", d.dialog_type, d.message, d.buttons.join(", "))
                 }).collect::<Vec<_>>().join("; ")
             },
-            history_summary
+            history_summary,
+            context_section,
         );
 
-        let request = json!({
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content}
-            ],
-            "temperature": 0.2,
-            "max_tokens": 500
-        });
+        let response = if self.is_anthropic {
+            // Anthropic API format - include image if available
+            let msg_content = if let Some(img) = base64_image {
+                json!([
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/jpeg",
+                            "data": img
+                        }
+                    },
+                    {
+                        "type": "text",
+                        "text": user_content
+                    }
+                ])
+            } else {
+                json!(user_content)
+            };
 
-        let response = self.client
-            .post(&self.endpoint)
-            .json(&request)
-            .send()
-            .await?;
+            let request = json!({
+                "model": self.model,
+                "max_tokens": 2000,
+                "system": system_prompt,
+                "messages": [
+                    {"role": "user", "content": msg_content}
+                ]
+            });
+
+            let mut req = self.client.post(&self.endpoint).json(&request);
+            if let Some(ref key) = self.api_key {
+                req = req.header("x-api-key", key)
+                    .header("anthropic-version", "2023-06-01");
+            }
+            req.send().await?
+        } else {
+            // OpenAI-compatible format - include image if available
+            let msg_content = if let Some(img) = base64_image {
+                json!([
+                    {
+                        "type": "text",
+                        "text": user_content
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": format!("data:image/jpeg;base64,{}", img)
+                        }
+                    }
+                ])
+            } else {
+                json!(user_content)
+            };
+
+            let request = json!({
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": msg_content}
+                ],
+                "temperature": 0.2,
+                "max_tokens": 2000
+            });
+
+            self.client
+                .post(&self.endpoint)
+                .json(&request)
+                .send()
+                .await?
+        };
 
         if !response.status().is_success() {
             let status = response.status();
@@ -132,9 +225,20 @@ What is the SINGLE next action to achieve the goal?"#,
         }
 
         let json: serde_json::Value = response.json().await?;
-        let content = json["choices"][0]["message"]["content"]
-            .as_str()
-            .unwrap_or("{}");
+        let content = if self.is_anthropic {
+            // Anthropic response format
+            json["content"][0]["text"].as_str().unwrap_or("{}")
+        } else {
+            // OpenAI response format - check both content and reasoning_content
+            // Reasoning models (e.g. ministral-3-14b-reasoning) put output in reasoning_content
+            let msg = &json["choices"][0]["message"];
+            let c = msg["content"].as_str().unwrap_or("");
+            if c.is_empty() {
+                msg["reasoning_content"].as_str().unwrap_or("{}")
+            } else {
+                c
+            }
+        };
 
         self.parse_action_response(content)
     }

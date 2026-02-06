@@ -86,7 +86,8 @@ pub use sentinel::{Sentinel, SentinelAnalysis, Verdict, ThreatCategory, Severity
 
 // Reactive Agent
 #[cfg(feature = "computer-use")]
-pub use agent::{ReactiveAgent, AgentConfig, AgentAction, WaitCondition, ScreenState};
+// TODO: Fix agent exports - types moved to agent_wiggum
+// pub use agent::{ReactiveAgent, AgentConfig, AgentAction, WaitCondition, ScreenState};
 
 // Zone filtering
 #[cfg(feature = "computer-use")]
