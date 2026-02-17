@@ -374,7 +374,69 @@ ganesha "summarize the top 5 stories on Hacker News"
 
 ---
 
-### 7. Built-in Web Search
+### 7. VLA: Vision-Language-Action (Computer Use)
+
+Ganesha's closed-loop GUI automation system. It sees the screen, plans actions, executes them via X11 input simulation, and verifies the result before moving on.
+
+```bash
+# Web browsing
+ganesha vla "Open Firefox and navigate to github.com/G-TechSD" \
+  --criteria "GitHub profile page is visible" \
+  --max-actions 15 --save-screenshots
+
+# Application control
+ganesha vla "In Blender, switch to Scripting workspace and run the script" \
+  --app Blender --timeout 180
+
+# Generic desktop tasks
+ganesha vla "Close all open browser tabs"
+```
+
+**How VLA Works:**
+
+```
+┌────────────────────────────────────────────────────────────┐
+│                    VLA CLOSED LOOP                          │
+├────────────────────────────────────────────────────────────┤
+│                                                            │
+│  ┌─────────┐   ┌─────────┐   ┌─────────┐   ┌─────────┐  │
+│  │ Capture │──▶│ Analyze │──▶│  Plan   │──▶│   Act   │  │
+│  │ Screen  │   │ (VLM)   │   │ (LLM)   │   │(xdotool)│  │
+│  └─────────┘   └─────────┘   └─────────┘   └─────────┘  │
+│       ▲                                          │        │
+│       └──────────── Verify ◀─────────────────────┘        │
+│                                                            │
+│  ┌────────────────────────────────────────────────────┐   │
+│  │              TASK DATABASE (SQLite)                 │   │
+│  │  • Action history    • Failure patterns            │   │
+│  │  • Learned context   • Screenshot archive          │   │
+│  └────────────────────────────────────────────────────┘   │
+│                                                            │
+└────────────────────────────────────────────────────────────┘
+```
+
+**Key Capabilities:**
+- **Keyboard-first strategy**: Prefers Ctrl+L, Ctrl+F, Tab over imprecise clicks
+- **Failure learning**: SQLite database records what went wrong so it doesn't repeat mistakes
+- **Drag/paint support**: Proper mousedown → mousemove → mouseup for creative apps (GIMP, Blender)
+- **Multi-monitor aware**: Handles coordinate scaling across resolutions
+- **Local vision models**: Uses Qwen 2.5-VL or Ministral for screen understanding — no cloud required
+
+**CLI Options:**
+```
+ganesha vla <GOAL>
+  --criteria <CRITERIA>         Success criteria (comma-separated)
+  --max-actions <N>             Max actions to try (default: 20)
+  --timeout <SECONDS>           Total timeout (default: 86400)
+  --save-screenshots            Save screenshots to /tmp/ganesha-vla-<timestamp>
+  --app <APP_NAME>              Focus on specific application
+  --planner-endpoint <URL>      Custom planner LLM endpoint
+  --planner-model <MODEL>       Custom planner model
+```
+
+---
+
+### 8. Built-in Web Search
 
 No API keys required for basic web search:
 
@@ -400,7 +462,7 @@ ganesha "search for this error: ENOSPC and fix it"
 
 ---
 
-### 8. Code Generation Mode
+### 9. Code Generation Mode
 
 Dedicated mode for generating code:
 
@@ -432,7 +494,7 @@ ganesha --code "SQL migration that adds soft delete to all tables"
 
 ---
 
-### 9. Response Metrics
+### 10. Response Metrics
 
 Every response includes performance metrics:
 
@@ -451,7 +513,7 @@ Every response includes performance metrics:
 
 ---
 
-### 10. Provider Cascade
+### 11. Provider Cascade
 
 Automatic fallback between AI providers:
 
@@ -707,7 +769,7 @@ New team members can learn from past operations.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                         GANESHA 3.14                                │
+│                          GANESHA 4.0                                │
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                     │
 │  ┌───────────────────────────────────────────────────────────────┐ │
@@ -763,7 +825,7 @@ url = "http://localhost:11434"
 model = "llama3"
 
 [providers.anthropic]
-model = "claude-3-opus"
+model = "claude-opus-4-6"
 # API key from environment: ANTHROPIC_API_KEY
 
 [providers.openai]
@@ -828,6 +890,9 @@ OPTIONS:
       --install         Install ganesha system-wide
       --version         Show version
   -h, --help            Show this help
+
+SUBCOMMANDS:
+  vla <GOAL>            Vision-Language-Action GUI automation (see --help for options)
 
 EXAMPLES:
   ganesha "show disk usage"
