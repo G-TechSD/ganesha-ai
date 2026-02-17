@@ -1,6 +1,6 @@
 [package]
 name = "ganesha"
-version = "3.14.0-beta.1"
+version = "4.0.0"
 edition = "2021"
 authors = ["G-Tech SD <dev@gtechsd.com>"]
 description = "The Remover of Obstacles - AI-Powered System Control"
