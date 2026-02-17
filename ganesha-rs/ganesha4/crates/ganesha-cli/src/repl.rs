@@ -131,9 +131,13 @@ impl SessionLogger {
         self.write_line(&format!("$ {}", command))?;
         if !output.is_empty() {
             self.write_line("--- Output ---")?;
-            // Limit output to prevent huge logs
+            // Limit output to prevent huge logs (truncate at char boundary)
             let truncated = if output.len() > 10000 {
-                format!("{}... (truncated)", &output[..10000])
+                let mut end = 10000;
+                while end > 0 && !output.is_char_boundary(end) {
+                    end -= 1;
+                }
+                format!("{}... (truncated)", &output[..end])
             } else {
                 output.to_string()
             };
@@ -953,6 +957,11 @@ fn is_interactive_command(cmd: &str) -> Option<&'static str> {
 fn clean_response(response: &str) -> String {
     let mut cleaned = response.to_string();
 
+    // Remove <think>...</think> blocks from reasoning models (DeepSeek, Qwen, etc.)
+    if let Ok(think_re) = Regex::new(r"(?s)<think>.*?</think>\s*") {
+        cleaned = think_re.replace_all(&cleaned, "").to_string();
+    }
+
     // Remove common control tokens from local models
     let patterns = [
         r"<\|channel\|>[^<]*<\|message\|>",
@@ -1126,6 +1135,7 @@ async fn agentic_chat(user_message: &str, state: &mut ReplState) -> anyhow::Resu
         // Get AI response
         let response = state.provider_manager.chat(&messages, &options).await?;
         spinner.finish_and_clear();
+        state.last_model = Some(response.model.clone());
         let content = response.content.clone();
 
         // Extract any commands or tool calls from the response
@@ -1661,7 +1671,7 @@ fn sanitize_output(content: &str) -> String {
 
 /// Print content in a styled Ganesha box with title and timestamp
 /// Renders markdown for better readability with proper box borders and word wrap
-fn print_ganesha_box(content: &str) {
+fn print_ganesha_box(content: &str, model: Option<&str>) {
     use unicode_width::UnicodeWidthStr;
 
     let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
@@ -1775,6 +1785,13 @@ fn print_ganesha_box(content: &str) {
 
     // Empty line before footer
     print_line("");
+
+    // Show model info in footer if available
+    if let Some(model_name) = model {
+        let model_label = format!("  ⚡ {}", model_name);
+        print_line(&model_label);
+        print_line("");
+    }
 
     // Bottom border
     println!("{}{}{}",
@@ -1988,6 +2005,8 @@ pub struct ReplState {
     pub mcp_manager: Arc<McpManager>,
     /// Cached MCP tools (refreshed on connect/disconnect)
     pub mcp_tools: Vec<(String, McpTool)>,
+    /// Last model used (from provider response)
+    pub last_model: Option<String>,
 }
 
 impl ReplState {
@@ -2015,6 +2034,7 @@ impl ReplState {
             is_first_message: true,
             mcp_manager: Arc::new(McpManager::new()),
             mcp_tools: Vec::new(),
+            last_model: None,
         }
     }
 
@@ -2429,7 +2449,7 @@ pub async fn run(cli: &Cli) -> anyhow::Result<()> {
             match agentic_chat(&line, &mut state).await {
                 Ok(response) => {
                     // Display final response in Ganesha box
-                    print_ganesha_box(&response);
+                    print_ganesha_box(&response, state.last_model.as_deref());
                     state.history.push((line.clone(), response));
                 }
                 Err(e) => {
@@ -2502,7 +2522,7 @@ pub async fn run(cli: &Cli) -> anyhow::Result<()> {
                 match agentic_chat(line, &mut state).await {
                     Ok(response) => {
                         // Display final response in Ganesha box
-                        print_ganesha_box(&response);
+                        print_ganesha_box(&response, state.last_model.as_deref());
                         state.history.push((line.to_string(), response.clone()));
 
                         // Check if response contains multiple choice options
@@ -2511,7 +2531,7 @@ pub async fn run(cli: &Cli) -> anyhow::Result<()> {
                                 // Send the selection back to the AI
                                 match agentic_chat(&selection, &mut state).await {
                                     Ok(follow_up) => {
-                                        print_ganesha_box(&follow_up);
+                                        print_ganesha_box(&follow_up, state.last_model.as_deref());
                                         state.history.push((selection, follow_up));
                                     }
                                     Err(e) => {
