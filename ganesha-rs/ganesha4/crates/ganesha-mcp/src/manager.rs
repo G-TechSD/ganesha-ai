@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 /// Manages multiple MCP servers
 pub struct McpManager {
@@ -109,7 +109,7 @@ impl McpManager {
 
         for id in auto_connect {
             if let Err(e) = self.connect(&id).await {
-                warn!("Failed to auto-connect to {}: {}", id, e);
+                debug!("Failed to auto-connect to {}: {}", id, e);
             }
         }
 

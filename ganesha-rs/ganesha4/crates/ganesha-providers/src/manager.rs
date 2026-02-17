@@ -8,7 +8,7 @@ use crate::{
 };
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 /// Provider priority for selection
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -208,7 +208,7 @@ impl ProviderManager {
             if managed.config.enabled {
                 match managed.provider.list_models().await {
                     Ok(models) => all_models.extend(models),
-                    Err(e) => warn!(
+                    Err(e) => debug!(
                         "Failed to list models from {}: {}",
                         managed.config.name, e
                     ),
@@ -258,7 +258,7 @@ impl ProviderManager {
             match managed.provider.chat(messages, options).await {
                 Ok(response) => return Ok(response),
                 Err(e) => {
-                    warn!("Provider {} failed: {}", managed.config.name, e);
+                    debug!("Provider {} failed: {}", managed.config.name, e);
                     last_error = Some(e);
                 }
             }
