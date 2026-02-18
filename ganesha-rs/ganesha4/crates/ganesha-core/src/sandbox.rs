@@ -613,3 +613,108 @@ fn simple_diff(original: &str, modified: &str) -> String {
 
     diff
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sandbox_mode_default() {
+        let mode = SandboxMode::default();
+        assert_eq!(mode, SandboxMode::GitWorktree);
+    }
+
+    #[test]
+    fn test_sandbox_config_default() {
+        let config = SandboxConfig::default();
+        assert_eq!(config.mode, SandboxMode::GitWorktree);
+        assert!(!config.allow_network);
+        assert!(config.allow_commands);
+        assert!(config.command_whitelist.contains(&"cargo".to_string()));
+        assert!(config.command_whitelist.contains(&"npm".to_string()));
+        assert_eq!(config.max_lifetime_secs, 3600);
+        assert_eq!(config.max_disk_mb, 1024);
+    }
+
+    #[test]
+    fn test_sandbox_config_serialization() {
+        let config = SandboxConfig::default();
+        let json = serde_json::to_string(&config).unwrap();
+        let deserialized: SandboxConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.mode, SandboxMode::GitWorktree);
+        assert_eq!(deserialized.command_whitelist.len(), config.command_whitelist.len());
+    }
+
+    #[test]
+    fn test_sandbox_manager_creation() {
+        let config = SandboxConfig::default();
+        let manager = SandboxManager::new(config);
+        assert_eq!(manager.list().len(), 0);
+    }
+
+    #[test]
+    fn test_sandbox_mode_variants() {
+        let modes = vec![
+            SandboxMode::FullIsolation,
+            SandboxMode::GitWorktree,
+            SandboxMode::Overlay,
+            SandboxMode::DryRun,
+        ];
+        // Each should be distinct
+        for (i, a) in modes.iter().enumerate() {
+            for (j, b) in modes.iter().enumerate() {
+                if i == j {
+                    assert_eq!(a, b);
+                } else {
+                    assert_ne!(a, b);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_apply_result() {
+        let result = ApplyResult {
+            files_modified: vec![PathBuf::from("a.rs"), PathBuf::from("b.rs")],
+            files_created: vec![],
+            files_deleted: vec![],
+            success: true,
+        };
+        assert_eq!(result.files_modified.len(), 2);
+        assert!(result.success);
+    }
+
+    #[test]
+    fn test_executed_command() {
+        let cmd = ExecutedCommand {
+            command: "cargo test".to_string(),
+            args: vec!["--all".to_string()],
+            working_dir: PathBuf::from("."),
+            exit_code: Some(0),
+            stdout: "ok".to_string(),
+            stderr: String::new(),
+            duration_ms: 5000,
+        };
+        assert_eq!(cmd.exit_code, Some(0));
+        assert_eq!(cmd.args.len(), 1);
+        assert_eq!(cmd.duration_ms, 5000);
+    }
+
+    #[tokio::test]
+    async fn test_sandbox_create_dry_run() {
+        let config = SandboxConfig {
+            mode: SandboxMode::DryRun,
+            ..Default::default()
+        };
+        let mut manager = SandboxManager::new(config);
+        let temp = tempfile::TempDir::new().unwrap();
+
+        let id = manager.create_sandbox(temp.path().to_path_buf()).await.unwrap();
+        assert!(!id.is_empty());
+        assert_eq!(manager.list().len(), 1);
+
+        let sandbox = manager.get(&id).unwrap();
+        assert!(sandbox.is_active());
+        assert_eq!(sandbox.mode, SandboxMode::DryRun);
+    }
+}

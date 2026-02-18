@@ -487,3 +487,115 @@ impl<'a> AutoCheckpoint<'a> {
 
 // Note: Can't implement async Drop, so manual cleanup is needed
 // Users should call commit() on success
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_checkpoint_creation() {
+        let cp = Checkpoint::new("test checkpoint", PathBuf::from("/tmp"));
+        assert!(!cp.id.is_empty());
+        assert_eq!(cp.name, "test checkpoint");
+        assert_eq!(cp.working_dir, PathBuf::from("/tmp"));
+        assert_eq!(cp.file_count(), 0);
+        assert!(cp.parent_id.is_none());
+        assert!(cp.git_commit.is_none());
+    }
+
+    #[test]
+    fn test_checkpoint_metadata() {
+        let mut cp = Checkpoint::new("meta test", PathBuf::from("."));
+        cp.add_metadata("key", "value");
+        cp.add_metadata("reason", "testing");
+        assert_eq!(cp.metadata.get("key").unwrap(), "value");
+        assert_eq!(cp.metadata.get("reason").unwrap(), "testing");
+    }
+
+    #[tokio::test]
+    async fn test_backup_file() {
+        let temp = TempDir::new().unwrap();
+        let file = temp.path().join("test.txt");
+        tokio::fs::write(&file, "hello world").await.unwrap();
+
+        let mut cp = Checkpoint::new("backup test", temp.path().to_path_buf());
+        cp.backup_file(Path::new("test.txt")).await.unwrap();
+
+        assert_eq!(cp.file_count(), 1);
+        assert!(cp.files[0].existed);
+        assert_eq!(cp.files[0].original_content, Some("hello world".to_string()));
+        assert!(cp.files[0].content_hash.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_backup_nonexistent_file() {
+        let temp = TempDir::new().unwrap();
+        let mut cp = Checkpoint::new("nofile", temp.path().to_path_buf());
+        cp.backup_file(Path::new("does_not_exist.txt")).await.unwrap();
+
+        assert_eq!(cp.file_count(), 1);
+        assert!(!cp.files[0].existed);
+        assert!(cp.files[0].original_content.is_none());
+    }
+
+    #[test]
+    fn test_checkpoint_serialization() {
+        let mut cp = Checkpoint::new("ser test", PathBuf::from("/tmp"));
+        cp.add_metadata("version", "1");
+        cp.files.push(FileBackup {
+            path: PathBuf::from("test.txt"),
+            original_content: Some("content".to_string()),
+            existed: true,
+            content_hash: Some("abc123".to_string()),
+        });
+
+        let json = serde_json::to_string(&cp).unwrap();
+        let deserialized: Checkpoint = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.name, "ser test");
+        assert_eq!(deserialized.file_count(), 1);
+        assert_eq!(deserialized.metadata.get("version").unwrap(), "1");
+    }
+
+    #[test]
+    fn test_rollback_result() {
+        let result = RollbackResult {
+            checkpoint_id: "cp-1".to_string(),
+            files_restored: vec![PathBuf::from("a.txt"), PathBuf::from("b.txt")],
+            files_deleted: vec![PathBuf::from("c.txt")],
+            git_reset: false,
+            success: true,
+        };
+        assert_eq!(result.files_affected(), 3);
+        assert!(result.success);
+    }
+
+    #[tokio::test]
+    async fn test_rollback_manager_creation() {
+        let temp = TempDir::new().unwrap();
+        let manager = RollbackManager::new(temp.path().to_path_buf());
+        let checkpoints = manager.list_checkpoints();
+        assert_eq!(checkpoints.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_create_and_list_checkpoints() {
+        let temp = TempDir::new().unwrap();
+        let work = temp.path().to_path_buf();
+        tokio::fs::write(work.join("file.txt"), "data").await.unwrap();
+
+        // Create storage dir manually
+        let storage = work.join(".ganesha").join("checkpoints");
+        tokio::fs::create_dir_all(&storage).await.unwrap();
+
+        let mut manager = RollbackManager::new(work.clone());
+
+        let id = manager.create_checkpoint_for_files(
+            "test cp",
+            &[PathBuf::from("file.txt")],
+        ).await.unwrap();
+
+        assert!(!id.is_empty());
+        assert_eq!(manager.list_checkpoints().len(), 1);
+    }
+}
