@@ -143,3 +143,95 @@ pub struct ToolCall {
     pub name: String,
     pub arguments: serde_json::Value,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_generate_options_default() {
+        let opts = GenerateOptions::default();
+        assert!(opts.model.is_none());
+        assert_eq!(opts.temperature, Some(0.7));
+        assert_eq!(opts.max_tokens, Some(4096));
+        assert!(opts.stop.is_none());
+        assert!(opts.system.is_none());
+        assert!(!opts.json_mode);
+    }
+
+    #[test]
+    fn test_response_fields() {
+        let response = Response {
+            content: "Hello!".to_string(),
+            model: "test-model".to_string(),
+            finish_reason: Some("stop".to_string()),
+            usage: Some(Usage {
+                prompt_tokens: 10,
+                completion_tokens: 5,
+                total_tokens: 15,
+            }),
+        };
+        assert_eq!(response.content, "Hello!");
+        assert_eq!(response.model, "test-model");
+        let usage = response.usage.unwrap();
+        assert_eq!(usage.total_tokens, 15);
+    }
+
+    #[test]
+    fn test_usage_default() {
+        let usage = Usage::default();
+        assert_eq!(usage.prompt_tokens, 0);
+        assert_eq!(usage.completion_tokens, 0);
+        assert_eq!(usage.total_tokens, 0);
+    }
+
+    #[test]
+    fn test_tool_definition() {
+        let tool = ToolDefinition {
+            name: "read_file".to_string(),
+            description: "Read file contents".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"}
+                },
+                "required": ["path"]
+            }),
+        };
+        assert_eq!(tool.name, "read_file");
+        assert!(tool.parameters["properties"]["path"]["type"] == "string");
+    }
+
+    #[test]
+    fn test_tool_response() {
+        let resp = ToolResponse {
+            content: Some("File contents here".to_string()),
+            tool_calls: vec![
+                ToolCall {
+                    id: "call_1".to_string(),
+                    name: "write_file".to_string(),
+                    arguments: serde_json::json!({"path": "/tmp/test.txt", "content": "hello"}),
+                }
+            ],
+            finish_reason: Some("tool_calls".to_string()),
+        };
+        assert!(resp.content.is_some());
+        assert_eq!(resp.tool_calls.len(), 1);
+        assert_eq!(resp.tool_calls[0].name, "write_file");
+    }
+
+    #[test]
+    fn test_generate_options_custom() {
+        let opts = GenerateOptions {
+            model: Some("claude-3-opus".to_string()),
+            temperature: Some(0.0),
+            max_tokens: Some(100),
+            stop: Some(vec!["---".to_string()]),
+            system: Some("Be concise".to_string()),
+            json_mode: true,
+        };
+        assert_eq!(opts.model.unwrap(), "claude-3-opus");
+        assert_eq!(opts.temperature.unwrap(), 0.0);
+        assert!(opts.json_mode);
+    }
+}
