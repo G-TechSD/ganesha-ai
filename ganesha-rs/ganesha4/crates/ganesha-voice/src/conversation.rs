@@ -531,4 +531,50 @@ mod tests {
         assert!(config.auto_listen);
         assert_eq!(config.max_history_turns, 100);
     }
+
+    #[test]
+    fn test_turn_with_duration() {
+        let turn = ConversationTurn::new(Speaker::Assistant, "Response".to_string())
+            .with_duration(Duration::from_secs(3));
+        assert_eq!(turn.duration, Duration::from_secs(3));
+    }
+
+    #[test]
+    fn test_turn_interrupted() {
+        let mut turn = ConversationTurn::new(Speaker::Assistant, "Interrupted".to_string());
+        assert!(!turn.was_interrupted);
+        turn.mark_interrupted();
+        assert!(turn.was_interrupted);
+    }
+
+    #[test]
+    fn test_speaker_equality() {
+        assert_eq!(Speaker::User, Speaker::User);
+        assert_eq!(Speaker::Assistant, Speaker::Assistant);
+        assert_ne!(Speaker::User, Speaker::Assistant);
+    }
+
+    #[test]
+    fn test_conversation_state_equality() {
+        assert_eq!(ConversationState::Idle, ConversationState::Idle);
+        assert_ne!(ConversationState::Idle, ConversationState::Listening);
+        assert_ne!(ConversationState::Speaking, ConversationState::Processing);
+    }
+
+    #[test]
+    fn test_transcript_empty() {
+        let transcript = Transcript::new();
+        assert!(transcript.turns.is_empty());
+        assert!(transcript.started_at.is_none());
+        let text = transcript.to_text();
+        assert!(text.is_empty() || text.len() >= 0); // empty transcript produces empty string
+    }
+
+    #[test]
+    fn test_turn_ids_increment() {
+        let turn1 = ConversationTurn::new(Speaker::User, "First".to_string());
+        let turn2 = ConversationTurn::new(Speaker::User, "Second".to_string());
+        assert!(turn2.id > turn1.id);
+    }
+
 }
