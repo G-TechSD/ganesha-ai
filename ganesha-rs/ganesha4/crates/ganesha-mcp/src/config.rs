@@ -394,3 +394,152 @@ pub mod presets {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_server_config_stdio() {
+        let config = ServerConfig::stdio("test", "echo");
+        assert_eq!(config.name, "test");
+        assert!(config.enabled);
+        assert!(!config.trusted);
+        assert_eq!(config.timeout, 30);
+        match config.transport {
+            TransportConfig::Stdio { command, .. } => assert_eq!(command, "echo"),
+            _ => panic!("Expected Stdio transport"),
+        }
+    }
+
+    #[test]
+    fn test_server_config_sse() {
+        let config = ServerConfig::sse("remote", "http://localhost:8080/sse");
+        assert_eq!(config.name, "remote");
+        match config.transport {
+            TransportConfig::Sse { url, .. } => assert_eq!(url, "http://localhost:8080/sse"),
+            _ => panic!("Expected SSE transport"),
+        }
+    }
+
+    #[test]
+    fn test_tool_filter_include() {
+        let mut config = ServerConfig::stdio("test", "echo");
+        config.include_tools = Some(vec!["read".to_string(), "write".to_string()]);
+        
+        assert!(config.should_include_tool("read"));
+        assert!(config.should_include_tool("write"));
+        assert!(!config.should_include_tool("delete"));
+    }
+
+    #[test]
+    fn test_tool_filter_exclude() {
+        let mut config = ServerConfig::stdio("test", "echo");
+        config.exclude_tools = Some(vec!["dangerous_tool".to_string()]);
+        
+        assert!(config.should_include_tool("read"));
+        assert!(!config.should_include_tool("dangerous_tool"));
+    }
+
+    #[test]
+    fn test_tool_filter_exclude_takes_precedence() {
+        let mut config = ServerConfig::stdio("test", "echo");
+        config.include_tools = Some(vec!["tool_a".to_string(), "tool_b".to_string()]);
+        config.exclude_tools = Some(vec!["tool_b".to_string()]);
+        
+        assert!(config.should_include_tool("tool_a"));
+        assert!(!config.should_include_tool("tool_b")); // excluded even though included
+    }
+
+    #[test]
+    fn test_tool_filter_no_filters() {
+        let config = ServerConfig::stdio("test", "echo");
+        assert!(config.should_include_tool("anything"));
+        assert!(config.should_include_tool("everything"));
+    }
+
+    #[test]
+    fn test_presets_filesystem() {
+        let config = presets::filesystem(vec!["/tmp".to_string()]);
+        assert_eq!(config.name, "Filesystem");
+        assert!(config.auto_connect);
+        assert!(!config.trusted);
+    }
+
+    #[test]
+    fn test_presets_github() {
+        let config = presets::github();
+        assert_eq!(config.name, "GitHub");
+        assert!(config.required_env.contains(&"GITHUB_PERSONAL_ACCESS_TOKEN".to_string()));
+    }
+
+    #[test]
+    fn test_presets_brave_search() {
+        let config = presets::brave_search();
+        assert_eq!(config.name, "Brave Search");
+        assert!(config.required_env.contains(&"BRAVE_API_KEY".to_string()));
+    }
+
+    #[test]
+    fn test_presets_puppeteer() {
+        let config = presets::puppeteer();
+        assert_eq!(config.name, "Puppeteer");
+        assert_eq!(config.timeout, 120); // longer timeout for browser
+        assert!(config.auto_connect);
+    }
+
+    #[test]
+    fn test_presets_memory() {
+        let config = presets::memory();
+        assert_eq!(config.name, "Memory");
+        assert!(config.trusted); // memory server is trusted
+        assert!(config.auto_connect);
+    }
+
+    #[test]
+    fn test_mcp_config_merge() {
+        let mut config = McpConfig::default();
+        config.servers.insert("a".to_string(), ServerConfig::stdio("Server A", "cmd_a"));
+        
+        let mut other = McpConfig::default();
+        other.servers.insert("b".to_string(), ServerConfig::stdio("Server B", "cmd_b"));
+        other.servers.insert("a".to_string(), ServerConfig::stdio("Server A Override", "cmd_a2"));
+        
+        config.merge(other);
+        assert_eq!(config.servers.len(), 2);
+        assert_eq!(config.servers["a"].name, "Server A Override");
+        assert_eq!(config.servers["b"].name, "Server B");
+    }
+
+    #[test]
+    fn test_mcp_config_serialization() {
+        let mut config = McpConfig::default();
+        config.servers.insert("test".to_string(), ServerConfig::stdio("Test", "echo"));
+        
+        let json = serde_json::to_string(&config).unwrap();
+        let deserialized: McpConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.servers.len(), 1);
+        assert_eq!(deserialized.servers["test"].name, "Test");
+    }
+
+    #[test]
+    fn test_transport_config_serialization() {
+        // Stdio
+        let stdio = TransportConfig::Stdio {
+            command: "node".to_string(),
+            args: vec!["server.js".to_string()],
+            env: HashMap::new(),
+            cwd: None,
+        };
+        let json = serde_json::to_string(&stdio).unwrap();
+        assert!(json.contains("\"type\":\"stdio\""));
+        
+        // SSE
+        let sse = TransportConfig::Sse {
+            url: "http://localhost:8080".to_string(),
+            auth: Some("Bearer token123".to_string()),
+        };
+        let json = serde_json::to_string(&sse).unwrap();
+        assert!(json.contains("\"type\":\"sse\""));
+    }
+}
