@@ -170,4 +170,73 @@ mod tests {
     fn test_unknown() {
         assert_eq!(get_model_tier("completely-unknown-model"), ModelTier::Unknown);
     }
+
+    #[test]
+    fn test_tier_icons() {
+        assert_eq!(ModelTier::Exceptional.icon(), "🟢");
+        assert_eq!(ModelTier::Capable.icon(), "🟡");
+        assert_eq!(ModelTier::Limited.icon(), "🟠");
+        assert_eq!(ModelTier::Unsafe.icon(), "🔴");
+        assert_eq!(ModelTier::Unknown.icon(), "⚪");
+    }
+
+    #[test]
+    fn test_tier_descriptions() {
+        assert!(ModelTier::Exceptional.description().contains("Excellent"));
+        assert!(ModelTier::Unsafe.description().contains("dangerous"));
+    }
+
+    #[test]
+    fn test_should_warn() {
+        assert!(!ModelTier::Exceptional.should_warn());
+        assert!(!ModelTier::Capable.should_warn());
+        assert!(ModelTier::Limited.should_warn());
+        assert!(ModelTier::Unsafe.should_warn());
+        assert!(ModelTier::Unknown.should_warn());
+    }
+
+    #[test]
+    fn test_tier_ordering() {
+        assert!(ModelTier::Exceptional < ModelTier::Capable);
+        assert!(ModelTier::Capable < ModelTier::Limited);
+        assert!(ModelTier::Limited < ModelTier::Unsafe);
+    }
+
+    #[test]
+    fn test_anthropic_models() {
+        assert_eq!(get_model_tier("claude-sonnet-4-20250514"), ModelTier::Exceptional);
+        assert_eq!(get_model_tier("claude-opus-4"), ModelTier::Exceptional);
+        assert_eq!(get_model_tier("claude-3-5-haiku-20241022"), ModelTier::Capable);
+    }
+
+    #[test]
+    fn test_openai_models() {
+        assert_eq!(get_model_tier("gpt-4o"), ModelTier::Exceptional);
+        assert_eq!(get_model_tier("o1-preview"), ModelTier::Exceptional);
+    }
+
+    #[test]
+    fn test_local_models() {
+        assert_eq!(get_model_tier("qwen-2.5-32b-instruct"), ModelTier::Capable);
+        assert_eq!(get_model_tier("mistral-7b-instruct"), ModelTier::Limited);
+        assert_eq!(get_model_tier("tinyllama-1.1b"), ModelTier::Unsafe);
+    }
+
+    #[test]
+    fn test_model_info_serialization() {
+        let info = ModelInfo {
+            id: "claude-sonnet-4".to_string(),
+            name: "Claude Sonnet 4".to_string(),
+            provider: "anthropic".to_string(),
+            tier: ModelTier::Exceptional,
+            context_length: Some(200000),
+            supports_vision: true,
+            supports_tools: true,
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        let deserialized: ModelInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.tier, ModelTier::Exceptional);
+        assert!(deserialized.supports_vision);
+    }
+
 }
