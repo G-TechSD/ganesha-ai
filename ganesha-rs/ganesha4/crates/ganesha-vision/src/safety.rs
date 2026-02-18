@@ -716,4 +716,128 @@ mod tests {
         guard.reset_emergency_stop().await;
         assert!(!guard.is_emergency_stop_active().await);
     }
+
+    #[test]
+    fn test_action_type_file_operations() {
+        assert!(ActionType::FileOpen.is_file_operation());
+        assert!(ActionType::FileSave.is_file_operation());
+        assert!(ActionType::FileDelete.is_file_operation());
+        assert!(!ActionType::MouseClick.is_file_operation());
+        assert!(!ActionType::NetworkRequest.is_file_operation());
+    }
+
+    #[test]
+    fn test_action_type_system_operations() {
+        assert!(ActionType::SystemCommand.is_system_operation());
+        assert!(ActionType::AppLaunch.is_system_operation());
+        assert!(!ActionType::MouseClick.is_system_operation());
+        assert!(!ActionType::FileOpen.is_system_operation());
+    }
+
+    #[test]
+    fn test_action_type_network_operations() {
+        assert!(ActionType::NetworkRequest.is_network_operation());
+        assert!(!ActionType::MouseClick.is_network_operation());
+        assert!(!ActionType::FileDelete.is_network_operation());
+    }
+
+    #[test]
+    fn test_action_type_custom() {
+        let custom = ActionType::Custom(42);
+        assert!(custom.is_destructive());
+        assert!(!custom.is_file_operation());
+    }
+
+    #[test]
+    fn test_audit_entry_with_session() {
+        let entry = AuditEntry::new(ActionType::MouseClick, "click")
+            .with_session("sess-123");
+        assert_eq!(entry.session_id, "sess-123");
+    }
+
+    #[test]
+    fn test_audit_entry_serialization() {
+        let entry = AuditEntry::new(ActionType::FileDelete, "Delete config")
+            .with_target_app("vim")
+            .with_details(serde_json::json!({"path": "/etc/config"}))
+            .blocked("Safety violation");
+
+        let json = serde_json::to_string(&entry).unwrap();
+        let deserialized: AuditEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.action_type, ActionType::FileDelete);
+        assert!(!deserialized.allowed);
+        assert_eq!(deserialized.target_app, Some("vim".to_string()));
+    }
+
+    #[test]
+    fn test_rate_limiter_empty() {
+        let limiter = RateLimiter::new(5, Duration::from_secs(60));
+        assert_eq!(limiter.current_rate(), 0);
+    }
+
+    #[test]
+    fn test_rate_limiter_within_limit() {
+        let mut limiter = RateLimiter::new(10, Duration::from_secs(60));
+        for _ in 0..9 {
+            assert!(limiter.check_and_record());
+        }
+        assert_eq!(limiter.current_rate(), 9);
+    }
+
+    #[test]
+    fn test_safety_stats_serialization() {
+        let stats = SafetyStats {
+            total_actions: 42,
+            total_blocked: 3,
+            click_rate: 10,
+            keystroke_rate: 50,
+            emergency_stops: 1,
+            session_id: "test-session".to_string(),
+        };
+        let json = serde_json::to_string(&stats).unwrap();
+        let deserialized: SafetyStats = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.total_actions, 42);
+        assert_eq!(deserialized.emergency_stops, 1);
+    }
+
+    #[tokio::test]
+    async fn test_safety_guard_action_counter() {
+        let config = VisionConfig::default();
+        let guard = SafetyGuard::new(&config);
+        assert_eq!(guard.total_actions().await, 0);
+    }
+
+    #[tokio::test]
+    async fn test_safety_guard_stats() {
+        let config = VisionConfig::default();
+        let guard = SafetyGuard::new(&config);
+        let stats = guard.get_stats().await;
+        assert_eq!(stats.total_actions, 0);
+        assert_eq!(stats.click_rate, 0);
+    }
+
+    #[tokio::test]
+    async fn test_emergency_stop_monitor() {
+        let config = VisionConfig::default();
+        let guard = Arc::new(SafetyGuard::new(&config));
+        let monitor = EmergencyStopMonitor::new(guard.clone());
+
+        assert!(!monitor.is_running().await);
+        monitor.start().await;
+        assert!(monitor.is_running().await);
+        monitor.stop().await;
+        assert!(!monitor.is_running().await);
+    }
+
+    #[tokio::test]
+    async fn test_emergency_stop_monitor_trigger() {
+        let config = VisionConfig::default();
+        let guard = Arc::new(SafetyGuard::new(&config));
+        let monitor = EmergencyStopMonitor::new(guard.clone());
+
+        assert!(!guard.is_emergency_stop_active().await);
+        monitor.trigger().await;
+        assert!(guard.is_emergency_stop_active().await);
+    }
+
 }
