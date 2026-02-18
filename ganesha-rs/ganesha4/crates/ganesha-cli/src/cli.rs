@@ -108,6 +108,9 @@ pub enum Commands {
         action: VoiceAction,
     },
 
+    /// Run provider setup wizard
+    Setup,
+
     /// Generate shell completions
     Completions {
         /// Shell to generate completions for

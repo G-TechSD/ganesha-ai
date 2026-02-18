@@ -67,6 +67,9 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::Voice { action }) => {
             commands::voice::run(action).await?;
         }
+        Some(Commands::Setup) => {
+            setup::run_setup_wizard()?;
+        }
         Some(Commands::Completions { shell }) => {
             cli::generate_completions(shell);
         }
