@@ -421,3 +421,102 @@ fn prompt_secret(msg: &str) -> anyhow::Result<String> {
     result?;
     Ok(input.trim().to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_provider_type_display_names() {
+        assert_eq!(ProviderType::Anthropic.display_name(), "Anthropic (Claude)");
+        assert_eq!(ProviderType::OpenAI.display_name(), "OpenAI (GPT-4)");
+        assert_eq!(ProviderType::Gemini.display_name(), "Google (Gemini)");
+        assert_eq!(ProviderType::OpenRouter.display_name(), "OpenRouter (Multi-provider)");
+        assert_eq!(ProviderType::Local.display_name(), "Local Server (Ollama/LM Studio/etc)");
+    }
+
+    #[test]
+    fn test_provider_type_base_urls() {
+        assert!(ProviderType::Anthropic.default_base_url().is_some());
+        assert!(ProviderType::OpenAI.default_base_url().is_some());
+        assert!(ProviderType::Local.default_base_url().is_none());
+    }
+
+    #[test]
+    fn test_provider_type_requires_api_key() {
+        assert!(ProviderType::Anthropic.requires_api_key());
+        assert!(ProviderType::OpenAI.requires_api_key());
+        assert!(!ProviderType::Local.requires_api_key());
+    }
+
+    #[test]
+    fn test_mask_api_key() {
+        assert_eq!(mask_api_key("sk-abcdefghijklmnop"), "sk-a...mnop");
+        assert_eq!(mask_api_key("short"), "*****");
+        assert_eq!(mask_api_key("12345678"), "********");
+    }
+
+    #[test]
+    fn test_providers_config_default() {
+        let config = ProvidersConfig::default();
+        assert!(config.providers.is_empty());
+        assert!(config.default_provider.is_none());
+        assert!(!config.has_providers());
+    }
+
+    #[test]
+    fn test_providers_config_with_provider() {
+        let mut config = ProvidersConfig::default();
+        config.providers.push(ProviderConfig {
+            name: "local".to_string(),
+            provider_type: ProviderType::Local,
+            api_key: None,
+            base_url: Some("http://localhost:1234".to_string()),
+            default_model: None,
+            enabled: true,
+        });
+        assert!(config.has_providers());
+        assert_eq!(config.enabled_providers().len(), 1);
+    }
+
+    #[test]
+    fn test_providers_config_disabled() {
+        let mut config = ProvidersConfig::default();
+        config.providers.push(ProviderConfig {
+            name: "disabled".to_string(),
+            provider_type: ProviderType::OpenAI,
+            api_key: Some("key".to_string()),
+            base_url: None,
+            default_model: None,
+            enabled: false,
+        });
+        assert!(!config.has_providers());
+        assert_eq!(config.enabled_providers().len(), 0);
+    }
+
+    #[test]
+    fn test_signup_urls() {
+        assert!(get_signup_url(ProviderType::Anthropic).contains("anthropic"));
+        assert!(get_signup_url(ProviderType::OpenAI).contains("openai"));
+        assert!(get_signup_url(ProviderType::Gemini).contains("google"));
+        assert!(get_signup_url(ProviderType::OpenRouter).contains("openrouter"));
+        assert!(get_signup_url(ProviderType::Local).is_empty());
+    }
+
+    #[test]
+    fn test_provider_config_serialization() {
+        let config = ProviderConfig {
+            name: "test".to_string(),
+            provider_type: ProviderType::Local,
+            api_key: None,
+            base_url: Some("http://localhost:1234".to_string()),
+            default_model: Some("gpt-oss-20b".to_string()),
+            enabled: true,
+        };
+        let toml = toml::to_string(&config).unwrap();
+        let deserialized: ProviderConfig = toml::from_str(&toml).unwrap();
+        assert_eq!(deserialized.name, "test");
+        assert_eq!(deserialized.provider_type, ProviderType::Local);
+        assert_eq!(deserialized.base_url, Some("http://localhost:1234".to_string()));
+    }
+}
