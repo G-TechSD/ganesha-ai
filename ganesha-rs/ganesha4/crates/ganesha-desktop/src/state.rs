@@ -151,3 +151,122 @@ impl Default for AtomicFlags {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_app_state_defaults() {
+        let state = AppState::new();
+        assert!(state.window_visible);
+        assert!(!state.border_visible);
+        assert!(!state.is_listening);
+        assert!(!state.is_processing);
+        assert!(!state.is_connected);
+        assert_eq!(state.risk_level, "Normal");
+        assert_eq!(state.personality, "Professional");
+        assert!(state.session_id.is_none());
+        assert_eq!(state.message_count, 0);
+    }
+
+    #[test]
+    fn test_connection_state() {
+        let mut state = AppState::new();
+        assert!(!state.is_connected);
+        state.set_connected(true);
+        assert!(state.is_connected);
+        state.set_connected(false);
+        assert!(!state.is_connected);
+    }
+
+    #[test]
+    fn test_processing_state() {
+        let mut state = AppState::new();
+        state.set_processing(true);
+        assert!(state.is_processing);
+        state.set_processing(false);
+        assert!(!state.is_processing);
+    }
+
+    #[test]
+    fn test_session_lifecycle() {
+        let mut state = AppState::new();
+
+        // Start session
+        state.start_session("session-123".to_string());
+        assert_eq!(state.session_id, Some("session-123".to_string()));
+        assert_eq!(state.message_count, 0);
+
+        // Add messages
+        state.add_message(100);
+        state.add_message(200);
+        assert_eq!(state.message_count, 2);
+        assert_eq!(state.token_usage.total, 300);
+
+        // End session
+        state.end_session();
+        assert!(state.session_id.is_none());
+    }
+
+    #[test]
+    fn test_token_usage_tracking() {
+        let mut state = AppState::new();
+        state.start_session("test".to_string());
+        state.add_message(50);
+        state.add_message(75);
+        state.add_message(125);
+        assert_eq!(state.message_count, 3);
+        assert_eq!(state.token_usage.total, 250);
+    }
+
+    #[test]
+    fn test_state_serialization() {
+        let state = AppState::new();
+        let json = serde_json::to_string(&state).unwrap();
+        let deserialized: AppState = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.risk_level, "Normal");
+        assert_eq!(deserialized.window_visible, true);
+    }
+
+    #[test]
+    fn test_atomic_flags() {
+        let flags = AtomicFlags::new();
+        assert!(!flags.is_push_to_talk());
+        assert!(!flags.is_emergency_stop());
+        assert!(flags.is_running());
+
+        flags.set_push_to_talk(true);
+        assert!(flags.is_push_to_talk());
+        flags.set_push_to_talk(false);
+        assert!(!flags.is_push_to_talk());
+    }
+
+    #[test]
+    fn test_emergency_stop() {
+        let flags = AtomicFlags::new();
+        assert!(!flags.is_emergency_stop());
+        flags.trigger_emergency_stop();
+        assert!(flags.is_emergency_stop());
+        flags.clear_emergency_stop();
+        assert!(!flags.is_emergency_stop());
+    }
+
+    #[test]
+    fn test_running_flag() {
+        let flags = AtomicFlags::new();
+        assert!(flags.is_running());
+        flags.stop();
+        assert!(!flags.is_running());
+    }
+
+    #[test]
+    fn test_atomic_flags_thread_safe() {
+        let flags = AtomicFlags::new();
+        let clone = flags.clone();
+
+        // Both should see same state
+        flags.set_push_to_talk(true);
+        assert!(clone.is_push_to_talk());
+    }
+}

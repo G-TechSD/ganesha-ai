@@ -173,3 +173,96 @@ impl DesktopConfig {
         dirs::config_dir().map(|p| p.join("ganesha").join("desktop.toml"))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_desktop_config_defaults() {
+        let config = DesktopConfig::default();
+        assert!(config.window.glass_effect);
+        assert_eq!(config.window.width, 800);
+        assert_eq!(config.window.height, 600);
+        assert!(!config.window.start_minimized);
+        assert!(config.tray.enabled);
+        assert!(config.tray.minimize_to_tray);
+        assert!(config.border.enabled);
+        assert_eq!(config.border.color, "#00FF00");
+        assert_eq!(config.border.width, 4);
+    }
+
+    #[test]
+    fn test_hotkey_defaults() {
+        let config = HotkeyConfig::default();
+        assert_eq!(config.push_to_talk, "Ctrl+Space");
+        assert_eq!(config.toggle_window, "Ctrl+Shift+G");
+        assert_eq!(config.emergency_stop, "Escape");
+        assert_eq!(config.toggle_voice, "Ctrl+Shift+V");
+    }
+
+    #[test]
+    fn test_theme_defaults() {
+        let config = ThemeConfig::default();
+        assert!(config.dark_mode);
+        assert_eq!(config.primary_color, "#6366f1");
+        assert_eq!(config.accent_color, "#22c55e");
+        assert!(config.background_opacity > 0.0 && config.background_opacity <= 1.0);
+    }
+
+    #[test]
+    fn test_config_serialization() {
+        let config = DesktopConfig::default();
+        let toml_str = toml::to_string_pretty(&config).unwrap();
+        let deserialized: DesktopConfig = toml::from_str(&toml_str).unwrap();
+        assert_eq!(deserialized.window.width, 800);
+        assert_eq!(deserialized.hotkeys.push_to_talk, "Ctrl+Space");
+    }
+
+    #[test]
+    fn test_config_json_serialization() {
+        let config = DesktopConfig::default();
+        let json = serde_json::to_string(&config).unwrap();
+        let deserialized: DesktopConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.theme.primary_color, "#6366f1");
+    }
+
+    #[test]
+    fn test_window_config() {
+        let config = WindowConfig {
+            glass_effect: false,
+            width: 1200,
+            height: 800,
+            start_minimized: true,
+            always_on_top: true,
+            title: "Custom Title".to_string(),
+        };
+        assert!(!config.glass_effect);
+        assert_eq!(config.width, 1200);
+        assert!(config.always_on_top);
+    }
+
+    #[test]
+    fn test_border_config_customization() {
+        let config = BorderConfig {
+            enabled: false,
+            color: "#FF0000".to_string(),
+            width: 8,
+            animate: false,
+        };
+        assert!(!config.enabled);
+        assert_eq!(config.color, "#FF0000");
+        assert_eq!(config.width, 8);
+    }
+
+    #[test]
+    fn test_tray_config() {
+        let config = TrayConfig {
+            enabled: false,
+            minimize_to_tray: false,
+            show_notifications: false,
+        };
+        assert!(!config.enabled);
+        assert!(!config.minimize_to_tray);
+    }
+}
