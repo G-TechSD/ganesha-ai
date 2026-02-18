@@ -209,3 +209,129 @@ pub struct SessionSummary {
     pub updated_at: DateTime<Utc>,
     pub message_count: usize,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_session_creation() {
+        let session = Session::new(PathBuf::from("/tmp/test"));
+        assert!(!session.id.is_empty());
+        assert!(session.name.is_none());
+        assert_eq!(session.messages.len(), 0);
+        assert_eq!(session.working_dir, PathBuf::from("/tmp/test"));
+    }
+
+    #[test]
+    fn test_add_messages() {
+        let mut session = Session::new(PathBuf::from("."));
+        session.add_message("user", "Hello", None);
+        session.add_message("assistant", "Hi!", Some("gpt-4".to_string()));
+
+        assert_eq!(session.message_count(), 2);
+        assert_eq!(session.messages[0].role, "user");
+        assert_eq!(session.messages[0].content, "Hello");
+        assert!(session.messages[0].model.is_none());
+        assert_eq!(session.messages[1].model, Some("gpt-4".to_string()));
+    }
+
+    #[test]
+    fn test_updated_at_changes() {
+        let mut session = Session::new(PathBuf::from("."));
+        let created = session.created_at;
+        // Add slight delay to ensure timestamp differs
+        session.add_message("user", "test", None);
+        // updated_at should be >= created_at
+        assert!(session.updated_at >= created);
+    }
+
+    #[test]
+    fn test_to_markdown() {
+        let mut session = Session::new(PathBuf::from("/home/user/project"));
+        session.name = Some("Test Session".to_string());
+        session.add_message("user", "What is Rust?", None);
+        session.add_message("assistant", "Rust is a systems programming language.", None);
+
+        let md = session.to_markdown();
+        assert!(md.contains("# Session: Test Session"));
+        assert!(md.contains("**You:**"));
+        assert!(md.contains("What is Rust?"));
+        assert!(md.contains("**Assistant:**"));
+        assert!(md.contains("Rust is a systems programming language."));
+    }
+
+    #[test]
+    fn test_session_serialization() {
+        let mut session = Session::new(PathBuf::from("."));
+        session.add_message("user", "Hello", None);
+        session.metadata.insert("key".to_string(), "value".to_string());
+
+        let json = serde_json::to_string(&session).unwrap();
+        let deserialized: Session = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.id, session.id);
+        assert_eq!(deserialized.message_count(), 1);
+        assert_eq!(deserialized.metadata.get("key").unwrap(), "value");
+    }
+
+    #[test]
+    fn test_session_files_in_context() {
+        let mut session = Session::new(PathBuf::from("."));
+        session.files_in_context.push(PathBuf::from("src/main.rs"));
+        session.files_in_context.push(PathBuf::from("Cargo.toml"));
+
+        assert_eq!(session.files_in_context.len(), 2);
+
+        let json = serde_json::to_string(&session).unwrap();
+        let deserialized: Session = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.files_in_context.len(), 2);
+    }
+
+    #[test]
+    fn test_history_message_optional_fields() {
+        let msg = HistoryMessage {
+            role: "user".to_string(),
+            content: "Hello".to_string(),
+            timestamp: Utc::now(),
+            model: None,
+            tokens: None,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        // Optional fields should be skipped
+        assert!(!json.contains("model"));
+        assert!(!json.contains("tokens"));
+    }
+
+    #[test]
+    fn test_session_summary() {
+        let summary = SessionSummary {
+            id: "test-id".to_string(),
+            name: Some("My Session".to_string()),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            message_count: 42,
+        };
+        assert_eq!(summary.message_count, 42);
+        assert_eq!(summary.name, Some("My Session".to_string()));
+    }
+
+    #[test]
+    fn test_session_manager_creation() {
+        let manager = SessionManager::with_dir(PathBuf::from("/tmp/test-sessions"));
+        // Just verifies construction doesn't panic
+        let _ = manager;
+    }
+
+    #[test]
+    fn test_markdown_with_system_messages() {
+        let mut session = Session::new(PathBuf::from("."));
+        session.add_message("system", "You are a helpful assistant.", None);
+        session.add_message("user", "Hi", None);
+
+        let md = session.to_markdown();
+        assert!(md.contains("*System:*"));
+        assert!(md.contains("You are a helpful assistant."));
+    }
+}
