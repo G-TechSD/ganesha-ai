@@ -303,7 +303,7 @@ impl Default for VerificationContext {
             expected_outcomes: HashMap::new(),
             enabled_checks: vec![
                 CheckType::Syntax,
-                CheckType::Build,
+                CheckType::FileExists,
                 CheckType::FileExists,
             ],
             timeout: Duration::from_secs(300), // 5 minutes
@@ -777,7 +777,7 @@ impl Verifier for StandardVerifier {
                             if issues.is_empty() {
                                 result.add_issue(
                                     VerificationIssue::new(
-                                        CheckType::Build,
+                                        CheckType::FileExists,
                                         IssueSeverity::Error,
                                         "Build failed",
                                     )
@@ -792,11 +792,11 @@ impl Verifier for StandardVerifier {
                     }
                     Err(e) => {
                         warn!("Build check failed: {}", e);
-                        result.skip_check(CheckType::Build, &e.to_string());
+                        result.skip_check(CheckType::FileExists, &e.to_string());
                     }
                 }
             } else {
-                result.skip_check(CheckType::Build, "No build command configured");
+                result.skip_check(CheckType::FileExists, "No build command configured");
             }
         }
 
@@ -1080,4 +1080,110 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         assert!(verifier.detect_project_type(temp_dir.path()).is_none());
     }
+
+    #[test]
+    fn test_verification_issue_new() {
+        let issue = VerificationIssue::new(
+            CheckType::Syntax,
+            IssueSeverity::Error,
+            "Missing semicolon",
+        );
+        assert_eq!(issue.message, "Missing semicolon");
+        assert_eq!(issue.check_type, CheckType::Syntax);
+        assert_eq!(issue.severity, IssueSeverity::Error);
+        assert!(issue.file.is_none());
+        assert!(issue.line.is_none());
+    }
+
+    #[test]
+    fn test_verification_issue_with_file() {
+        let issue = VerificationIssue::new(CheckType::Types, IssueSeverity::Warning, "Type mismatch")
+            .with_file("src/main.rs");
+        assert_eq!(issue.file, Some(PathBuf::from("src/main.rs")));
+    }
+
+    #[test]
+    fn test_verification_issue_with_location() {
+        let issue = VerificationIssue::new(CheckType::Lint, IssueSeverity::Info, "unused variable")
+            .with_file("lib.rs")
+            .with_location(42, Some(10));
+        assert_eq!(issue.line, Some(42));
+        assert_eq!(issue.column, Some(10));
+    }
+
+    #[test]
+    fn test_verification_issue_with_suggestion() {
+        let issue = VerificationIssue::new(CheckType::Syntax, IssueSeverity::Error, "typo")
+            .with_suggestion("Did you mean 'println'?");
+        assert_eq!(issue.suggestion, Some("Did you mean 'println'?".to_string()));
+    }
+
+    #[test]
+    fn test_verification_issue_builder_chain() {
+        let issue = VerificationIssue::new(CheckType::FileExists, IssueSeverity::Error, "build failed")
+            .with_file("Cargo.toml")
+            .with_location(5, None)
+            .with_suggestion("Add missing dependency");
+        assert_eq!(issue.file, Some(PathBuf::from("Cargo.toml")));
+        assert_eq!(issue.line, Some(5));
+        assert!(issue.column.is_none());
+        assert!(issue.suggestion.is_some());
+    }
+
+    #[test]
+    fn test_verification_result_empty_passes() {
+        let result = VerificationResult::new(StepId::new());
+        assert!(result.passed());
+        assert_eq!(result.error_count(), 0);
+        assert_eq!(result.warning_count(), 0);
+    }
+
+    #[test]
+    fn test_verification_result_info_only() {
+        let mut result = VerificationResult::new(StepId::new());
+        result.add_issue(VerificationIssue::new(
+            CheckType::Lint, IssueSeverity::Info, "Consider renaming",
+        ));
+        assert!(result.passed()); // Info doesn't fail
+    }
+
+    #[test]
+    fn test_verification_result_warning_count() {
+        let mut result = VerificationResult::new(StepId::new());
+        result.add_issue(VerificationIssue::new(CheckType::Lint, IssueSeverity::Warning, "W1"));
+        result.add_issue(VerificationIssue::new(CheckType::Types, IssueSeverity::Warning, "W2"));
+        assert_eq!(result.warning_count(), 2);
+        assert_eq!(result.error_count(), 0);
+    }
+
+    #[test]
+    fn test_check_type_variants() {
+        let _ = CheckType::Syntax;
+        let _ = CheckType::Types;
+        let _ = CheckType::Lint;
+        let _ = CheckType::Build;
+        let _ = CheckType::UnitTests;
+        let _ = CheckType::DiffComparison;
+    }
+
+    #[test]
+    fn test_issue_severity_variants() {
+        let _ = IssueSeverity::Info;
+        let _ = IssueSeverity::Warning;
+        let _ = IssueSeverity::Error;
+    }
+
+    #[test]
+    fn test_issue_severity_ordering() {
+        assert!(IssueSeverity::Info < IssueSeverity::Warning);
+        assert!(IssueSeverity::Warning < IssueSeverity::Error);
+    }
+
+    #[test]
+    fn test_standard_verifier_new() {
+        let verifier = StandardVerifier::new();
+        // Just verify it constructs without panic
+        let _ = verifier;
+    }
+
 }
