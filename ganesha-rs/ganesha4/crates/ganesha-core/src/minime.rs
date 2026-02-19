@@ -1513,4 +1513,75 @@ mod tests {
 
         assert!(haiku_cost < opus_cost);
     }
+
+    
+    #[test]
+    fn test_agent_id_unique() {
+        let id1 = AgentId::new();
+        let id2 = AgentId::new();
+        assert_ne!(id1.as_uuid(), id2.as_uuid());
+    }
+
+    #[test]
+    fn test_agent_status_is_finished_idle() {
+        assert!(!AgentStatus::Idle.is_finished());
+    }
+
+    #[test]
+    fn test_agent_status_is_finished_working() {
+        assert!(!AgentStatus::Working.is_finished());
+    }
+
+    #[test]
+    fn test_agent_status_is_finished_completed() {
+        assert!(AgentStatus::Completed.is_finished());
+    }
+
+    #[test]
+    fn test_agent_status_is_finished_failed() {
+        assert!(AgentStatus::Failed.is_finished());
+    }
+
+    #[test]
+    fn test_agent_status_is_finished_cancelled() {
+        assert!(AgentStatus::Cancelled.is_finished());
+    }
+
+    #[test]
+    fn test_subagent_new_fields() {
+        let agent = SubAgent::new("coder", "write tests", "claude-3");
+        assert_eq!(agent.name, "coder");
+        assert_eq!(agent.assigned_task, "write tests");
+        assert_eq!(agent.model, "claude-3");
+        assert_eq!(agent.status, AgentStatus::Idle);
+        assert!(agent.output_result.is_none());
+        assert!(agent.completion_time.is_none());
+    }
+
+    #[test]
+    fn test_subagent_with_context_field() {
+        let agent = SubAgent::new("reviewer", "review PR", "gpt-4")
+            .with_context("This is a Rust project");
+        assert_eq!(agent.input_context, "This is a Rust project");
+    }
+
+    #[test]
+    fn test_token_usage_default() {
+        let usage = TokenUsage::default();
+        assert_eq!(usage.prompt_tokens, 0);
+        assert_eq!(usage.completion_tokens, 0);
+        assert_eq!(usage.total_tokens, 0);
+    }
+
+    #[test]
+    fn test_progress_type_variants() {
+        let _ = ProgressType::Started;
+        let _ = ProgressType::Working;
+        let _ = ProgressType::Completed;
+        let _ = ProgressType::Failed;
+        let _ = ProgressType::Cancelled;
+        let _ = ProgressType::Escalating;
+        let _ = ProgressType::Progress { percent: Some(50) };
+    }
+
 }
