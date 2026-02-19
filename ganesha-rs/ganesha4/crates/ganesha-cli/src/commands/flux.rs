@@ -440,4 +440,70 @@ mod tests {
         assert!(stripped.contains("After"));
         assert!(!stripped.contains("ls"));
     }
+
+    #[test]
+    fn test_parse_duration_zero_hours() {
+        assert_eq!(parse_duration("0h"), Some(Duration::from_secs(0)));
+    }
+
+    #[test]
+    fn test_parse_duration_large() {
+        assert_eq!(parse_duration("24h"), Some(Duration::from_secs(86400)));
+    }
+
+    #[test]
+    fn test_parse_duration_whitespace() {
+        assert_eq!(parse_duration("  2h  "), Some(Duration::from_secs(7200)));
+    }
+
+    #[test]
+    fn test_format_duration_zero() {
+        assert_eq!(format_duration(Duration::from_secs(0)), "0s");
+    }
+
+    #[test]
+    fn test_format_duration_large() {
+        assert_eq!(format_duration(Duration::from_secs(7290)), "2h 1m");
+    }
+
+    #[test]
+    fn test_extract_bash_command_sh_block() {
+        let response = "```sh\necho hello\n```";
+        assert_eq!(extract_bash_command(response), Some("echo hello".to_string()));
+    }
+
+    #[test]
+    fn test_extract_bash_command_multiline() {
+        let response = "```bash\n# setup\ncd /tmp\nls\n```";
+        assert_eq!(extract_bash_command(response), Some("cd /tmp".to_string()));
+    }
+
+    #[test]
+    fn test_extract_bash_command_unmarked_block() {
+        let response = "Here:\n```\npwd\n```";
+        assert_eq!(extract_bash_command(response), Some("pwd".to_string()));
+    }
+
+    #[test]
+    fn test_strip_code_blocks_multiple() {
+        let text = "A```bash\nx\n```B```sh\ny\n```C";
+        let stripped = strip_code_blocks(text);
+        assert!(stripped.contains("A"));
+        assert!(stripped.contains("B"));
+        assert!(stripped.contains("C"));
+        assert!(!stripped.contains("x"));
+        assert!(!stripped.contains("y"));
+    }
+
+    #[test]
+    fn test_strip_code_blocks_no_blocks() {
+        let text = "Just regular text";
+        assert_eq!(strip_code_blocks(text), "Just regular text");
+    }
+
+    #[test]
+    fn test_parse_duration_combined_1h0m() {
+        assert_eq!(parse_duration("1h0m"), Some(Duration::from_secs(3600)));
+    }
+
 }
