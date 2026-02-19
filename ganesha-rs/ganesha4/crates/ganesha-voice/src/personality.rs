@@ -537,4 +537,101 @@ mod tests {
         assert_eq!(custom.name, "Robot");
         assert_eq!(custom.greeting, Some("GREETINGS HUMAN".to_string()));
     }
+
+    #[test]
+    fn test_personality_builder_pattern() {
+        let p = Personality::new("test", "Test Bot")
+            .with_description("A test personality")
+            .with_greeting("Hello!")
+            .with_farewell("Bye!");
+        assert_eq!(p.id, "test");
+        assert_eq!(p.name, "Test Bot");
+        assert_eq!(p.description, "A test personality");
+        assert_eq!(p.greeting, Some("Hello!".to_string()));
+        assert_eq!(p.farewell, Some("Bye!".to_string()));
+    }
+
+    #[test]
+    fn test_personality_custom_phrases() {
+        let p = Personality::new("custom", "Custom")
+            .with_custom_phrase("error", "Oops!")
+            .with_custom_phrase("success", "Yay!");
+        assert_eq!(p.custom_phrases.len(), 2);
+        assert_eq!(p.custom_phrases.get("error").unwrap().as_str(), "Oops!");
+    }
+
+    #[test]
+    fn test_builtin_professional() {
+        let p = BuiltInPersonalities::professional();
+        assert_eq!(p.id, "professional");
+        assert!(!p.name.is_empty());
+    }
+
+    #[test]
+    fn test_builtin_friendly() {
+        let p = BuiltInPersonalities::friendly();
+        assert_eq!(p.id, "friendly");
+    }
+
+    #[test]
+    fn test_builtin_mentor() {
+        let p = BuiltInPersonalities::mentor();
+        assert_eq!(p.id, "mentor");
+    }
+
+    #[test]
+    fn test_builtin_pirate() {
+        let p = BuiltInPersonalities::pirate();
+        assert_eq!(p.id, "pirate");
+    }
+
+    #[test]
+    fn test_all_builtins_have_ids() {
+        let all = BuiltInPersonalities::all();
+        for p in &all {
+            assert!(!p.id.is_empty(), "Personality missing id");
+            assert!(!p.name.is_empty(), "Personality {} missing name", p.id);
+        }
+    }
+
+    #[test]
+    fn test_personality_manager_add_remove() {
+        let mut manager = PersonalityManager::new();
+        let custom = Personality::new("test1", "Test 1");
+        manager.add(custom);
+        assert!(manager.get("test1").is_some());
+        let _ = manager.remove("test1");
+        assert!(manager.get("test1").is_none());
+    }
+
+    #[test]
+    fn test_personality_manager_set_current() {
+        let mut manager = PersonalityManager::new();
+        let p = Personality::new("mybot", "My Bot");
+        manager.add(p);
+        let _ = manager.set_current("mybot");
+        let current = manager.current();
+        assert!(!current.id.is_empty());
+    }
+
+    #[test]
+    fn test_personality_manager_list() {
+        let manager = PersonalityManager::new();
+        let list = manager.list();
+        // Should have builtins
+        assert!(list.len() >= 3);
+    }
+
+    #[test]
+    fn test_voice_selection_default() {
+        let vs = VoiceSelection::default();
+        // Should have reasonable defaults
+        let _ = vs;
+    }
+
+    #[test]
+    fn test_speaking_style_default() {
+        let style = SpeakingStyle::default();
+        let _ = style;
+    }
 }

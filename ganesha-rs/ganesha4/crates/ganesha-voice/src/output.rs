@@ -787,4 +787,92 @@ mod tests {
         assert!(!voice.voice_id.is_empty());
         assert!(!voice.name.is_empty());
     }
+
+    #[test]
+    fn test_openai_voice_all_variants() {
+        let voices = vec![
+            OpenAIVoice::Alloy,
+            OpenAIVoice::Echo,
+            OpenAIVoice::Fable,
+            OpenAIVoice::Onyx,
+            OpenAIVoice::Nova,
+            OpenAIVoice::Shimmer,
+        ];
+        for voice in &voices {
+            let s = voice.to_string();
+            assert!(!s.is_empty());
+        }
+        assert_eq!(voices.len(), 6);
+    }
+
+    #[test]
+    fn test_openai_voice_default_is_nova() {
+        let voice = OpenAIVoice::default();
+        assert_eq!(voice.to_string(), "nova");
+    }
+
+    #[test]
+    fn test_voice_output_settings_custom() {
+        let mut settings = VoiceOutputSettings::default();
+        settings.speed = 1.5;
+        settings.volume = 0.8;
+        settings.playback_enabled = false;
+        assert_eq!(settings.speed, 1.5);
+        assert_eq!(settings.volume, 0.8);
+        assert!(!settings.playback_enabled);
+    }
+
+    #[test]
+    fn test_speech_audio_creation() {
+        let audio = SpeechAudio {
+            data: bytes::Bytes::from(vec![1u8, 2, 3, 4]),
+            format: AudioFormat::Mp3,
+            duration: Some(std::time::Duration::from_secs(1)),
+            text: "hello".to_string(),
+        };
+        assert_eq!(audio.data.len(), 4);
+        assert_eq!(audio.text, "hello");
+    }
+
+    #[test]
+    fn test_audio_formats() {
+        let formats = vec![
+            AudioFormat::Mp3,
+            AudioFormat::Wav,
+            AudioFormat::Opus,
+            AudioFormat::Pcm,
+        ];
+        assert_eq!(formats.len(), 4);
+    }
+
+    #[test]
+    fn test_speech_audio_empty() {
+        let audio = SpeechAudio {
+            data: bytes::Bytes::new(),
+            format: AudioFormat::Wav,
+            duration: None,
+            text: String::new(),
+        };
+        assert!(audio.data.is_empty());
+        assert!(audio.duration.is_none());
+    }
+
+    #[test]
+    fn test_elevenlabs_voice_custom() {
+        let voice = ElevenLabsVoice {
+            voice_id: "custom123".to_string(),
+            name: "Custom Voice".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(voice.voice_id, "custom123");
+        assert_eq!(voice.name, "Custom Voice");
+    }
+
+    #[test]
+    fn test_openai_voice_display_all() {
+        assert_eq!(OpenAIVoice::Echo.to_string(), "echo");
+        assert_eq!(OpenAIVoice::Fable.to_string(), "fable");
+        assert_eq!(OpenAIVoice::Onyx.to_string(), "onyx");
+        assert_eq!(OpenAIVoice::Shimmer.to_string(), "shimmer");
+    }
 }
