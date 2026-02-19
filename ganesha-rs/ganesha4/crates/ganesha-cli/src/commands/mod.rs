@@ -9,3 +9,4 @@ pub mod mcp;
 pub mod models;
 pub mod session;
 pub mod voice;
+pub mod flux;

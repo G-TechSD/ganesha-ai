@@ -67,6 +67,9 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::Voice { action }) => {
             commands::voice::run(action).await?;
         }
+        Some(Commands::Flux { ref duration, ref task }) => {
+            commands::flux::run(duration.clone(), task.clone(), &cli).await?;
+        }
         Some(Commands::Setup) => {
             setup::run_setup_wizard()?;
         }

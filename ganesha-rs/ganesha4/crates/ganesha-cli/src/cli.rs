@@ -108,6 +108,14 @@ pub enum Commands {
         action: VoiceAction,
     },
 
+    /// Time-boxed autonomous work mode
+    Flux {
+        /// Duration (e.g. 2h, 30m, 1h30m)
+        duration: String,
+        /// Task description
+        task: String,
+    },
+
     /// Run provider setup wizard
     Setup,
 
