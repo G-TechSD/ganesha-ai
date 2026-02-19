@@ -233,4 +233,101 @@ mod tests {
 
         assert!(RiskLevel::Yolo.allows(OperationRisk::Critical));
     }
+
+    #[test]
+    fn test_risk_level_descriptions() {
+        assert!(!RiskLevel::Safe.description().is_empty());
+        assert!(!RiskLevel::Normal.description().is_empty());
+        assert!(!RiskLevel::Trusted.description().is_empty());
+        assert!(!RiskLevel::Yolo.description().is_empty());
+    }
+
+    #[test]
+    fn test_risk_level_icons() {
+        assert_eq!(RiskLevel::Safe.icon(), "🟢");
+        assert_eq!(RiskLevel::Normal.icon(), "🟡");
+        assert_eq!(RiskLevel::Trusted.icon(), "🟠");
+        assert_eq!(RiskLevel::Yolo.icon(), "🔴");
+    }
+
+    #[test]
+    fn test_risk_level_auto_approves() {
+        // Safe: only auto-approves ReadOnly
+        assert!(RiskLevel::Safe.auto_approves(OperationRisk::ReadOnly));
+        assert!(!RiskLevel::Safe.auto_approves(OperationRisk::Low));
+
+        // Normal: only auto-approves ReadOnly
+        assert!(RiskLevel::Normal.auto_approves(OperationRisk::ReadOnly));
+        assert!(!RiskLevel::Normal.auto_approves(OperationRisk::Low));
+
+        // Trusted: auto-approves up to Medium
+        assert!(RiskLevel::Trusted.auto_approves(OperationRisk::Medium));
+        assert!(!RiskLevel::Trusted.auto_approves(OperationRisk::High));
+
+        // Yolo: auto-approves everything below Critical
+        assert!(RiskLevel::Yolo.auto_approves(OperationRisk::High));
+    }
+
+    #[test]
+    fn test_operation_risk_ordering() {
+        assert!(OperationRisk::ReadOnly < OperationRisk::Low);
+        assert!(OperationRisk::Low < OperationRisk::Medium);
+        assert!(OperationRisk::Medium < OperationRisk::High);
+        assert!(OperationRisk::High < OperationRisk::Critical);
+    }
+
+    #[test]
+    fn test_command_classification_read_commands() {
+        let read_cmds = ["ls", "cat foo.txt", "pwd", "grep pattern", "find .", "head -n 5"];
+        for cmd in read_cmds {
+            assert_eq!(OperationRisk::classify_command(cmd), OperationRisk::ReadOnly,
+                "Expected ReadOnly for: {}", cmd);
+        }
+    }
+
+    #[test]
+    fn test_command_classification_dangerous() {
+        let dangerous = ["rm -rf /tmp/old", "sudo reboot", "dd if=/dev/zero"];
+        for cmd in dangerous {
+            let risk = OperationRisk::classify_command(cmd);
+            assert!(risk >= OperationRisk::High,
+                "Expected High+ for: {} (got {:?})", cmd, risk);
+        }
+    }
+
+    #[test]
+    fn test_command_classification_medium() {
+        let medium = ["npm install", "cargo build", "pip install requests"];
+        for cmd in medium {
+            let risk = OperationRisk::classify_command(cmd);
+            assert!(risk >= OperationRisk::Medium,
+                "Expected Medium+ for: {} (got {:?})", cmd, risk);
+        }
+    }
+
+    #[test]
+    fn test_risk_level_default() {
+        assert_eq!(RiskLevel::default(), RiskLevel::Normal);
+    }
+
+    #[test]
+    fn test_risk_level_display() {
+        // RiskLevel should have a Display impl or at least Debug
+        let safe_str = format!("{:?}", RiskLevel::Safe);
+        assert!(safe_str.contains("Safe"));
+    }
+
+    #[test]
+    fn test_operation_risk_display() {
+        let read_str = format!("{:?}", OperationRisk::ReadOnly);
+        assert!(read_str.contains("ReadOnly"));
+    }
+
+    #[test]
+    fn test_risk_level_parsing_case_insensitive() {
+        assert_eq!("SAFE".parse::<RiskLevel>().unwrap(), RiskLevel::Safe);
+        assert_eq!("Normal".parse::<RiskLevel>().unwrap(), RiskLevel::Normal);
+        assert_eq!("YOLO".parse::<RiskLevel>().unwrap(), RiskLevel::Yolo);
+    }
+
 }
