@@ -883,7 +883,7 @@ mod tests {
         manager.record_response(&request, &response);
 
         // Similar request should now be auto-approved
-        let similar_request = ConsentRequest::new("Similar op", OperationRisk::Medium);
+        let _similar_request = ConsentRequest::new("Similar op", OperationRisk::Medium);
         // Note: This depends on the consent key generation
     }
 
@@ -900,4 +900,190 @@ mod tests {
         assert!(manager.approved_batches.is_empty());
         assert_eq!(manager.rules.len(), 1); // Only persistent rule remains
     }
+
+    // ============================================================
+    // Additional consent module unit tests
+    // ============================================================
+
+    #[test]
+    fn test_operation_risk_variants_exist() {
+        let _ = OperationRisk::ReadOnly;
+        let _ = OperationRisk::Low;
+        let _ = OperationRisk::Medium;
+        let _ = OperationRisk::High;
+        let _ = OperationRisk::Critical;
+    }
+
+    #[test]
+    fn test_consent_request_file_operation() {
+        let req = ConsentRequest::file_operation("read", OperationCategory::FileRead, ["/tmp/test.txt"]);
+        assert_eq!(req.risk, OperationRisk::ReadOnly);
+        assert!(!req.affected_files.is_empty());
+    }
+
+    #[test]
+    fn test_consent_request_with_category() {
+        let req = ConsentRequest::new("Op", OperationRisk::Low)
+            .with_category(OperationCategory::FileWrite);
+        assert!(matches!(req.category, OperationCategory::FileWrite));
+    }
+
+    #[test]
+    fn test_consent_request_with_files() {
+        let req = ConsentRequest::new("Op", OperationRisk::Low)
+            .with_files(["/a.txt", "/b.txt"]);
+        assert_eq!(req.affected_files.len(), 2);
+    }
+
+    #[test]
+    fn test_consent_request_with_context() {
+        let req = ConsentRequest::new("Op", OperationRisk::Low)
+            .with_context("reason", "testing");
+        assert_eq!(req.context.get("reason"), Some(&"testing".to_string()));
+    }
+
+    #[test]
+    fn test_consent_request_in_batch() {
+        let req = ConsentRequest::new("Op", OperationRisk::Low)
+            .in_batch("batch-42");
+        assert_eq!(req.batch_id, Some("batch-42".to_string()));
+    }
+
+    #[test]
+    fn test_shell_command_risk_classification() {
+        // Safe commands
+        let safe = ConsentRequest::shell_command("cat file.txt");
+        assert_eq!(safe.risk, OperationRisk::ReadOnly);
+
+        let ls = ConsentRequest::shell_command("ls -la /tmp");
+        assert_eq!(ls.risk, OperationRisk::ReadOnly);
+
+        // Risky commands
+        let rm = ConsentRequest::shell_command("rm -rf /tmp/old");
+        assert!(matches!(rm.risk, OperationRisk::High | OperationRisk::Critical));
+
+        let sudo = ConsentRequest::shell_command("sudo systemctl restart nginx");
+        assert!(matches!(sudo.risk, OperationRisk::High | OperationRisk::Critical));
+    }
+
+    #[test]
+    fn test_consent_response_approve() {
+        let resp = ConsentResponse::approve("req-1");
+        assert!(matches!(resp.decision, ConsentLevel::Auto));
+    }
+
+    #[test]
+    fn test_consent_response_deny() {
+        let resp = ConsentResponse::deny("req-1");
+        assert!(matches!(resp.decision, ConsentLevel::Deny));
+    }
+
+    #[test]
+    fn test_consent_response_with_comment() {
+        let resp = ConsentResponse::approve("req-1")
+            .with_comment("Looks safe");
+        assert_eq!(resp.comment, Some("Looks safe".to_string()));
+    }
+
+    #[test]
+    fn test_consent_response_remember_session() {
+        let resp = ConsentResponse::approve("req-1")
+            .remember(RememberScope::Session);
+        assert!(resp.remember);
+        assert!(matches!(resp.remember_scope, RememberScope::Session));
+    }
+
+    #[test]
+    fn test_consent_response_remember_always() {
+        let resp = ConsentResponse::approve("req-1")
+            .remember(RememberScope::Global);
+        assert!(resp.remember);
+        assert!(matches!(resp.remember_scope, RememberScope::Global));
+    }
+
+    #[test]
+    fn test_operation_category_default_risk() {
+        assert!(matches!(OperationCategory::FileRead.default_risk(), OperationRisk::ReadOnly));
+        assert!(matches!(OperationCategory::System.default_risk(), OperationRisk::High | OperationRisk::Critical));
+    }
+
+    #[test]
+    fn test_consent_rule_builder() {
+        let rule = ConsentRule::new("Auto-approve reads")
+            .for_category(OperationCategory::FileRead)
+            .up_to_risk(OperationRisk::Low)
+            .persistent()
+            .with_action(ConsentLevel::Auto);
+        assert!(rule.persistent);
+        assert!(matches!(rule.action, ConsentLevel::Auto));
+    }
+
+    #[test]
+    fn test_consent_rule_expires_in() {
+        let rule = ConsentRule::new("Temp rule")
+            .expires_in(Duration::from_secs(3600));
+        assert!(rule.expires_at.is_some());
+    }
+
+    #[test]
+    fn test_consent_rule_path_matching() {
+        let rule = ConsentRule::new("Rust files")
+            .matching_path("*.rs")
+            .up_to_risk(OperationRisk::Medium)
+            .with_action(ConsentLevel::Auto);
+
+        let req = ConsentRequest::file_operation("edit", OperationCategory::FileWrite, ["main.rs"]);
+        assert!(rule.matches(&req));
+
+        let non_match = ConsentRequest::file_operation("edit", OperationCategory::FileWrite, ["main.py"]);
+        assert!(!rule.matches(&non_match));
+    }
+
+    #[test]
+    fn test_consent_rule_command_matching() {
+        let rule = ConsentRule::new("Git commands")
+            .matching_command("git *")
+            .up_to_risk(OperationRisk::Medium)
+            .with_action(ConsentLevel::Auto);
+
+        let req = ConsentRequest::shell_command("git status");
+        assert!(rule.matches(&req));
+    }
+
+    #[test]
+    fn test_consent_manager_safe_mode() {
+        let mut manager = ConsentManager::new(RiskLevel::Safe);
+
+        // ReadOnly should be approved in safe mode
+        let read = ConsentRequest::new("Read", OperationRisk::ReadOnly);
+        assert_eq!(manager.request_consent(&read).unwrap(), ConsentDecision::Approved);
+
+        // Low risk should be denied in safe mode
+        let low = ConsentRequest::new("Write", OperationRisk::Low);
+        assert_eq!(manager.request_consent(&low).unwrap(), ConsentDecision::Denied);
+    }
+
+    #[test]
+    fn test_consent_manager_trusted_mode() {
+        let mut manager = ConsentManager::new(RiskLevel::Trusted);
+
+        // Medium risk should be auto-approved in trusted mode
+        let med = ConsentRequest::new("Edit file", OperationRisk::Medium);
+        assert_eq!(manager.request_consent(&med).unwrap(), ConsentDecision::Approved);
+    }
+
+    #[test]
+    fn test_consent_decision_variants() {
+        let _ = ConsentDecision::Approved;
+        let _ = ConsentDecision::Denied;
+        let _ = ConsentDecision::NeedsPrompt;
+    }
+
+    #[test]
+    fn test_consent_level_variants() {
+        let _ = ConsentLevel::Auto;
+        let _ = ConsentLevel::Deny;
+        let _ = ConsentLevel::Confirm;
+    }
+
 }
