@@ -1584,4 +1584,54 @@ mod tests {
         let _ = ProgressType::Progress { percent: Some(50) };
     }
 
+
+    #[test]
+    fn test_agent_id_as_uuid() {
+        let id = AgentId::new();
+        let uuid = id.as_uuid();
+        assert!(!uuid.is_nil());
+    }
+
+    #[test]
+    fn test_work_item_new() {
+        let item = WorkItem::new("test task");
+        assert_eq!(item.description, "test task");
+    }
+
+    #[test]
+    fn test_work_item_with_context() {
+        let item = WorkItem::new("task").with_context("ctx");
+        assert!(!item.context.is_empty());
+    }
+
+    #[test]
+    fn test_work_item_with_output_type() {
+        let item = WorkItem::new("task").with_output_type(OutputType::Code);
+        assert!(matches!(item.expected_output_type, OutputType::Code));
+    }
+
+    #[test]
+    fn test_output_type_variants() {
+        let _ = OutputType::Text;
+        let _ = OutputType::Code;
+        let _ = OutputType::Json;
+    }
+
+    #[test]
+    fn test_model_selector_select() {
+        let selector = ModelSelector::new(
+            vec!["fast-model".to_string()],
+            vec!["capable-model".to_string()],
+            vec!["powerful-model".to_string()],
+        );
+        assert_eq!(selector.select_fast(), "fast-model");
+    }
+
+    #[test]
+    fn test_token_usage_arithmetic() {
+        let mut u = TokenUsage::default();
+        u.prompt_tokens = 100;
+        u.completion_tokens = 50;
+        assert_eq!(u.prompt_tokens + u.completion_tokens, 150);
+    }
 }
