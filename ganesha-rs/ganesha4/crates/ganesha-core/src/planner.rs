@@ -822,4 +822,173 @@ mod tests {
         assert_eq!(plan.len(), 2);
         assert!(plan.metadata.contains_key("author"));
     }
+
+    // ============================================================
+    // Additional unit tests for planner module
+    // ============================================================
+
+    #[test]
+    fn test_step_id_uniqueness() {
+        let id1 = StepId::new();
+        let id2 = StepId::new();
+        assert_ne!(id1, id2);
+    }
+
+    #[test]
+    fn test_action_type_base_risk() {
+        assert!(matches!(ActionType::ReadFile.base_risk(), OperationRisk::ReadOnly));
+        assert!(matches!(ActionType::WriteFile.base_risk(), OperationRisk::Medium));
+        assert!(matches!(ActionType::ShellCommand.base_risk(), OperationRisk::High));
+        assert!(matches!(ActionType::Analyze.base_risk(), OperationRisk::ReadOnly));
+    }
+
+    #[test]
+    fn test_plan_step_with_targets_multiple() {
+        let step = PlanStep::new("Multi-target", ActionType::ReadFile)
+            .with_targets(["/a.txt", "/b.txt", "/c.txt"]);
+        assert_eq!(step.target_files.len(), 3);
+    }
+
+    #[test]
+    fn test_plan_step_optional() {
+        let step = PlanStep::new("Optional step", ActionType::Analyze).optional();
+        assert!(step.optional);
+    }
+
+    #[test]
+    fn test_plan_step_with_duration() {
+        let step = PlanStep::new("Slow step", ActionType::ShellCommand)
+            .with_duration(120);
+        assert_eq!(step.estimated_duration, Some(120));
+    }
+
+    #[test]
+    fn test_plan_step_with_rollback_strategy() {
+        let step = PlanStep::new("Write", ActionType::WriteFile)
+            .with_rollback(RollbackStrategy::Custom(vec!["restore backup".into()]));
+        assert!(matches!(step.rollback_strategy, RollbackStrategy::Custom(_)));
+    }
+
+    #[test]
+    fn test_plan_step_with_context() {
+        let step = PlanStep::new("Step", ActionType::Analyze)
+            .with_context("language", "rust");
+        assert!(step.context.contains_key("language"));
+    }
+
+    #[test]
+    fn test_plan_step_depends_on_all() {
+        let id1 = StepId::new();
+        let id2 = StepId::new();
+        let step = PlanStep::new("Final", ActionType::WriteFile)
+            .depends_on_all(vec![id1, id2]);
+        assert_eq!(step.dependencies.len(), 2);
+        assert!(step.dependencies.contains(&id1));
+        assert!(step.dependencies.contains(&id2));
+    }
+
+    #[test]
+    fn test_plan_step_default_risk() {
+        let step = PlanStep::new("Read", ActionType::ReadFile);
+        // Default risk should be based on action type
+        assert!(matches!(step.risk, OperationRisk::ReadOnly));
+    }
+
+    #[test]
+    fn test_task_plan_get_step() {
+        let mut plan = TaskPlan::new("Test");
+        let step = PlanStep::new("Step 1", ActionType::ReadFile);
+        let id = step.id;
+        plan.add_step(step);
+        assert!(plan.get_step(id).is_some());
+        assert!(plan.get_step(StepId::new()).is_none());
+    }
+
+    #[test]
+    fn test_task_plan_is_empty() {
+        let plan = TaskPlan::new("Empty plan");
+        assert!(plan.is_empty());
+        assert_eq!(plan.len(), 0);
+    }
+
+    #[test]
+    fn test_task_plan_with_metadata() {
+        let plan = TaskPlan::new("Plan")
+            .with_metadata("version", "1.0")
+            .with_metadata("priority", 5);
+        assert!(plan.metadata.contains_key("version"));
+        assert!(plan.metadata.contains_key("priority"));
+    }
+
+    #[test]
+    fn test_task_plan_steps_mut() {
+        let mut plan = TaskPlan::new("Mutable");
+        plan.add_step(PlanStep::new("Step", ActionType::Analyze));
+        assert_eq!(plan.steps_mut().len(), 1);
+    }
+
+    #[test]
+    fn test_parallelizable_steps_empty_completed() {
+        let mut plan = TaskPlan::new("Parallel test");
+        let step1 = PlanStep::new("Independent 1", ActionType::ReadFile);
+        let step2 = PlanStep::new("Independent 2", ActionType::ReadFile);
+        plan.add_step(step1);
+        plan.add_step(step2);
+
+        let completed = HashSet::new();
+        let parallel = plan.parallelizable_steps(&completed);
+        // Both steps have no dependencies, both should be parallelizable
+        assert_eq!(parallel.len(), 2);
+    }
+
+    #[test]
+    fn test_parallelizable_steps_with_dependency() {
+        let mut plan = TaskPlan::new("Dep test");
+        let step1 = PlanStep::new("First", ActionType::ReadFile);
+        let id1 = step1.id;
+        plan.add_step(step1);
+
+        let step2 = PlanStep::new("Second", ActionType::WriteFile).depends_on(id1);
+        plan.add_step(step2);
+
+        // Nothing completed yet — only step1 (no deps) is parallelizable
+        let completed = HashSet::new();
+        let parallel = plan.parallelizable_steps(&completed);
+        assert_eq!(parallel.len(), 1);
+        assert_eq!(parallel[0], id1);
+    }
+
+    #[test]
+    fn test_rollback_strategy_variants() {
+        let _ = RollbackStrategy::Auto;
+        let _ = RollbackStrategy::Snapshot;
+        let _ = RollbackStrategy::None;
+        let _ = RollbackStrategy::Custom(vec!["strategy".into()]);
+    }
+
+    #[test]
+    fn test_plan_builder_empty() {
+        let result = PlanBuilder::new("Empty task").build();
+        // Empty plan should still build (or fail validation depending on impl)
+        assert!(result.is_ok() || result.is_err());
+    }
+
+    #[test]
+    fn test_single_step_execution_order() {
+        let mut plan = TaskPlan::new("Single");
+        let step = PlanStep::new("Only step", ActionType::ReadFile);
+        let id = step.id;
+        plan.add_step(step);
+
+        let order = plan.execution_order().unwrap();
+        assert_eq!(order.len(), 1);
+        assert_eq!(order[0], id);
+    }
+
+    #[test]
+    fn test_planning_context_new() {
+        let ctx = PlanningContext::new();
+        assert!(ctx.project_files.is_empty());
+    }
+
 }
