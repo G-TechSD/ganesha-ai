@@ -596,4 +596,69 @@ mod tests {
         assert!(!Region::new(0, 0, 0, 100).is_valid());
         assert!(!Region::new(0, 0, 100, 0).is_valid());
     }
+
+    #[test]
+    fn test_region_new_values() {
+        let r = Region::new(10, 20, 30, 40);
+        assert_eq!(r.x, 10);
+        assert_eq!(r.y, 20);
+        assert_eq!(r.width, 30);
+        assert_eq!(r.height, 40);
+    }
+
+    #[test]
+    fn test_region_center_origin() {
+        let r = Region::new(0, 0, 100, 100);
+        assert_eq!(r.center(), (50, 50));
+    }
+
+    #[test]
+    fn test_region_contains_edge() {
+        let r = Region::new(0, 0, 100, 100);
+        assert!(r.contains(0, 0));        // top-left
+        assert!(r.contains(99, 99));      // near bottom-right
+        assert!(!r.contains(100, 100));   // outside (width=100 means 0-99)
+        assert!(!r.contains(-1, 50));     // left of region
+    }
+
+    #[test]
+    fn test_region_center_with_offset() {
+        let r = Region::new(50, 75, 20, 30);
+        assert_eq!(r.center(), (60, 90)); // 50+10, 75+15
+    }
+
+    #[test]
+    fn test_capture_error_variants() {
+        let _ = CaptureError::CaptureFailed("test".to_string());
+    }
+
+    #[test]
+    fn test_monitor_info() {
+        let m = MonitorInfo {
+            index: 0,
+            name: "Monitor 1".to_string(),
+            region: Region::new(0, 0, 1920, 1080),
+            is_primary: true,
+            scale_factor: 1.0,
+        };
+        assert!(m.is_primary);
+        assert_eq!(m.region.width, 1920);
+        assert_eq!(m.index, 0);
+    }
+
+    #[test]
+    fn test_window_info() {
+        let w = WindowInfo {
+            id: 42,
+            title: "Test Window".to_string(),
+            process_name: "TestApp".to_string(),
+            pid: 1234,
+            region: Region::new(100, 100, 800, 600),
+            is_minimized: false,
+            is_visible: true,
+        };
+        assert!(w.is_visible);
+        assert_eq!(w.pid, 1234);
+        assert_eq!(w.id, 42);
+    }
 }
