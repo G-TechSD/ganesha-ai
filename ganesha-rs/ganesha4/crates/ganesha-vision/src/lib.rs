@@ -368,4 +368,65 @@ mod tests {
         let system = VisionSystem::with_defaults();
         assert!(system.validate().is_ok());
     }
+
+    #[test]
+    fn test_builder_model() {
+        let system = VisionSystemBuilder::new()
+            .model(VisionModel::ClaudeVision)
+            .build()
+            .unwrap();
+        assert_eq!(system.config().model, VisionModel::ClaudeVision);
+    }
+
+    #[test]
+    fn test_builder_audit_log_path() {
+        let system = VisionSystemBuilder::new()
+            .audit_logging(true)
+            .audit_log_path("/tmp/vision-audit.log")
+            .build()
+            .unwrap();
+        assert!(system.config().audit_logging);
+    }
+
+    #[test]
+    fn test_system_disabled_by_default() {
+        let system = VisionSystem::with_defaults();
+        assert!(!system.is_enabled());
+        assert!(!system.is_dry_run());
+    }
+
+    #[test]
+    fn test_system_safety_access() {
+        let system = VisionSystem::with_defaults();
+        let _safety = system.safety();
+    }
+
+    #[test]
+    fn test_system_config_access() {
+        let system = VisionSystem::with_defaults();
+        let config = system.config();
+        assert!(!config.enabled);
+    }
+
+    #[test]
+    fn test_builder_dry_run_mode() {
+        let system = VisionSystemBuilder::new()
+            .enabled(true)
+            .dry_run(true)
+            .build()
+            .unwrap();
+        assert!(system.is_dry_run());
+        assert!(system.is_enabled());
+    }
+
+    #[test]
+    fn test_builder_chaining() {
+        let result = VisionSystemBuilder::new()
+            .enabled(true)
+            .dry_run(false)
+            .audit_logging(true)
+            .model(VisionModel::Local)
+            .build();
+        assert!(result.is_ok());
+    }
 }
