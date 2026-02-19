@@ -598,4 +598,100 @@ mod tests {
         assert!(!id.is_empty());
         assert_eq!(manager.list_checkpoints().len(), 1);
     }
+
+    #[test]
+    fn test_checkpoint_new() {
+        let cp = Checkpoint::new("my checkpoint", PathBuf::from("/workspace"));
+        assert_eq!(cp.name, "my checkpoint");
+        assert!(!cp.id.is_empty());
+        assert_eq!(cp.file_count(), 0);
+        assert!(cp.files.is_empty());
+        assert!(cp.metadata.is_empty());
+    }
+
+    #[test]
+    fn test_checkpoint_add_metadata() {
+        let mut cp = Checkpoint::new("meta", PathBuf::from("/tmp"));
+        cp.add_metadata("git_branch", "main");
+        cp.add_metadata("reason", "before refactor");
+        assert_eq!(cp.metadata.get("git_branch"), Some(&"main".to_string()));
+        assert_eq!(cp.metadata.get("reason"), Some(&"before refactor".to_string()));
+    }
+
+    #[test]
+    fn test_file_backup_creation() {
+        let backup = FileBackup {
+            path: PathBuf::from("src/main.rs"),
+            original_content: Some("fn main() {}".to_string()),
+            existed: true,
+            content_hash: Some("deadbeef".to_string()),
+        };
+        assert_eq!(backup.path, PathBuf::from("src/main.rs"));
+        assert!(backup.existed);
+        assert!(backup.content_hash.is_some());
+    }
+
+    #[test]
+    fn test_file_backup_new_file() {
+        let backup = FileBackup {
+            path: PathBuf::from("new_file.rs"),
+            original_content: None,
+            existed: false,
+            content_hash: None,
+        };
+        assert!(!backup.existed);
+        assert!(backup.original_content.is_none());
+    }
+
+    #[test]
+    fn test_rollback_result_files_affected() {
+        let result = RollbackResult {
+            checkpoint_id: "cp-42".to_string(),
+            files_restored: vec![PathBuf::from("a"), PathBuf::from("b")],
+            files_deleted: vec![],
+            git_reset: false,
+            success: true,
+        };
+        assert_eq!(result.files_affected(), 2);
+    }
+
+    #[test]
+    fn test_rollback_result_with_deletions() {
+        let result = RollbackResult {
+            checkpoint_id: "cp-99".to_string(),
+            files_restored: vec![PathBuf::from("old.txt")],
+            files_deleted: vec![PathBuf::from("new1.txt"), PathBuf::from("new2.txt")],
+            git_reset: true,
+            success: true,
+        };
+        assert_eq!(result.files_affected(), 3);
+        assert!(result.git_reset);
+    }
+
+    #[test]
+    fn test_rollback_result_failed() {
+        let result = RollbackResult {
+            checkpoint_id: "cp-fail".to_string(),
+            files_restored: vec![],
+            files_deleted: vec![],
+            git_reset: false,
+            success: false,
+        };
+        assert!(!result.success);
+        assert_eq!(result.files_affected(), 0);
+    }
+
+    #[test]
+    fn test_rollback_manager_new() {
+        let manager = RollbackManager::new(PathBuf::from("/workspace"));
+        assert!(manager.list_checkpoints().is_empty());
+    }
+
+    #[test]
+    fn test_checkpoint_unique_ids() {
+        let cp1 = Checkpoint::new("first", PathBuf::from("/tmp"));
+        let cp2 = Checkpoint::new("second", PathBuf::from("/tmp"));
+        assert_ne!(cp1.id, cp2.id);
+    }
+
 }
