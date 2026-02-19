@@ -1988,6 +1988,8 @@ pub struct ReplState {
     pub mcp_manager: Arc<McpManager>,
     /// Cached MCP tools (refreshed on connect/disconnect)
     pub mcp_tools: Vec<(String, McpTool)>,
+    /// Current risk level (safe/normal/trusted/yolo)
+    pub risk_level: crate::cli::RiskLevel,
 }
 
 impl ReplState {
@@ -2015,6 +2017,7 @@ impl ReplState {
             is_first_message: true,
             mcp_manager: Arc::new(McpManager::new()),
             mcp_tools: Vec::new(),
+            risk_level: cli.risk,
         }
     }
 
@@ -2215,6 +2218,12 @@ const SLASH_COMMANDS: &[SlashCommand] = &[
         aliases: &["p"],
         description: "Add or manage AI providers",
         handler: cmd_provider,
+    },
+    SlashCommand {
+        name: "risk",
+        aliases: &["safety"],
+        description: "Set risk level (safe/normal/trusted/yolo)",
+        handler: cmd_risk,
     },
     SlashCommand {
         name: "status",
@@ -3763,6 +3772,54 @@ fn cmd_provider(args: &str, _state: &mut ReplState) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn cmd_risk(args: &str, state: &mut ReplState) -> anyhow::Result<()> {
+    use crate::cli::RiskLevel;
+
+    let arg = args.trim().to_lowercase();
+    if arg.is_empty() {
+        // Show current risk level
+        let (name, desc, emoji) = match state.risk_level {
+            RiskLevel::Safe => ("safe", "Read-only. Won't modify anything.", "🟢"),
+            RiskLevel::Normal => ("normal", "Asks before risky operations.", "🟡"),
+            RiskLevel::Trusted => ("trusted", "Auto-approves routine tasks.", "🟠"),
+            RiskLevel::Yolo => ("yolo", "Full send. No questions asked.", "🔴"),
+        };
+        println!();
+        println!("  {} Risk Level: {} {}", emoji, name.to_uppercase().bright_white().bold(), desc.dimmed());
+        println!();
+        println!("  Change with: {} {}", "/risk".bright_cyan(), "<safe|normal|trusted|yolo>".dimmed());
+        println!();
+        return Ok(());
+    }
+
+    match arg.as_str() {
+        "safe" | "s" => {
+            state.risk_level = RiskLevel::Safe;
+            println!("  {} Risk level set to {}", "🟢", "SAFE".bright_green().bold());
+            println!("  {}", "Read-only mode. I'll look but won't touch.".dimmed());
+        }
+        "normal" | "n" => {
+            state.risk_level = RiskLevel::Normal;
+            println!("  {} Risk level set to {}", "🟡", "NORMAL".bright_yellow().bold());
+            println!("  {}", "I'll ask before anything risky.".dimmed());
+        }
+        "trusted" | "t" => {
+            state.risk_level = RiskLevel::Trusted;
+            println!("  {} Risk level set to {}", "🟠", "TRUSTED".bright_yellow().bold());
+            println!("  {}", "Routine tasks auto-approved. Still asks for sudo/deletes.".dimmed());
+        }
+        "yolo" | "y" | "-a" => {
+            state.risk_level = RiskLevel::Yolo;
+            println!("  {} Risk level set to {}", "🔴", "YOLO".bright_red().bold());
+            println!("  {}", "Full send, no questions. Rollback always available.".dimmed());
+        }
+        _ => {
+            println!("  {} Unknown risk level: '{}'. Use: safe, normal, trusted, yolo", "Error:".red(), arg);
+        }
+    }
+    Ok(())
+}
+
 fn cmd_status(_args: &str, state: &mut ReplState) -> anyhow::Result<()> {
     use sysinfo::System;
 
@@ -3772,6 +3829,15 @@ fn cmd_status(_args: &str, state: &mut ReplState) -> anyhow::Result<()> {
 
     // Working directory
     println!("  {} {}", "Dir:".bright_white(), state.working_dir.display().to_string().dimmed());
+
+    // Risk level
+    let risk_emoji = match state.risk_level {
+        crate::cli::RiskLevel::Safe => "🟢",
+        crate::cli::RiskLevel::Normal => "🟡",
+        crate::cli::RiskLevel::Trusted => "🟠",
+        crate::cli::RiskLevel::Yolo => "🔴",
+    };
+    println!("  {} {} {:?}", "Risk:".bright_white(), risk_emoji, state.risk_level);
 
     // Mode
     println!("  {} {:?}", "Mode:".bright_white(), state.mode);
