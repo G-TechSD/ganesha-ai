@@ -243,3 +243,64 @@ pub fn wrap_text(text: &str, indent: usize) -> String {
 
     wrap(text, &options).join("\n")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_style_variants() {
+        let _ = Style::Assistant;
+        let _ = Style::User;
+        let _ = Style::System;
+        let _ = Style::Error;
+        let _ = Style::Warning;
+        let _ = Style::Info;
+        let _ = Style::Success;
+        let _ = Style::Code;
+    }
+
+    #[test]
+    fn test_terminal_width_positive() {
+        let w = terminal_width();
+        assert!(w > 0);
+    }
+
+    #[test]
+    fn test_wrap_text_short() {
+        let result = wrap_text("hello", 0);
+        assert_eq!(result, "hello");
+    }
+
+    #[test]
+    fn test_wrap_text_with_indent() {
+        let result = wrap_text("hello world", 4);
+        assert!(result.contains("hello"));
+    }
+
+    #[test]
+    fn test_wrap_text_long_line() {
+        let long = "word ".repeat(100);
+        let result = wrap_text(&long, 0);
+        assert!(result.contains("word"));
+    }
+
+    #[test]
+    fn test_wrap_text_empty() {
+        let result = wrap_text("", 0);
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_spinner_new() {
+        let spinner = Spinner::new("loading");
+        spinner.finish();
+    }
+
+    #[test]
+    fn test_spinner_update_and_finish_with_message() {
+        let spinner = Spinner::new("starting");
+        spinner.update("updating");
+        spinner.finish_with_message("done");
+    }
+}

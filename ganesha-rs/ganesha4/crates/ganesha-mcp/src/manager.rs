@@ -338,4 +338,107 @@ mod tests {
         let manager = McpManager::new();
         assert!(manager.list_connected().await.is_empty());
     }
+
+    #[tokio::test]
+    async fn test_list_configured_empty() {
+        let manager = McpManager::new();
+        assert!(manager.list_configured().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_add_server_config() {
+        let manager = McpManager::new();
+        let config = ServerConfig {
+            name: "test-server".to_string(),
+            transport: TransportConfig::Stdio {
+                command: "echo".to_string(),
+                args: vec![],
+                env: std::collections::HashMap::new(),
+                cwd: None,
+            },
+            enabled: true,
+            auto_connect: false,
+            trusted: false,
+            include_tools: None,
+            exclude_tools: None,
+            timeout: 30,
+            required_env: vec![],
+            description: None,
+        };
+        manager.add_server_config("test", config).await;
+        let configured = manager.list_configured().await;
+        assert_eq!(configured.len(), 1);
+        assert_eq!(configured[0].0, "test");
+    }
+
+    #[tokio::test]
+    async fn test_remove_server_config() {
+        let manager = McpManager::new();
+        let config = ServerConfig {
+            name: "removable".to_string(),
+            transport: TransportConfig::Stdio {
+                command: "echo".to_string(),
+                args: vec![],
+                env: std::collections::HashMap::new(),
+                cwd: None,
+            },
+            enabled: true,
+            auto_connect: false,
+            trusted: false,
+            include_tools: None,
+            exclude_tools: None,
+            timeout: 30,
+            required_env: vec![],
+            description: None,
+        };
+        manager.add_server_config("rm-test", config).await;
+        assert_eq!(manager.list_configured().await.len(), 1);
+        let removed = manager.remove_server_config("rm-test").await;
+        assert!(removed.is_some());
+        assert!(manager.list_configured().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_remove_nonexistent() {
+        let manager = McpManager::new();
+        let removed = manager.remove_server_config("nonexistent").await;
+        assert!(removed.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_get_server_nonexistent() {
+        let manager = McpManager::new();
+        assert!(manager.get_server("none").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_list_tools_empty() {
+        let manager = McpManager::new();
+        assert!(manager.list_tools().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_find_tool_nonexistent() {
+        let manager = McpManager::new();
+        assert!(manager.find_tool("fake-tool").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_server_status_nonexistent() {
+        let manager = McpManager::new();
+        assert!(manager.server_status("none").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_disconnect_all_empty() {
+        let manager = McpManager::new();
+        let result = manager.disconnect_all().await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_default() {
+        let manager = McpManager::default();
+        assert!(manager.list_connected().await.is_empty());
+    }
 }
