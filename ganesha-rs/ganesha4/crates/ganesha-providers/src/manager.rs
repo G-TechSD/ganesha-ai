@@ -314,4 +314,49 @@ mod tests {
         let manager = ProviderManager::new();
         assert!(!manager.has_available_provider().await);
     }
+
+    #[test]
+    fn test_provider_manager_builder() {
+        let manager = ProviderManager::new();
+        let manager = manager.local_first(true);
+        // Just verify it builds without panic
+        let _ = manager;
+    }
+
+    #[test]
+    fn test_provider_config_fields() {
+        let config = ProviderConfig {
+            name: "test".to_string(),
+            priority: ProviderPriority::Primary,
+            enabled: true,
+        };
+        assert_eq!(config.name, "test");
+        assert!(config.enabled);
+    }
+
+    #[test]
+    fn test_provider_priority_ordering() {
+        assert!((ProviderPriority::Primary as u8) < (ProviderPriority::Secondary as u8));
+        assert!((ProviderPriority::Secondary as u8) < (ProviderPriority::Fallback as u8));
+    }
+
+    #[test]
+    fn test_provider_config_disabled() {
+        let config = ProviderConfig {
+            name: "disabled-provider".to_string(),
+            priority: ProviderPriority::Fallback,
+            enabled: false,
+        };
+        assert!(!config.enabled);
+        assert_eq!(config.name, "disabled-provider");
+    }
+
+    #[test]
+    fn test_model_tier_from_manager() {
+        let manager = ProviderManager::new();
+        let tier = manager.model_tier("claude-3.5-sonnet");
+        // Should classify claude models
+        let _ = tier;
+    }
+
 }

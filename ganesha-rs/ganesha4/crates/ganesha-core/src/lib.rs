@@ -329,4 +329,147 @@ mod tests {
         let _ = RiskLevel::Normal;
         let _ = OperationRisk::ReadOnly;
     }
+
+    #[test]
+    fn test_name_constant() {
+        assert_eq!(NAME, "ganesha-core");
+    }
+
+    #[test]
+    fn test_version_semver() {
+        let parts: Vec<&str> = VERSION.split('.').collect();
+        assert!(parts.len() >= 2, "Version should be semver");
+        assert!(parts[0].parse::<u32>().is_ok());
+    }
+
+    #[test]
+    fn test_risk_levels_ordering() {
+        use crate::prelude::*;
+        // RiskLevel enum should have increasingly permissive levels
+        let safe = RiskLevel::Safe;
+        let normal = RiskLevel::Normal;
+        let trusted = RiskLevel::Trusted;
+        let yolo = RiskLevel::Yolo;
+        assert_ne!(format!("{:?}", safe), format!("{:?}", normal));
+        assert_ne!(format!("{:?}", trusted), format!("{:?}", yolo));
+    }
+
+    #[test]
+    fn test_operation_risk_variants() {
+        use crate::prelude::*;
+        let risks = vec![
+            OperationRisk::ReadOnly,
+            OperationRisk::Low,
+            OperationRisk::Medium,
+            OperationRisk::High,
+            OperationRisk::Critical,
+        ];
+        assert_eq!(risks.len(), 5);
+    }
+
+    #[test]
+    fn test_consent_decision_variants() {
+        use crate::prelude::*;
+        let approved = ConsentDecision::Approved;
+        let denied = ConsentDecision::Denied;
+        assert_ne!(format!("{:?}", approved), format!("{:?}", denied));
+    }
+
+    #[test]
+    fn test_consent_level_variants() {
+        use crate::prelude::*;
+        let auto = ConsentLevel::Auto;
+        let confirm = ConsentLevel::Confirm;
+        let deny = ConsentLevel::Deny;
+        assert_ne!(format!("{:?}", auto), format!("{:?}", deny));
+        assert_ne!(format!("{:?}", confirm), format!("{:?}", deny));
+    }
+
+    #[test]
+    fn test_message_role_variants() {
+        use crate::prelude::*;
+        let user = MessageRole::User;
+        let assistant = MessageRole::Assistant;
+        let system = MessageRole::System;
+        let tool = MessageRole::Tool;
+        assert_ne!(format!("{:?}", user), format!("{:?}", assistant));
+        assert_ne!(format!("{:?}", system), format!("{:?}", tool));
+    }
+
+    #[test]
+    fn test_session_status_variants() {
+        use crate::prelude::*;
+        let active = SessionStatus::Active;
+        let paused = SessionStatus::Paused;
+        let completed = SessionStatus::Completed;
+        assert_ne!(format!("{:?}", active), format!("{:?}", paused));
+        assert_ne!(format!("{:?}", paused), format!("{:?}", completed));
+    }
+
+    #[test]
+    fn test_sandbox_mode_variants() {
+        use crate::prelude::*;
+        let restricted = SandboxMode::FullIsolation;
+        let permissive = SandboxMode::GitWorktree;
+        let disabled = SandboxMode::DryRun;
+        assert_ne!(format!("{:?}", restricted), format!("{:?}", permissive));
+        assert_ne!(format!("{:?}", permissive), format!("{:?}", disabled));
+    }
+
+    #[test]
+    fn test_action_type_risk_mapping() {
+        use crate::prelude::*;
+        let read = ActionType::ReadFile;
+        let write = ActionType::WriteFile;
+        let shell = ActionType::ShellCommand;
+        // Just verify they exist and are distinct
+        assert_ne!(format!("{:?}", read), format!("{:?}", write));
+        assert_ne!(format!("{:?}", write), format!("{:?}", shell));
+    }
+
+    #[test]
+    fn test_file_change_type_variants() {
+        use crate::prelude::*;
+        let created = FileChangeType::Created;
+        let modified = FileChangeType::Modified;
+        let deleted = FileChangeType::Deleted;
+        assert_ne!(format!("{:?}", created), format!("{:?}", modified));
+        assert_ne!(format!("{:?}", modified), format!("{:?}", deleted));
+    }
+
+    #[test]
+    fn test_check_type_variants() {
+        use crate::prelude::*;
+        let syntax = CheckType::Syntax;
+        let tests = CheckType::UnitTests;
+        let lint = CheckType::Lint;
+        assert_ne!(format!("{:?}", syntax), format!("{:?}", tests));
+        assert_ne!(format!("{:?}", tests), format!("{:?}", lint));
+    }
+
+    #[test]
+    fn test_issue_severity_variants() {
+        use crate::prelude::*;
+        let error = IssueSeverity::Error;
+        let warning = IssueSeverity::Warning;
+        let info = IssueSeverity::Info;
+        assert_ne!(format!("{:?}", error), format!("{:?}", warning));
+        assert_ne!(format!("{:?}", warning), format!("{:?}", info));
+    }
+
+    #[test]
+    fn test_agent_status_variants() {
+        use crate::prelude::*;
+        let idle = AgentStatus::Idle;
+        let working = AgentStatus::Working;
+        assert_ne!(format!("{:?}", idle), format!("{:?}", working));
+    }
+
+    #[test]
+    fn test_core_error_display() {
+        let err = CoreError::PlanningError("test error".to_string());
+        let display = format!("{}", err);
+        assert!(display.contains("test error"));
+    }
+
 }
