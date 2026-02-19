@@ -2591,4 +2591,111 @@ mod tests {
         let named = kg.query_entities(&EntityQuery::new().with_name_pattern("file1")).unwrap();
         assert_eq!(named.len(), 1);
     }
+
+    #[test]
+    fn test_message_system() {
+        let msg = Message::system("You are a coder");
+        assert_eq!(msg.role, Role::System);
+        assert_eq!(msg.content, "You are a coder");
+        assert!(!msg.id.is_nil());
+    }
+
+    #[test]
+    fn test_message_user() {
+        let msg = Message::user("help me");
+        assert_eq!(msg.role, Role::User);
+    }
+
+    #[test]
+    fn test_message_assistant() {
+        let msg = Message::assistant("Sure!");
+        assert_eq!(msg.role, Role::Assistant);
+    }
+
+    #[test]
+    fn test_message_tool() {
+        let msg = Message::tool("result data", "call-42");
+        assert_eq!(msg.role, Role::Tool);
+        assert_eq!(msg.tool_call_id, Some("call-42".to_string()));
+    }
+
+    #[test]
+    fn test_message_with_model() {
+        let msg = Message::assistant("hi").with_model("gpt-4");
+        assert_eq!(msg.model, Some("gpt-4".to_string()));
+    }
+
+    #[test]
+    fn test_message_with_metadata() {
+        let msg = Message::user("q").with_metadata("source", serde_json::json!("cli"));
+        assert!(msg.metadata.contains_key("source"));
+    }
+
+    #[test]
+    fn test_message_unique_ids() {
+        let m1 = Message::user("a");
+        let m2 = Message::user("b");
+        assert_ne!(m1.id, m2.id);
+    }
+
+    #[test]
+    fn test_token_estimation() {
+        // Rough heuristic: ~4 chars per token
+        let tokens = Message::estimate_tokens("hello world, this is a test");
+        assert!(tokens > 0);
+        assert!(tokens < 100); // Should be reasonable
+    }
+
+    #[test]
+    fn test_conversation_new() {
+        let conv = Conversation::new();
+        assert_eq!(conv.total_tokens(), 0);
+        assert!(conv.messages.is_empty());
+    }
+
+    #[test]
+    fn test_conversation_with_system_prompt() {
+        let conv = Conversation::new().with_system_prompt("Be helpful");
+        assert_eq!(conv.system_prompt, Some("Be helpful".to_string()));
+    }
+
+    #[test]
+    fn test_conversation_with_project() {
+        let conv = Conversation::new().with_project("/my/project");
+        assert!(conv.metadata.project_path.is_some());
+    }
+
+    #[test]
+    fn test_conversation_add_user_message() {
+        let mut conv = Conversation::new();
+        let msg = conv.add_user_message("hello");
+        assert_eq!(msg.role, Role::User);
+        assert_eq!(msg.content, "hello");
+        assert_eq!(conv.messages.len(), 1);
+    }
+
+    #[test]
+    fn test_conversation_add_assistant_message() {
+        let mut conv = Conversation::new();
+        conv.add_assistant_message("response", Some("claude-3".to_string()));
+        assert_eq!(conv.messages.len(), 1);
+        assert_eq!(conv.messages[0].model, Some("claude-3".to_string()));
+    }
+
+    #[test]
+    fn test_conversation_total_tokens() {
+        let mut conv = Conversation::new();
+        conv.add_user_message("short msg");
+        assert!(conv.total_tokens() > 0);
+    }
+
+    #[test]
+    fn test_summary_compression_ratio() {
+        let summary = ConversationSummary::new("brief", vec![Uuid::new_v4()], 1000);
+        let ratio = summary.compression_ratio();
+        // Summary tokens / original tokens
+        assert!(ratio > 0.0);
+        assert!(ratio > 1.0); // original_tokens / summary_tokens > 1
+    }
+
 }
