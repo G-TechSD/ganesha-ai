@@ -502,3 +502,115 @@ struct OpenAiCompatModelsResponse {
 struct OpenAiCompatModel {
     id: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_local_provider_type_default_ports() {
+        assert_eq!(LocalProviderType::LmStudio.default_port(), 1234);
+        assert_eq!(LocalProviderType::Ollama.default_port(), 11434);
+        assert_eq!(LocalProviderType::LlamaCpp.default_port(), 8080);
+        assert_eq!(LocalProviderType::Vllm.default_port(), 8000);
+        assert_eq!(LocalProviderType::TextGenWebUi.default_port(), 5000);
+        assert_eq!(LocalProviderType::OpenAiCompatible.default_port(), 8080);
+    }
+
+    #[test]
+    fn test_local_provider_type_default_urls() {
+        // Clear env vars for deterministic testing
+        std::env::remove_var("LM_STUDIO_URL");
+        std::env::remove_var("OLLAMA_URL");
+
+        let lm = LocalProviderType::LmStudio.default_base_url();
+        assert!(lm.contains("1234"));
+        assert!(lm.ends_with("/v1"));
+
+        let ollama = LocalProviderType::Ollama.default_base_url();
+        assert!(ollama.contains("11434"));
+        assert!(ollama.ends_with("/api"));
+    }
+
+    #[test]
+    fn test_local_provider_new() {
+        let provider = LocalProvider::new(LocalProviderType::LmStudio);
+        assert_eq!(provider.name(), "lmstudio");
+    }
+
+    #[test]
+    fn test_local_provider_new_ollama() {
+        let provider = LocalProvider::new(LocalProviderType::Ollama);
+        assert_eq!(provider.name(), "ollama");
+    }
+
+    #[test]
+    fn test_local_provider_new_llamacpp() {
+        let provider = LocalProvider::new(LocalProviderType::LlamaCpp);
+        assert_eq!(provider.name(), "llamacpp");
+    }
+
+    #[test]
+    fn test_local_provider_new_vllm() {
+        let provider = LocalProvider::new(LocalProviderType::Vllm);
+        assert_eq!(provider.name(), "vllm");
+    }
+
+    #[test]
+    fn test_local_provider_with_base_url() {
+        let provider = LocalProvider::new(LocalProviderType::LmStudio)
+            .with_base_url("http://192.168.1.100:5555/v1");
+        assert_eq!(provider.base_url, "http://192.168.1.100:5555/v1");
+    }
+
+    #[test]
+    fn test_local_provider_with_default_model() {
+        let provider = LocalProvider::new(LocalProviderType::LmStudio)
+            .with_default_model("gpt-oss-20b");
+        assert_eq!(provider.default_model.as_deref(), Some("gpt-oss-20b"));
+    }
+
+    #[test]
+    fn test_local_provider_chained_config() {
+        let provider = LocalProvider::new(LocalProviderType::Ollama)
+            .with_base_url("http://myserver:11434/api")
+            .with_default_model("llama3");
+        assert_eq!(provider.base_url, "http://myserver:11434/api");
+        assert_eq!(provider.default_model.as_deref(), Some("llama3"));
+    }
+
+    #[test]
+    fn test_local_provider_type_equality() {
+        assert_eq!(LocalProviderType::LmStudio, LocalProviderType::LmStudio);
+        assert_ne!(LocalProviderType::LmStudio, LocalProviderType::Ollama);
+    }
+
+    #[test]
+    fn test_local_provider_type_debug() {
+        let debug_str = format!("{:?}", LocalProviderType::LmStudio);
+        assert_eq!(debug_str, "LmStudio");
+    }
+
+    #[test]
+    fn test_all_provider_types_have_names() {
+        let types = vec![
+            LocalProviderType::LmStudio,
+            LocalProviderType::Ollama,
+            LocalProviderType::LlamaCpp,
+            LocalProviderType::Vllm,
+            LocalProviderType::TextGenWebUi,
+            LocalProviderType::OpenAiCompatible,
+        ];
+        for t in types {
+            let provider = LocalProvider::new(t);
+            assert!(!provider.name().is_empty(), "Provider {:?} has empty name", t);
+        }
+    }
+
+    #[test]
+    fn test_text_gen_webui_default_url() {
+        std::env::remove_var("TEXT_GEN_WEBUI_URL");
+        let url = LocalProviderType::TextGenWebUi.default_base_url();
+        assert!(url.contains("5000"));
+    }
+}

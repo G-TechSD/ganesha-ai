@@ -312,3 +312,46 @@ struct OpenRouterModel {
 struct ModelArchitecture {
     modality: Option<String>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_openrouter_provider_new() {
+        let provider = OpenRouterProvider::new("sk-or-test");
+        assert_eq!(provider.name(), "openrouter");
+    }
+
+    #[test]
+    fn test_openrouter_provider_with_default_model() {
+        let provider = OpenRouterProvider::new("sk-or-test")
+            .with_default_model("anthropic/claude-3-opus");
+        assert_eq!(provider.default_model, "anthropic/claude-3-opus");
+    }
+
+    #[test]
+    fn test_openrouter_provider_with_site_url() {
+        let provider = OpenRouterProvider::new("sk-or-test")
+            .with_site_url("https://myapp.com");
+        assert_eq!(provider.site_url.as_deref(), Some("https://myapp.com"));
+    }
+
+    #[test]
+    fn test_openrouter_provider_with_site_name() {
+        let provider = OpenRouterProvider::new("sk-or-test")
+            .with_site_name("My App");
+        assert_eq!(provider.site_name.as_deref(), Some("My App"));
+    }
+
+    #[test]
+    fn test_openrouter_provider_chained() {
+        let provider = OpenRouterProvider::new("sk-or-test")
+            .with_default_model("meta/llama-3")
+            .with_site_url("https://ganesha.ai")
+            .with_site_name("Ganesha");
+        assert_eq!(provider.default_model, "meta/llama-3");
+        assert_eq!(provider.site_url.as_deref(), Some("https://ganesha.ai"));
+        assert_eq!(provider.site_name.as_deref(), Some("Ganesha"));
+    }
+}

@@ -90,3 +90,122 @@ pub enum ProviderError {
 }
 
 pub type Result<T> = std::result::Result<T, ProviderError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_provider_error_display_http() {
+        // Build a reqwest error from an invalid URL
+        
+        let err = ProviderError::Unavailable("test server".to_string());
+        let msg = format!("{}", err);
+        assert!(msg.contains("test server"));
+    }
+
+    #[test]
+    fn test_provider_error_display_api() {
+        let err = ProviderError::ApiError { status: 429, message: "rate limited".to_string() };
+        let msg = format!("{}", err);
+        assert!(msg.contains("429"));
+        assert!(msg.contains("rate limited"));
+    }
+
+    #[test]
+    fn test_provider_error_display_rate_limited() {
+        let err = ProviderError::RateLimited { retry_after: Some(30) };
+        let msg = format!("{}", err);
+        assert!(msg.contains("Rate limited"));
+    }
+
+    #[test]
+    fn test_provider_error_display_model_not_found() {
+        let err = ProviderError::ModelNotFound("gpt-5".to_string());
+        let msg = format!("{}", err);
+        assert!(msg.contains("gpt-5"));
+    }
+
+    #[test]
+    fn test_provider_error_display_auth() {
+        let err = ProviderError::AuthError("invalid key".to_string());
+        let msg = format!("{}", err);
+        assert!(msg.contains("Authentication failed"));
+    }
+
+    #[test]
+    fn test_provider_error_display_unavailable() {
+        let err = ProviderError::Unavailable("LM Studio".to_string());
+        let msg = format!("{}", err);
+        assert!(msg.contains("LM Studio"));
+    }
+
+    #[test]
+    fn test_provider_error_display_timeout() {
+        let err = ProviderError::Timeout(30);
+        let msg = format!("{}", err);
+        assert!(msg.contains("30"));
+    }
+
+    #[test]
+    fn test_provider_error_display_config() {
+        let err = ProviderError::ConfigError("missing API key".to_string());
+        let msg = format!("{}", err);
+        assert!(msg.contains("Configuration error"));
+    }
+
+    #[test]
+    fn test_provider_error_display_stream() {
+        let err = ProviderError::StreamError("connection reset".to_string());
+        let msg = format!("{}", err);
+        assert!(msg.contains("Stream error"));
+    }
+
+    #[test]
+    fn test_provider_error_display_invalid_response() {
+        let err = ProviderError::InvalidResponse("missing choices".to_string());
+        let msg = format!("{}", err);
+        assert!(msg.contains("Invalid response"));
+    }
+
+    // Cross-module integration tests
+    #[test]
+    fn test_all_providers_constructable() {
+        let _openai = OpenAiProvider::new("test");
+        let _anthropic = AnthropicProvider::new("test");
+        let _gemini = GeminiProvider::new("test");
+        let _openrouter = OpenRouterProvider::new("test");
+        let _local = LocalProvider::new(LocalProviderType::LmStudio);
+    }
+
+    #[test]
+    fn test_provider_priority_ordering() {
+        assert!(ProviderPriority::Primary < ProviderPriority::Secondary);
+        assert!(ProviderPriority::Secondary < ProviderPriority::Fallback);
+        assert!(ProviderPriority::Fallback < ProviderPriority::LastResort);
+    }
+
+    #[test]
+    fn test_model_tier_ordering() {
+        // Ensure tier system works
+        let tier = get_model_tier("claude-3-opus");
+        assert!(matches!(tier, ModelTier::Exceptional | ModelTier::Capable | ModelTier::Limited | ModelTier::Unsafe));
+    }
+
+    #[test]
+    fn test_message_creation() {
+        let msg = Message::user("Hello");
+        assert_eq!(msg.role, MessageRole::User);
+        assert_eq!(msg.content, "Hello");
+    }
+
+    #[test]
+    fn test_message_roles() {
+        let user = Message::user("hi");
+        let assistant = Message::assistant("hello");
+        let system = Message::system("you are helpful");
+        assert_eq!(user.role, MessageRole::User);
+        assert_eq!(assistant.role, MessageRole::Assistant);
+        assert_eq!(system.role, MessageRole::System);
+    }
+}

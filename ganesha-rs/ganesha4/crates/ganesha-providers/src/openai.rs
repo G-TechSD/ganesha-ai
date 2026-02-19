@@ -282,3 +282,33 @@ struct OpenAiModelsResponse {
 struct OpenAiModel {
     id: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_openai_provider_new() {
+        let provider = OpenAiProvider::new("sk-test-key");
+        assert_eq!(provider.name(), "openai");
+    }
+
+    #[test]
+    fn test_openai_provider_with_base_url() {
+        let provider = OpenAiProvider::with_base_url("sk-test", "http://custom:8080/v1");
+        assert_eq!(provider.base_url, "http://custom:8080/v1");
+    }
+
+    #[test]
+    fn test_openai_provider_with_default_model() {
+        let provider = OpenAiProvider::new("sk-test")
+            .with_default_model("gpt-4o");
+        assert_eq!(provider.default_model, "gpt-4o");
+    }
+
+    #[test]
+    fn test_openai_provider_default_model_none() {
+        let provider = OpenAiProvider::new("sk-test");
+        assert_eq!(provider.default_model, "gpt-4o"); // default
+    }
+}

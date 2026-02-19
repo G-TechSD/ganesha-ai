@@ -273,3 +273,27 @@ struct AnthropicUsage {
     input_tokens: u32,
     output_tokens: u32,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_anthropic_provider_new() {
+        let provider = AnthropicProvider::new("sk-ant-test");
+        assert_eq!(provider.name(), "anthropic");
+    }
+
+    #[test]
+    fn test_anthropic_provider_with_default_model() {
+        let provider = AnthropicProvider::new("sk-ant-test")
+            .with_default_model("claude-3-opus");
+        assert_eq!(provider.default_model, "claude-3-opus");
+    }
+
+    #[test]
+    fn test_anthropic_provider_default_model_none() {
+        let provider = AnthropicProvider::new("sk-ant-test");
+        assert!(!provider.default_model.is_empty()); // has a default
+    }
+}

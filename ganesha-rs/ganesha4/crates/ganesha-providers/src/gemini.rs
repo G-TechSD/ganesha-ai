@@ -250,3 +250,27 @@ struct GeminiModelsResponse {
 struct GeminiModel {
     id: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_gemini_provider_new() {
+        let provider = GeminiProvider::new("test-api-key");
+        assert_eq!(provider.name(), "gemini");
+    }
+
+    #[test]
+    fn test_gemini_provider_with_default_model() {
+        let provider = GeminiProvider::new("test-key")
+            .with_default_model("gemini-pro");
+        assert_eq!(provider.default_model, "gemini-pro");
+    }
+
+    #[test]
+    fn test_gemini_provider_default_model_none() {
+        let provider = GeminiProvider::new("test-key");
+        assert!(!provider.default_model.is_empty()); // has a default
+    }
+}
