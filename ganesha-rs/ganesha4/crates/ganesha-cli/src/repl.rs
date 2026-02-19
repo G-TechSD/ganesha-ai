@@ -2217,6 +2217,12 @@ const SLASH_COMMANDS: &[SlashCommand] = &[
         handler: cmd_provider,
     },
     SlashCommand {
+        name: "status",
+        aliases: &["info", "i"],
+        description: "Show current status",
+        handler: cmd_status,
+    },
+    SlashCommand {
         name: "exit",
         aliases: &["quit", "q"],
         description: "Exit Ganesha",
@@ -3754,6 +3760,76 @@ fn cmd_provider(args: &str, _state: &mut ReplState) -> anyhow::Result<()> {
             println!();
         }
     }
+    Ok(())
+}
+
+fn cmd_status(_args: &str, state: &mut ReplState) -> anyhow::Result<()> {
+    use sysinfo::System;
+
+    println!();
+    println!("{}", "  Ganesha Status".bright_cyan().bold());
+    println!("{}", "  ─────────────────────────────────".dimmed());
+
+    // Working directory
+    println!("  {} {}", "Dir:".bright_white(), state.working_dir.display().to_string().dimmed());
+
+    // Mode
+    println!("  {} {:?}", "Mode:".bright_white(), state.mode);
+
+    // Model
+    if let Some(ref m) = state.model {
+        println!("  {} {}", "Model:".bright_white(), m.bright_cyan());
+    } else {
+        println!("  {} {}", "Model:".bright_white(), "(default)".dimmed());
+    }
+
+    // Providers
+    let providers = tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(state.provider_manager.list_providers())
+    });
+    if providers.is_empty() {
+        println!("  {} {}", "Providers:".bright_white(), "none".red());
+    } else {
+        let names: Vec<_> = providers.iter().map(|p| p.name.as_str()).collect();
+        println!("  {} {}", "Providers:".bright_white(), names.join(", ").green());
+    }
+
+    // MCP
+    let mcp_count = tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(state.mcp_manager.list_connected())
+    }).len();
+    let tool_count = state.mcp_tools.len();
+    if mcp_count > 0 || tool_count > 0 {
+        println!("  {} {} servers, {} tools", "MCP:".bright_white(),
+            mcp_count.to_string().bright_green(), tool_count.to_string().bright_green());
+    }
+
+    // Context files
+    if !state.context_files.is_empty() {
+        println!("  {} {} file(s)", "Context:".bright_white(), state.context_files.len());
+    }
+
+    // Conversation
+    let msg_count = state.messages.len();
+    println!("  {} {} messages", "Chat:".bright_white(), msg_count);
+
+    // Session log
+    if let Some(log_path) = state.session_logger.log_path() {
+        if let Ok(meta) = std::fs::metadata(log_path) {
+            println!("  {} {} ({})", "Log:".bright_white(),
+                log_path.file_name().unwrap_or_default().to_string_lossy().dimmed(),
+                format_size(meta.len()).dimmed());
+        }
+    }
+
+    // System info
+    let mut sys = System::new();
+    sys.refresh_memory();
+    let mem_used = (sys.total_memory() - sys.available_memory()) as f64 / 1024.0 / 1024.0 / 1024.0;
+    let mem_total = sys.total_memory() as f64 / 1024.0 / 1024.0 / 1024.0;
+    println!("  {} {:.1}/{:.1} GB", "Memory:".bright_white(), mem_used, mem_total);
+
+    println!();
     Ok(())
 }
 
