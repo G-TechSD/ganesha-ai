@@ -771,18 +771,95 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_audio_data_creation() {
-        let samples = vec![0.0f32; 16000]; // 1 second at 16kHz
-        let audio = AudioData::new(samples, 16000, 1);
-        assert_eq!(audio.sample_rate, 16000);
-        assert_eq!(audio.channels, 1);
-        assert!(audio.duration >= Duration::from_millis(900));
+    fn test_vad_config_defaults() {
+        let config = VadConfig::default();
+        assert_eq!(config.voice_threshold, 0.02);
+        assert_eq!(config.silence_duration, Duration::from_millis(1500));
     }
 
     #[test]
-    fn test_vad_config_default() {
-        let config = VadConfig::default();
-        assert!(config.voice_threshold > 0.0);
-        assert!(config.silence_duration > Duration::ZERO);
+    fn test_audio_data_new() {
+        let samples = vec![0.0f32; 16000];
+        let data = AudioData::new(samples.clone(), 16000, 1);
+        assert_eq!(data.sample_rate, 16000);
+        assert_eq!(data.channels, 1);
+        assert_eq!(data.samples.len(), 16000);
+        
+    }
+
+    #[test]
+    fn test_audio_data_stereo() {
+        let samples = vec![0.0f32; 88200];
+        let data = AudioData::new(samples, 44100, 2);
+        assert_eq!(data.sample_rate, 44100);
+        assert_eq!(data.channels, 2);
+        assert_eq!(data.duration.as_secs(), 2);
+        
+    }
+
+    #[test]
+    fn test_audio_data_empty() {
+        let data = AudioData::new(vec![], 16000, 1);
+        assert_eq!(data.duration, Duration::ZERO);
+        assert!(data.samples.is_empty());
+    }
+
+    #[test]
+    fn test_transcription_result() {
+        let result = TranscriptionResult {
+            text: "Hello world".to_string(),
+            confidence: Some(0.95),
+            language: Some("en".to_string()),
+            duration: Duration::from_secs(2),
+            segments: vec![
+                TranscriptionSegment {
+                    text: "Hello".to_string(),
+                    start: 0.0,
+                    end: 0.5,
+                },
+                TranscriptionSegment {
+                    text: "world".to_string(),
+                    start: 0.6,
+                    end: 1.0,
+                },
+            ],
+        };
+        assert_eq!(result.text, "Hello world");
+        assert_eq!(result.confidence.unwrap(), 0.95);
+        assert_eq!(result.segments.len(), 2);
+    }
+
+    #[test]
+    fn test_transcription_segment_timing() {
+        let seg = TranscriptionSegment {
+            text: "test".to_string(),
+            start: 1.5,
+            end: 2.0,
+        };
+        assert!(seg.end > seg.start);
+        assert_eq!(seg.end - seg.start, 0.5);
+    }
+
+    #[test]
+    fn test_voice_input_event_variants() {
+        let _ = VoiceInputEvent::RecordingStarted;
+        let _ = VoiceInputEvent::RecordingStopped;
+        let _ = VoiceInputEvent::VoiceActivityDetected;
+        let _ = VoiceInputEvent::SilenceDetected { duration: Duration::from_secs(1) };
+        let _ = VoiceInputEvent::AudioLevel { level: 0.5 };
+        let _ = VoiceInputEvent::Transcription { text: "hi".to_string(), is_final: true };
+        let _ = VoiceInputEvent::Error { message: "fail".to_string() };
+    }
+
+    #[test]
+    fn test_vad_config_custom() {
+        let config = VadConfig {
+            voice_threshold: 0.05,
+            silence_duration: Duration::from_secs(2),
+            min_speech_duration: Duration::from_millis(500),
+            max_recording_duration: Duration::from_secs(60),
+        };
+        assert_eq!(config.voice_threshold, 0.05);
+        assert_eq!(config.max_recording_duration.as_secs(), 60);
     }
 }
