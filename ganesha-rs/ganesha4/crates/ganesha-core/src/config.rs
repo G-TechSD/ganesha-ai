@@ -855,4 +855,66 @@ mod tests {
         assert_eq!(config.ai_timeout(), Duration::from_secs(120));
         assert_eq!(config.verification_timeout(), Duration::from_secs(300));
     }
+
+    #[test]
+    fn test_ai_config_defaults() {
+        let config = CoreConfig::new();
+        assert!(!config.ai.model.is_empty());
+        assert!(config.ai.max_tokens > 0);
+    }
+
+    #[test]
+    fn test_execution_config_defaults() {
+        let config = CoreConfig::new();
+        assert!(config.execution.command_timeout_secs > 0);
+    }
+
+    #[test]
+    fn test_session_config_defaults() {
+        let config = CoreConfig::new();
+        assert!(config.session.max_age_days > 0);
+    }
+
+    #[test]
+    fn test_config_risk_level() {
+        let mut config = CoreConfig::new();
+        config.set_risk_level(RiskLevel::Trusted);
+        assert_eq!(config.risk_level, RiskLevel::Trusted);
+    }
+
+    #[test]
+    fn test_config_command_timeout() {
+        let config = CoreConfig::new();
+        let timeout = config.command_timeout();
+        assert!(timeout.as_secs() > 0);
+    }
+
+    #[test]
+    fn test_config_serialization_roundtrip() {
+        let config = CoreConfig::new();
+        let json = serde_json::to_string(&config).unwrap();
+        let deserialized: CoreConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.ai.model, config.ai.model);
+    }
+
+    #[test]
+    fn test_display_config_defaults() {
+        let config = CoreConfig::new();
+        let _ = &config.display;
+    }
+
+    #[test]
+    fn test_mcp_config_defaults() {
+        let config = CoreConfig::new();
+        // MCP servers list exists (may be empty)
+        let _ = &config.mcp.servers;
+    }
+
+    #[test]
+    fn test_config_paths() {
+        // These return Option - just verify they don't panic
+        let _ = CoreConfig::global_config_path();
+        let _ = CoreConfig::project_config_path();
+    }
+
 }
