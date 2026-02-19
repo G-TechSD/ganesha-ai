@@ -913,6 +913,7 @@ pub async fn execute_plan_steps<E: Executor>(
 mod tests {
     use super::*;
     use tempfile::TempDir;
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_read_file() {
@@ -1034,4 +1035,184 @@ mod tests {
         assert!(!result.success);
         assert!(result.error.unwrap().contains("Timeout"));
     }
+
+    // ============================================================
+    // Unit tests (non-async) for data structures
+    // ============================================================
+
+    #[test]
+    fn test_file_change_new() {
+        let change = FileChange::new("/tmp/test.txt", FileChangeType::Created);
+        assert_eq!(change.path, PathBuf::from("/tmp/test.txt"));
+        assert!(matches!(change.change_type, FileChangeType::Created));
+        assert!(change.original_content.is_none());
+        assert!(change.new_content.is_none());
+    }
+
+    #[test]
+    fn test_file_change_with_original() {
+        let change = FileChange::new("/tmp/test.txt", FileChangeType::Modified)
+            .with_original("old content");
+        assert_eq!(change.original_content, Some("old content".to_string()));
+    }
+
+    #[test]
+    fn test_file_change_with_new_content() {
+        let change = FileChange::new("/tmp/test.txt", FileChangeType::Modified)
+            .with_new_content("new content");
+        assert_eq!(change.new_content, Some("new content".to_string()));
+    }
+
+    #[test]
+    fn test_file_change_builder_chain() {
+        let change = FileChange::new("/tmp/test.txt", FileChangeType::Modified)
+            .with_original("old")
+            .with_new_content("new");
+        assert_eq!(change.original_content, Some("old".to_string()));
+        assert_eq!(change.new_content, Some("new".to_string()));
+    }
+
+    #[test]
+    fn test_file_change_type_variants() {
+        // Ensure all variants exist
+        let _ = FileChangeType::Created;
+        let _ = FileChangeType::Modified;
+        let _ = FileChangeType::Deleted;
+        let _ = FileChangeType::Moved { from: PathBuf::from("old.txt") };
+    }
+
+    #[test]
+    fn test_execution_result_success() {
+        let result = ExecutionResult::success(StepId(Uuid::new_v4()), Duration::from_millis(100));
+        assert!(result.success);
+        assert!(result.error.is_none());
+        assert!(result.success);  // step_id is a UUID
+        assert_eq!(result.duration, Duration::from_millis(100));
+    }
+
+    #[test]
+    fn test_execution_result_failure() {
+        let result = ExecutionResult::failure(StepId(Uuid::new_v4()), "something went wrong", Duration::from_secs(1));
+        assert!(!result.success);
+        assert_eq!(result.error, Some("something went wrong".to_string()));
+        assert!(!result.success);  // step_id is a UUID
+    }
+
+    #[test]
+    fn test_execution_result_with_output() {
+        let result = ExecutionResult::success(StepId(Uuid::new_v4()), Duration::from_millis(50))
+            .with_output("command output");
+        assert_eq!(result.output, Some("command output".to_string()));
+    }
+
+    #[test]
+    fn test_execution_result_with_change() {
+        let change = FileChange::new("test.txt", FileChangeType::Created);
+        let result = ExecutionResult::success(StepId(Uuid::new_v4()), Duration::from_millis(50))
+            .with_change(change);
+        assert_eq!(result.changes.len(), 1);
+    }
+
+    #[test]
+    fn test_execution_result_with_changes() {
+        let changes = vec![
+            FileChange::new("a.txt", FileChangeType::Created),
+            FileChange::new("b.txt", FileChangeType::Modified),
+        ];
+        let result = ExecutionResult::success(StepId(Uuid::new_v4()), Duration::from_millis(50))
+            .with_changes(changes);
+        assert_eq!(result.changes.len(), 2);
+    }
+
+    #[test]
+    fn test_execution_result_with_exit_code() {
+        let result = ExecutionResult::success(StepId(Uuid::new_v4()), Duration::from_millis(50))
+            .with_exit_code(0);
+        assert_eq!(result.exit_code, Some(0));
+    }
+
+    #[test]
+    fn test_execution_result_with_rollback_point() {
+        let result = ExecutionResult::success(StepId(Uuid::new_v4()), Duration::from_millis(50))
+            .with_rollback_point("checkpoint-1");
+        assert_eq!(result.rollback_point, Some("checkpoint-1".to_string()));
+    }
+
+    #[test]
+    fn test_execution_context_new() {
+        let ctx = ExecutionContext::new("/tmp/work");
+        assert_eq!(ctx.working_directory, PathBuf::from("/tmp/work"));
+        assert!(!ctx.dry_run);
+        assert!(ctx.enable_rollback);
+    }
+
+    #[test]
+    fn test_execution_context_dry_run() {
+        let ctx = ExecutionContext::new("/tmp").dry_run();
+        assert!(ctx.dry_run);
+    }
+
+    #[test]
+    fn test_execution_context_no_rollback() {
+        let ctx = ExecutionContext::new("/tmp").no_rollback();
+        assert!(!ctx.enable_rollback);
+    }
+
+    #[test]
+    fn test_execution_context_with_env() {
+        let ctx = ExecutionContext::new("/tmp")
+            .with_env("PATH", "/usr/bin")
+            .with_env("HOME", "/root");
+        assert_eq!(ctx.environment.get("PATH"), Some(&"/usr/bin".to_string()));
+        assert_eq!(ctx.environment.get("HOME"), Some(&"/root".to_string()));
+    }
+
+    #[test]
+    fn test_execution_context_with_timeout() {
+        let ctx = ExecutionContext::new("/tmp").with_timeout(Duration::from_secs(30));
+        assert_eq!(ctx.default_timeout, Duration::from_secs(30));
+    }
+
+    #[test]
+    fn test_execution_context_with_rollback_dir() {
+        let ctx = ExecutionContext::new("/tmp").with_rollback_dir("/backups");
+        assert_eq!(ctx.rollback_dir, Some(PathBuf::from("/backups")));
+    }
+
+    #[test]
+    fn test_standard_executor_new() {
+        let executor = StandardExecutor::new();
+        assert_eq!(executor.max_retries, 3);
+    }
+
+    #[test]
+    fn test_standard_executor_with_retries() {
+        let executor = StandardExecutor::new().with_retries(3);
+        assert_eq!(executor.max_retries, 3);
+    }
+
+    #[test]
+    fn test_executor_error_display() {
+        let err = ExecutorError::ExecutionFailed("test failure".to_string());
+        assert_eq!(format!("{}", err), "Step execution failed: test failure");
+
+        let err = ExecutorError::Timeout(Duration::from_secs(5));
+        assert!(format!("{}", err).contains("5s"));
+
+        let err = ExecutorError::CommandFailed { code: 1, message: "not found".to_string() };
+        assert!(format!("{}", err).contains("exit code 1"));
+
+        let err = ExecutorError::Cancelled;
+        assert_eq!(format!("{}", err), "Cancelled by user");
+    }
+
+    #[test]
+    fn test_execution_result_serialization() {
+        let result = ExecutionResult::success(StepId(Uuid::new_v4()), Duration::from_millis(100))
+            .with_output("hello")
+            .with_exit_code(0);
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("hello"));
+    }
+
 }
