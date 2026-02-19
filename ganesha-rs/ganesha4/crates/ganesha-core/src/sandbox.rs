@@ -717,4 +717,64 @@ mod tests {
         assert!(sandbox.is_active());
         assert_eq!(sandbox.mode, SandboxMode::DryRun);
     }
+
+    
+    #[test]
+    fn test_sandbox_mode_display() {
+        assert!(!format!("{:?}", SandboxMode::DryRun).is_empty());
+        assert!(!format!("{:?}", SandboxMode::GitWorktree).is_empty());
+        assert!(!format!("{:?}", SandboxMode::FullIsolation).is_empty());
+        assert!(!format!("{:?}", SandboxMode::Overlay).is_empty());
+    }
+
+    #[test]
+    fn test_sandbox_config_custom_mode() {
+        let config = SandboxConfig {
+            mode: SandboxMode::GitWorktree,
+            ..SandboxConfig::default()
+        };
+        assert_eq!(config.mode, SandboxMode::GitWorktree);
+    }
+
+    #[test]
+    fn test_sandbox_manager_empty_list() {
+        let config = SandboxConfig::default();
+        let manager = SandboxManager::new(config);
+        assert!(manager.list().is_empty());
+    }
+
+    #[test]
+    fn test_sandbox_manager_get_none() {
+        let config = SandboxConfig::default();
+        let manager = SandboxManager::new(config);
+        assert!(manager.get("nope").is_none());
+    }
+
+    #[test]
+    fn test_executed_command_construction() {
+        let cmd = ExecutedCommand {
+            command: "ls".to_string(),
+            args: vec!["-la".to_string()],
+            working_dir: PathBuf::from("/tmp"),
+            exit_code: Some(0),
+            stdout: "output".to_string(),
+            stderr: String::new(),
+            duration_ms: 50,
+        };
+        assert_eq!(cmd.command, "ls");
+        assert_eq!(cmd.exit_code, Some(0));
+    }
+
+    #[test]
+    fn test_apply_result_construction() {
+        let result = ApplyResult {
+            files_modified: vec![PathBuf::from("lib.rs")],
+            files_created: vec![PathBuf::from("new.rs")],
+            files_deleted: vec![],
+            success: true,
+        };
+        assert!(result.success);
+        assert_eq!(result.files_created.len(), 1);
+    }
+
 }
