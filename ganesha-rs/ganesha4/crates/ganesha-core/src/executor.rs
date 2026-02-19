@@ -1215,4 +1215,49 @@ mod tests {
         assert!(json.contains("hello"));
     }
 
+
+    
+    #[test]
+    fn test_file_change_debug() {
+        let fc = FileChange::new("test.rs", FileChangeType::Created);
+        let s = format!("{:?}", fc);
+        assert!(s.contains("test.rs"));
+    }
+
+    #[test]
+    fn test_execution_result_success_is_success() {
+        let result = ExecutionResult::success(StepId::new(), Duration::from_secs(1));
+        assert!(result.success);
+        assert!(result.error.is_none());
+    }
+
+    #[test]
+    fn test_execution_result_failure_has_error() {
+        let result = ExecutionResult::failure(StepId::new(), "something broke", Duration::from_secs(1));
+        assert!(!result.success);
+        assert!(result.error.is_some());
+    }
+
+    #[test]
+    fn test_execution_context_defaults() {
+        let ctx = ExecutionContext::new("/tmp");
+        assert_eq!(ctx.working_directory, PathBuf::from("/tmp"));
+        assert!(!ctx.dry_run);
+    }
+
+    #[test]
+    fn test_execution_context_dry_run_flag() {
+        let ctx = ExecutionContext::new("/tmp").dry_run();
+        assert!(ctx.dry_run);
+    }
+
+    #[test]
+    fn test_execution_result_multiple_changes() {
+        let result = ExecutionResult::success(StepId::new(), Duration::from_secs(1))
+            .with_change(FileChange::new("a.rs", FileChangeType::Created))
+            .with_change(FileChange::new("b.rs", FileChangeType::Modified))
+            .with_change(FileChange::new("c.rs", FileChangeType::Deleted));
+        assert_eq!(result.changes.len(), 3);
+    }
+
 }
