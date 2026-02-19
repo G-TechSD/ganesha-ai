@@ -334,4 +334,97 @@ mod tests {
         assert!(md.contains("*System:*"));
         assert!(md.contains("You are a helpful assistant."));
     }
+
+    #[test]
+    fn test_markdown_without_name_uses_id() {
+        let session = Session::new(PathBuf::from("/tmp"));
+        let md = session.to_markdown();
+        assert!(md.contains(&format!("# Session: {}", session.id)));
+    }
+
+    #[test]
+    fn test_empty_session_markdown() {
+        let session = Session::new(PathBuf::from("."));
+        let md = session.to_markdown();
+        assert!(md.contains("---"));
+        assert!(!md.contains("**You:**"));
+    }
+
+    #[test]
+    fn test_message_with_tokens() {
+        let msg = HistoryMessage {
+            role: "assistant".to_string(),
+            content: "Response".to_string(),
+            timestamp: Utc::now(),
+            model: Some("gpt-4".to_string()),
+            tokens: Some(150),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("tokens"));
+        assert!(json.contains("150"));
+        assert!(json.contains("model"));
+        assert!(json.contains("gpt-4"));
+    }
+
+    #[test]
+    fn test_session_metadata_operations() {
+        let mut session = Session::new(PathBuf::from("."));
+        session.metadata.insert("provider".to_string(), "openai".to_string());
+        session.metadata.insert("mode".to_string(), "chat".to_string());
+        
+        assert_eq!(session.metadata.len(), 2);
+        assert_eq!(session.metadata.get("provider").unwrap(), "openai");
+        
+        session.metadata.remove("mode");
+        assert_eq!(session.metadata.len(), 1);
+    }
+
+    #[test]
+    fn test_session_id_is_uuid() {
+        let session = Session::new(PathBuf::from("."));
+        // UUID v4 format: 8-4-4-4-12 hex chars
+        assert_eq!(session.id.len(), 36);
+        assert_eq!(session.id.chars().filter(|c| *c == '-').count(), 4);
+    }
+
+    #[test]
+    fn test_multiple_messages_ordering() {
+        let mut session = Session::new(PathBuf::from("."));
+        session.add_message("user", "First", None);
+        session.add_message("assistant", "Second", None);
+        session.add_message("user", "Third", None);
+        
+        assert_eq!(session.messages[0].content, "First");
+        assert_eq!(session.messages[1].content, "Second");
+        assert_eq!(session.messages[2].content, "Third");
+    }
+
+    #[test]
+    fn test_session_summary_fields() {
+        let summary = SessionSummary {
+            id: "abc-123".to_string(),
+            name: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            message_count: 0,
+        };
+        assert!(summary.name.is_none());
+        assert_eq!(summary.id, "abc-123");
+    }
+
+    #[test]
+    fn test_markdown_multiple_roles() {
+        let mut session = Session::new(PathBuf::from("."));
+        session.add_message("system", "System prompt", None);
+        session.add_message("user", "User message", None);
+        session.add_message("assistant", "Assistant reply", None);
+        session.add_message("tool", "Tool output", None);
+        
+        let md = session.to_markdown();
+        assert!(md.contains("*System:*"));
+        assert!(md.contains("**You:**"));
+        assert!(md.contains("**Assistant:**"));
+        assert!(md.contains("tool"));  // Unknown roles just use the role name
+    }
+
 }

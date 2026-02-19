@@ -263,4 +263,88 @@ mod tests {
     fn test_voice_mode_enum() {
         assert_ne!(VoiceMode::PushToTalk, VoiceMode::Conversation);
     }
+
+    #[test]
+    fn test_voice_ptt_default() {
+        let ptt = VoicePTT::default();
+        assert!(!ptt.is_recording());
+        assert!(!ptt.is_conversation_active());
+    }
+
+    #[test]
+    fn test_voice_ptt_initial_state() {
+        let ptt = VoicePTT::new();
+        assert!(ptt.last_ctrl_press.is_none());
+        assert_eq!(ptt.double_tap_threshold, Duration::from_millis(400));
+    }
+
+    #[test]
+    fn test_voice_input_event_variants() {
+        // Ensure all event variants can be constructed
+        let events = vec![
+            VoiceInputEvent::StartRecording,
+            VoiceInputEvent::StopAndTranscribe,
+            VoiceInputEvent::ToggleConversation,
+            VoiceInputEvent::ConversationEnabled,
+            VoiceInputEvent::ConversationDisabled,
+            VoiceInputEvent::Cancel,
+            VoiceInputEvent::Exit,
+        ];
+        assert_eq!(events.len(), 7);
+    }
+
+    #[test]
+    fn test_voice_mode_equality() {
+        assert_eq!(VoiceMode::PushToTalk, VoiceMode::PushToTalk);
+        assert_eq!(VoiceMode::Conversation, VoiceMode::Conversation);
+        assert_ne!(VoiceMode::PushToTalk, VoiceMode::Conversation);
+    }
+
+    #[test]
+    fn test_voice_mode_clone() {
+        let mode = VoiceMode::PushToTalk;
+        let cloned = mode.clone();
+        assert_eq!(mode, cloned);
+    }
+
+    #[test]
+    fn test_voice_mode_copy() {
+        let mode = VoiceMode::Conversation;
+        let copied = mode;
+        assert_eq!(mode, copied);
+    }
+
+    #[test]
+    fn test_recording_flag_atomic() {
+        let ptt = VoicePTT::new();
+        // Directly test atomic behavior
+        ptt.is_recording.store(true, Ordering::SeqCst);
+        assert!(ptt.is_recording());
+        ptt.is_recording.store(false, Ordering::SeqCst);
+        assert!(!ptt.is_recording());
+    }
+
+    #[test]
+    fn test_conversation_flag_atomic() {
+        let ptt = VoicePTT::new();
+        ptt.conversation_active.store(true, Ordering::SeqCst);
+        assert!(ptt.is_conversation_active());
+        ptt.conversation_active.store(false, Ordering::SeqCst);
+        assert!(!ptt.is_conversation_active());
+    }
+
+    #[test]
+    fn test_voice_input_event_debug() {
+        let event = VoiceInputEvent::StartRecording;
+        let debug = format!("{:?}", event);
+        assert!(debug.contains("StartRecording"));
+    }
+
+    #[test]
+    fn test_voice_input_event_clone() {
+        let event = VoiceInputEvent::Cancel;
+        let cloned = event.clone();
+        assert!(format!("{:?}", cloned).contains("Cancel"));
+    }
+
 }
