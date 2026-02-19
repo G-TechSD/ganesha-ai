@@ -1079,4 +1079,87 @@ mod tests {
         assert_eq!(drag.start_x, 0);
         assert_eq!(drag.end_x, 100);
     }
+
+    #[test]
+    fn test_keyboard_shortcut_ctrl() {
+        let s = KeyboardShortcut::ctrl(KeyInput::Char('s'));
+        assert!(s.modifiers.contains(&Modifier::Control));
+    }
+
+    #[test]
+    fn test_keyboard_shortcut_alt() {
+        let s = KeyboardShortcut::alt(KeyInput::Special(Key::F4));
+        assert!(s.modifiers.contains(&Modifier::Alt));
+    }
+
+    #[test]
+    fn test_keyboard_shortcut_shift() {
+        let s = KeyboardShortcut::shift(KeyInput::Special(Key::Tab));
+        assert!(s.modifiers.contains(&Modifier::Shift));
+    }
+
+    #[test]
+    fn test_keyboard_shortcut_ctrl_shift() {
+        let s = KeyboardShortcut::ctrl_shift(KeyInput::Char('z'));
+        assert!(s.modifiers.contains(&Modifier::Control));
+        assert!(s.modifiers.contains(&Modifier::Shift));
+    }
+
+    #[test]
+    fn test_keyboard_shortcut_ctrl_alt() {
+        let s = KeyboardShortcut::ctrl_alt(KeyInput::Special(Key::Delete));
+        assert!(s.modifiers.contains(&Modifier::Control));
+        assert!(s.modifiers.contains(&Modifier::Alt));
+    }
+
+    #[test]
+    fn test_mouse_double_click() {
+        let action = MouseAction::double_click(50, 75);
+        assert_eq!(action.x, 50);
+        assert_eq!(action.y, 75);
+        assert_eq!(action.click_type, ClickType::Double);
+    }
+
+    #[test]
+    fn test_mouse_right_click() {
+        let action = MouseAction::right_click(10, 20);
+        assert_eq!(action.button, MouseButton::Right);
+    }
+
+    #[test]
+    fn test_scroll_vertical() {
+        let scroll = ScrollAction::vertical(0, 0, 5);
+        assert_eq!(scroll.delta_y, 5);
+        assert_eq!(scroll.delta_x, 0);
+    }
+
+    #[test]
+    fn test_scroll_horizontal() {
+        let scroll = ScrollAction::horizontal(0, 0, 3);
+        assert_eq!(scroll.delta_x, 3);
+        assert_eq!(scroll.delta_y, 0);
+    }
+
+    #[test]
+    fn test_drag_operation_detailed() {
+        let drag = DragOperation::new(10, 20, 300, 400);
+        assert_eq!(drag.start_x, 10);
+        assert_eq!(drag.start_y, 20);
+        assert_eq!(drag.end_x, 300);
+        assert_eq!(drag.end_y, 400);
+    }
+
+    #[test]
+    fn test_keyboard_shortcut_parse_single() {
+        let s = KeyboardShortcut::parse("A").unwrap();
+        assert!(s.modifiers.is_empty());
+    }
+
+    #[test]
+    fn test_keyboard_shortcut_parse_meta() {
+        let s = KeyboardShortcut::parse("Meta+C");
+        // Meta might not be supported in all parse implementations
+        // but shouldn't panic
+        let _ = s;
+    }
 }
