@@ -3761,3 +3761,367 @@ fn cmd_exit(_args: &str, _state: &mut ReplState) -> anyhow::Result<()> {
     println!("Goodbye! 🐘");
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ============================================================
+    // looks_like_shell_command tests
+    // ============================================================
+    mod looks_like_shell_command_tests {
+        use super::*;
+
+        #[test]
+        fn accepts_basic_commands() {
+            assert!(looks_like_shell_command("ls -la"));
+            assert!(looks_like_shell_command("cat file.txt"));
+            assert!(looks_like_shell_command("grep -r pattern ."));
+            assert!(looks_like_shell_command("echo hello"));
+            assert!(looks_like_shell_command("cd /tmp"));
+            assert!(looks_like_shell_command("git status"));
+            assert!(looks_like_shell_command("npm install"));
+            assert!(looks_like_shell_command("cargo build"));
+            assert!(looks_like_shell_command("python3 script.py"));
+        }
+
+        #[test]
+        fn accepts_compound_commands() {
+            assert!(looks_like_shell_command("cd /tmp && ls"));
+            assert!(looks_like_shell_command("mkdir -p dir && cd dir"));
+        }
+
+        #[test]
+        fn accepts_path_prefixed_commands() {
+            assert!(looks_like_shell_command("./script.sh"));
+            assert!(looks_like_shell_command("/usr/bin/env python3"));
+        }
+
+        #[test]
+        fn rejects_empty_string() {
+            assert!(!looks_like_shell_command(""));
+            assert!(!looks_like_shell_command("   "));
+        }
+
+        #[test]
+        fn rejects_prose() {
+            assert!(!looks_like_shell_command("If you want to list files, use ls"));
+            assert!(!looks_like_shell_command("The file contains data"));
+            assert!(!looks_like_shell_command("You should try running the command"));
+            assert!(!looks_like_shell_command("This is a description of the problem"));
+        }
+
+        #[test]
+        fn rejects_ls_output() {
+            assert!(!looks_like_shell_command("drwxrwxr-x 5 user user 4096 Feb 18 file"));
+            assert!(!looks_like_shell_command("-rw-r--r-- 1 user user 1234 Feb 18 file.txt"));
+            assert!(!looks_like_shell_command("total 48"));
+        }
+
+        #[test]
+        fn rejects_config_lines() {
+            assert!(!looks_like_shell_command("[section]"));
+        }
+
+        #[test]
+        fn rejects_markdown() {
+            assert!(!looks_like_shell_command("## Header"));
+            assert!(!looks_like_shell_command("---"));
+            assert!(!looks_like_shell_command("```bash"));
+        }
+
+        #[test]
+        fn rejects_code_declarations() {
+            assert!(!looks_like_shell_command("fn main() {"));
+            assert!(!looks_like_shell_command("pub struct Foo {"));
+            assert!(!looks_like_shell_command("def hello():"));
+            assert!(!looks_like_shell_command("class MyClass:"));
+            assert!(!looks_like_shell_command("const x = 42;"));
+            assert!(!looks_like_shell_command("function doStuff() {"));
+        }
+
+        #[test]
+        fn rejects_day_names() {
+            assert!(!looks_like_shell_command("Tuesday, January 20, 2026 11:36:58 AM"));
+            assert!(!looks_like_shell_command("Monday morning is great"));
+        }
+
+        #[test]
+        fn rejects_numbered_lists() {
+            assert!(!looks_like_shell_command("1. Add the user to the system"));
+            assert!(!looks_like_shell_command("2. Configure the settings"));
+        }
+    }
+
+    // ============================================================
+    // extract_commands tests
+    // ============================================================
+    mod extract_commands_tests {
+        use super::*;
+
+        #[test]
+        fn extracts_from_bash_block() {
+            let response = "Let me check:\n```bash\nls -la\n```\nThat should show the files.";
+            let cmds = extract_commands(response);
+            assert_eq!(cmds, vec!["ls -la"]);
+        }
+
+        #[test]
+        fn extracts_from_shell_block() {
+            let response = "```shell\ngit status\n```";
+            let cmds = extract_commands(response);
+            assert_eq!(cmds, vec!["git status"]);
+        }
+
+        #[test]
+        fn skips_comments_in_code_blocks() {
+            let response = "```bash\n# This is a comment\necho hello\n```";
+            let cmds = extract_commands(response);
+            assert_eq!(cmds, vec!["echo hello"]);
+        }
+
+        #[test]
+        fn limits_to_first_command() {
+            let response = "```bash\nls -la\npwd\necho done\n```";
+            let cmds = extract_commands(response);
+            assert_eq!(cmds.len(), 1);
+            assert_eq!(cmds[0], "ls -la");
+        }
+
+        #[test]
+        fn returns_empty_for_no_commands() {
+            let response = "Here is some text without any code blocks.";
+            let cmds = extract_commands(response);
+            assert!(cmds.is_empty());
+        }
+
+        #[test]
+        fn extracts_from_json_format() {
+            let response = r#"{"cmd": ["bash", "-c", "ls -la"]}"#;
+            let cmds = extract_commands(response);
+            assert_eq!(cmds, vec!["ls -la"]);
+        }
+
+        #[test]
+        fn extracts_from_command_json() {
+            let response = r#"{"command": "git log --oneline -5"}"#;
+            let cmds = extract_commands(response);
+            assert_eq!(cmds, vec!["git log --oneline -5"]);
+        }
+    }
+
+    // ============================================================
+    // extract_command_from_json tests
+    // ============================================================
+    mod json_extraction_tests {
+        use super::*;
+
+        #[test]
+        fn extracts_cmd_array() {
+            let resp = r#"{"cmd": ["bash", "-c", "ls -la"]}"#;
+            let cmd = extract_command_from_json(resp);
+            assert_eq!(cmd, Some("ls -la".to_string()));
+        }
+
+        #[test]
+        fn extracts_command_string() {
+            let resp = r#"{"command": "echo hello"}"#;
+            let cmd = extract_command_from_json(resp);
+            assert_eq!(cmd, Some("echo hello".to_string()));
+        }
+
+        #[test]
+        fn extracts_tool_shell() {
+            let resp = r#"{"tool": "shell", "arguments": {"command": "pwd"}}"#;
+            let cmd = extract_command_from_json(resp);
+            assert_eq!(cmd, Some("pwd".to_string()));
+        }
+
+        #[test]
+        fn returns_none_for_non_json() {
+            let resp = "This is just text";
+            assert!(extract_command_from_json(resp).is_none());
+        }
+
+        #[test]
+        fn handles_embedded_json() {
+            let resp = r#"Let me run: {"command": "find . -name '*.rs'"} to find files."#;
+            let cmd = extract_command_from_json(resp);
+            assert_eq!(cmd, Some("find . -name '*.rs'".to_string()));
+        }
+    }
+
+    // ============================================================
+    // extract_tool_calls tests
+    // ============================================================
+    mod tool_call_tests {
+        use super::*;
+
+        #[test]
+        fn extracts_tool_block() {
+            let resp = "```tool\ntool_name: puppeteer:navigate\narguments:\n  url: https://example.com\n```";
+            let calls = extract_tool_calls(resp);
+            assert_eq!(calls.len(), 1);
+            assert_eq!(calls[0].0, "puppeteer:navigate");
+        }
+
+        #[test]
+        fn returns_empty_for_no_tools() {
+            let resp = "No tools here, just text.";
+            let calls = extract_tool_calls(resp);
+            assert!(calls.is_empty());
+        }
+
+        #[test]
+        fn handles_json_tool_format() {
+            let resp = r#"{"name": "shell", "arguments": {"command": "ls"}}"#;
+            let calls = extract_tool_calls(resp);
+            assert_eq!(calls.len(), 1);
+            assert_eq!(calls[0].0, "shell");
+        }
+    }
+
+    // ============================================================
+    // clean_response tests
+    // ============================================================
+    mod clean_response_tests {
+        use super::*;
+
+        #[test]
+        fn passes_through_normal_text() {
+            let text = "Hello, this is a normal response.";
+            assert_eq!(clean_response(text), text);
+        }
+
+        #[test]
+        fn removes_channel_tokens() {
+            let text = "<|channel|>some token<|message|>Hello world";
+            let cleaned = clean_response(text);
+            assert!(!cleaned.contains("<|channel|>"));
+            assert!(!cleaned.contains("<|message|>"));
+        }
+
+        #[test]
+        fn removes_commentary_lines() {
+            let text = "commentary to=container.exec json\nHello";
+            let cleaned = clean_response(text);
+            assert!(!cleaned.contains("commentary"));
+        }
+    }
+
+    // ============================================================
+    // strip_shell_comment tests
+    // ============================================================
+    mod strip_comment_tests {
+        use super::*;
+
+        #[test]
+        fn strips_trailing_comment() {
+            assert_eq!(strip_shell_comment("ls -la # list files"), "ls -la");
+        }
+
+        #[test]
+        fn preserves_comment_in_quotes() {
+            assert_eq!(strip_shell_comment("echo '# not a comment'"), "echo '# not a comment'");
+        }
+
+        #[test]
+        fn preserves_no_comment() {
+            assert_eq!(strip_shell_comment("ls -la"), "ls -la");
+        }
+    }
+
+    // ============================================================
+    // is_interactive_command tests
+    // ============================================================
+    mod interactive_cmd_tests {
+        use super::*;
+
+        #[test]
+        fn detects_editors() {
+            assert!(is_interactive_command("nano file.txt").is_some());
+            assert!(is_interactive_command("vim file.txt").is_some());
+            assert!(is_interactive_command("vi file.txt").is_some());
+        }
+
+        #[test]
+        fn detects_passwd() {
+            assert!(is_interactive_command("passwd").is_some());
+        }
+
+        #[test]
+        fn allows_non_interactive() {
+            assert!(is_interactive_command("ls -la").is_none());
+            assert!(is_interactive_command("cat file.txt").is_none());
+            assert!(is_interactive_command("grep pattern file").is_none());
+        }
+
+        #[test]
+        fn allows_mysql_with_flag() {
+            assert!(is_interactive_command("mysql -e 'SELECT 1'").is_none());
+        }
+    }
+
+    // ============================================================
+    // format_size tests
+    // ============================================================
+    mod format_size_tests {
+        use super::*;
+
+        #[test]
+        fn formats_bytes() {
+            assert_eq!(format_size(42), "42B");
+        }
+
+        #[test]
+        fn formats_kilobytes() {
+            assert_eq!(format_size(2048), "2.0K");
+        }
+
+        #[test]
+        fn formats_megabytes() {
+            assert_eq!(format_size(5 * 1024 * 1024), "5.0M");
+        }
+
+        #[test]
+        fn formats_gigabytes() {
+            assert_eq!(format_size(3 * 1024 * 1024 * 1024), "3.0G");
+        }
+    }
+
+    // ============================================================
+    // SessionLogger tests
+    // ============================================================
+    mod session_logger_tests {
+        use super::*;
+
+        #[test]
+        fn new_disabled_logger() {
+            let logger = SessionLogger::new(false, 1024);
+            assert!(!logger.enabled);
+            assert_eq!(logger.max_total_size, 1024);
+        }
+
+        #[test]
+        fn new_enabled_logger() {
+            let logger = SessionLogger::new(true, 512 * 1024 * 1024);
+            assert!(logger.enabled);
+        }
+
+        #[test]
+        fn disabled_logger_skips_operations() {
+            let mut logger = SessionLogger::new(false, 1024);
+            assert!(logger.log_user("test").is_ok());
+            assert!(logger.log_assistant("test").is_ok());
+            assert!(logger.log_command("ls", "output", true).is_ok());
+            assert!(logger.end_session().is_ok());
+            assert!(logger.log_path().is_none());
+        }
+
+        #[test]
+        fn log_path_none_when_no_session() {
+            let logger = SessionLogger::new(true, 1024);
+            assert!(logger.log_path().is_none());
+        }
+    }
+}
