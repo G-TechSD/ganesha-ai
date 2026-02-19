@@ -830,4 +830,148 @@ mod tests {
         let summaries = manager.list_sessions().unwrap();
         assert_eq!(summaries.len(), 2);
     }
+
+    #[test]
+    fn test_message_user() {
+        let msg = Message::user("hello world");
+        assert_eq!(msg.role, MessageRole::User);
+        assert_eq!(msg.content, "hello world");
+        assert!(!msg.id.is_empty());
+    }
+
+    #[test]
+    fn test_message_assistant() {
+        let msg = Message::assistant("I can help");
+        assert_eq!(msg.role, MessageRole::Assistant);
+        assert_eq!(msg.content, "I can help");
+    }
+
+    #[test]
+    fn test_message_system() {
+        let msg = Message::system("You are a helpful assistant");
+        assert_eq!(msg.role, MessageRole::System);
+    }
+
+    #[test]
+    fn test_message_tool_result() {
+        let msg = Message::tool_result("call-123", "result data");
+        assert_eq!(msg.role, MessageRole::Tool);
+        assert_eq!(msg.tool_call_id, Some("call-123".to_string()));
+    }
+
+    #[test]
+    fn test_message_with_tool_calls() {
+        let calls = vec![ToolCall::new("read_file", serde_json::json!({"path": "test.rs"}))];
+        let msg = Message::assistant("Let me read that").with_tool_calls(calls);
+        assert!(msg.tool_calls.is_some());
+        assert_eq!(msg.tool_calls.as_ref().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_message_with_metadata() {
+        let msg = Message::user("test").with_metadata("source", "cli");
+        assert!(msg.metadata.contains_key("source"));
+    }
+
+    #[test]
+    fn test_message_unique_ids() {
+        let m1 = Message::user("a");
+        let m2 = Message::user("b");
+        assert_ne!(m1.id, m2.id);
+    }
+
+    #[test]
+    fn test_tool_call_new() {
+        let tc = ToolCall::new("run_command", serde_json::json!({"cmd": "ls"}));
+        assert_eq!(tc.name, "run_command");
+        assert!(!tc.id.is_empty());
+    }
+
+    #[test]
+    fn test_session_with_id() {
+        let s = Session::new("/tmp").with_id("custom-id");
+        assert_eq!(s.id, "custom-id");
+    }
+
+    #[test]
+    fn test_session_with_name() {
+        let s = Session::new("/tmp").with_name("My Project");
+        assert_eq!(s.name, Some("My Project".to_string()));
+    }
+
+    #[test]
+    fn test_session_message_count() {
+        let mut s = Session::new("/tmp");
+        assert_eq!(s.message_count(), 0);
+        s.add_message(Message::user("hello"));
+        s.add_message(Message::assistant("hi"));
+        assert_eq!(s.message_count(), 2);
+    }
+
+    #[test]
+    fn test_session_last_messages() {
+        let mut s = Session::new("/tmp");
+        s.add_message(Message::user("1"));
+        s.add_message(Message::user("2"));
+        s.add_message(Message::user("3"));
+        let last2 = s.last_messages(2);
+        assert_eq!(last2.len(), 2);
+        assert_eq!(last2[0].content, "2");
+        assert_eq!(last2[1].content, "3");
+    }
+
+    #[test]
+    fn test_session_messages_since() {
+        let mut s = Session::new("/tmp");
+        s.add_message(Message::user("a"));
+        s.add_message(Message::user("b"));
+        s.add_message(Message::user("c"));
+        let since1 = s.messages_since(1);
+        assert_eq!(since1.len(), 2);
+    }
+
+    #[test]
+    fn test_session_clear_history() {
+        let mut s = Session::new("/tmp");
+        s.add_message(Message::user("msg"));
+        assert_eq!(s.message_count(), 1);
+        s.clear_history();
+        assert_eq!(s.message_count(), 0);
+    }
+
+    #[test]
+    fn test_session_status_transitions() {
+        let mut s = Session::new("/tmp");
+        assert_eq!(s.status, SessionStatus::Active);
+        s.set_status(SessionStatus::Paused);
+        assert_eq!(s.status, SessionStatus::Paused);
+        s.set_status(SessionStatus::Completed);
+        assert_eq!(s.status, SessionStatus::Completed);
+    }
+
+    #[test]
+    fn test_session_checkpoint_creation() {
+        let mut s = Session::new("/tmp");
+        s.add_message(Message::user("before checkpoint"));
+        let cp = s.checkpoint("save point");
+        assert_eq!(cp.name, "save point");
+        assert!(!cp.id.is_empty());
+    }
+
+    #[test]
+    fn test_session_get_checkpoint() {
+        let mut s = Session::new("/tmp");
+        s.add_message(Message::user("msg"));
+        let cp_id = s.checkpoint("cp1").id.clone();
+        assert!(s.get_checkpoint(&cp_id).is_some());
+        assert!(s.get_checkpoint("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_checkpoint_with_state() {
+        let cp = Checkpoint::new("test", 0, PathBuf::from("/tmp"))
+            .with_state("key", "value");
+        assert!(cp.state.contains_key("key"));
+    }
+
 }
