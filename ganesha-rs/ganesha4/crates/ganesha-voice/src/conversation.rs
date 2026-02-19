@@ -577,4 +577,77 @@ mod tests {
         assert!(turn2.id > turn1.id);
     }
 
+
+    #[test]
+    fn test_conversation_turn_new() {
+        let turn = ConversationTurn::new(Speaker::User, "hello".to_string());
+        assert_eq!(turn.text, "hello");
+    }
+
+    #[test]
+    fn test_conversation_turn_with_duration() {
+        let turn = ConversationTurn::new(Speaker::User, "test".to_string())
+            .with_duration(std::time::Duration::from_secs(2));
+        assert!(turn.duration.as_secs() >= 2);
+    }
+
+    #[test]
+    fn test_conversation_turn_mark_interrupted() {
+        let mut turn = ConversationTurn::new(Speaker::Assistant, "response".to_string());
+        turn.mark_interrupted();
+        assert!(turn.was_interrupted);
+    }
+
+    #[test]
+    fn test_transcript_new_empty() {
+        let t = Transcript::new();
+        assert!(t.to_text().is_empty());
+    }
+
+    #[test]
+    fn test_transcript_add_turns() {
+        let mut t = Transcript::new();
+        t.add_turn(ConversationTurn::new(Speaker::User, "hi".to_string()));
+        t.add_turn(ConversationTurn::new(Speaker::Assistant, "hello".to_string()));
+        let text = t.to_text();
+        assert!(text.contains("hi"));
+        assert!(text.contains("hello"));
+    }
+
+    #[test]
+    fn test_transcript_to_json() {
+        let mut t = Transcript::new();
+        t.add_turn(ConversationTurn::new(Speaker::User, "test".to_string()));
+        let json = t.to_json();
+        assert!(json.is_ok());
+    }
+
+    #[test]
+    fn test_speaker_variants() {
+        let _ = Speaker::User;
+        let _ = Speaker::Assistant;
+        // Only User and Assistant variants
+    }
+
+    #[test]
+    fn test_conversation_state_variants() {
+        let _ = ConversationState::Idle;
+        let _ = ConversationState::Listening;
+        let _ = ConversationState::Processing;
+        let _ = ConversationState::Speaking;
+    }
+
+    #[test]
+    fn test_voice_conversation_new() {
+        let config = ConversationConfig::default();
+        let conv = VoiceConversation::new(config);
+        assert!(matches!(conv.state(), ConversationState::Idle));
+    }
+
+    #[test]
+    fn test_voice_conversation_transcript() {
+        let conv = VoiceConversation::new(ConversationConfig::default());
+        let t = conv.transcript();
+        assert!(t.to_text().is_empty());
+    }
 }
