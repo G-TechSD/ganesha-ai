@@ -1055,9 +1055,42 @@ pub fn create_analyzer(config: &VisionConfig) -> AnalysisResult<Box<dyn VisionAn
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+
+    fn make_element(id: &str, etype: ElementType, x: i32, y: i32, w: u32, h: u32, text: Option<&str>) -> UIElement {
+        UIElement {
+            id: id.to_string(),
+            element_type: etype,
+            bounds: Region::new(x, y, w, h),
+            text: text.map(|s| s.to_string()),
+            state: ElementState { enabled: true, visible: true, ..Default::default() },
+            confidence: 0.95,
+            attributes: HashMap::new(),
+        }
+    }
+
+    fn make_analysis(elements: Vec<UIElement>) -> ScreenAnalysis {
+        ScreenAnalysis {
+            elements,
+            text_blocks: vec![],
+            description: String::new(),
+            app_context: None,
+            raw_response: None,
+            timestamp: 0,
+        }
+    }
 
     #[test]
-    fn test_element_type_interactive() {
+    fn test_find_by_text() {
+        let analysis = make_analysis(vec![
+            make_element("btn1", ElementType::Button, 0, 0, 100, 30, Some("Save File")),
+        ]);
+        assert!(analysis.find_by_text("save").is_some());
+        assert!(analysis.find_by_text("delete").is_none());
+    }
+
+    #[test]
+    fn test_element_type_is_interactive() {
         assert!(ElementType::Button.is_interactive());
         assert!(ElementType::TextField.is_interactive());
         assert!(!ElementType::Label.is_interactive());
@@ -1072,25 +1105,83 @@ mod tests {
     }
 
     #[test]
-    fn test_screen_analysis_find_by_text() {
+    fn test_ui_element_center() {
+        let elem = make_element("a", ElementType::Button, 100, 200, 50, 30, None);
+        let (cx, cy) = elem.center();
+        assert_eq!(cx, 125);
+        assert_eq!(cy, 215);
+    }
+
+    #[test]
+    fn test_ui_element_is_clickable() {
+        let btn = make_element("b", ElementType::Button, 0, 0, 10, 10, None);
+        assert!(btn.is_clickable());
+        let lbl = make_element("l", ElementType::Label, 0, 0, 10, 10, None);
+        assert!(!lbl.is_clickable());
+    }
+
+    #[test]
+    fn test_find_by_type() {
+        let analysis = make_analysis(vec![
+            make_element("b1", ElementType::Button, 0, 0, 10, 10, Some("OK")),
+            make_element("t1", ElementType::TextField, 0, 20, 100, 10, None),
+            make_element("b2", ElementType::Button, 0, 40, 10, 10, Some("Cancel")),
+        ]);
+        let buttons = analysis.find_by_type(ElementType::Button);
+        assert_eq!(buttons.len(), 2);
+    }
+
+    #[test]
+    fn test_find_clickable() {
+        let analysis = make_analysis(vec![
+            make_element("b1", ElementType::Button, 0, 0, 10, 10, Some("OK")),
+            make_element("l1", ElementType::Label, 0, 20, 100, 10, Some("Title")),
+            make_element("lk", ElementType::Link, 0, 40, 100, 10, Some("Click me")),
+        ]);
+        let clickable = analysis.find_clickable();
+        assert!(clickable.len() >= 2);
+    }
+
+    #[test]
+    fn test_find_at() {
+        let analysis = make_analysis(vec![
+            make_element("b1", ElementType::Button, 10, 10, 50, 30, Some("OK")),
+        ]);
+        assert!(analysis.find_at(20, 20).is_some());
+        assert!(analysis.find_at(200, 200).is_none());
+    }
+
+    #[test]
+    fn test_all_text() {
         let analysis = ScreenAnalysis {
-            elements: vec![UIElement {
-                id: "btn1".to_string(),
-                element_type: ElementType::Button,
-                bounds: Region::new(0, 0, 100, 30),
-                text: Some("Save File".to_string()),
-                state: ElementState::default(),
-                confidence: 0.9,
-                attributes: HashMap::new(),
-            }],
-            text_blocks: vec![],
+            elements: vec![],
+            text_blocks: vec![
+                ExtractedText { text: "Hello".to_string(), bounds: Region::new(0,0,10,10), confidence: 0.9, is_word: true },
+                ExtractedText { text: "World".to_string(), bounds: Region::new(0,20,10,10), confidence: 0.9, is_word: true },
+            ],
             description: String::new(),
             app_context: None,
             raw_response: None,
             timestamp: 0,
         };
+        let text = analysis.all_text();
+        assert!(text.contains("Hello"));
+        assert!(text.contains("World"));
+    }
 
-        assert!(analysis.find_by_text("save").is_some());
-        assert!(analysis.find_by_text("delete").is_none());
+    #[test]
+    fn test_analysis_error_variants() {
+        let _ = AnalysisError::ModelError("test".to_string());
+        let _ = AnalysisError::ApiError("test".to_string());
+        let _ = AnalysisError::InvalidResponse("test".to_string());
+        let _ = AnalysisError::MissingApiKey("gpt4v".to_string());
+    }
+
+    #[test]
+    fn test_empty_analysis() {
+        let analysis = make_analysis(vec![]);
+        assert!(analysis.find_by_text("anything").is_none());
+        assert!(analysis.find_clickable().is_empty());
+        assert!(analysis.all_text().is_empty());
     }
 }
