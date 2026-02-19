@@ -2698,4 +2698,163 @@ mod tests {
         assert!(ratio > 1.0); // original_tokens / summary_tokens > 1
     }
 
+    #[test]
+    fn test_file_context_memory_new() {
+        let mem = FileContextMemory::new(100);
+        assert_eq!(mem.all_files().count(), 0);
+    }
+
+    #[test]
+    fn test_file_context_memory_record_read() {
+        let mut mem = FileContextMemory::new(100);
+        mem.record_read("test.rs", Some("fn main() {}"));
+        assert_eq!(mem.all_files().count(), 1);
+    }
+
+    #[test]
+    fn test_file_context_memory_record_modification() {
+        let mut mem = FileContextMemory::new(100);
+        mem.record_read("test.rs", None);
+        mem.record_modification("test.rs");
+        let files: Vec<_> = mem.modified_files().collect();
+        assert_eq!(files.len(), 1);
+    }
+
+    #[test]
+    fn test_file_context_memory_recent_files() {
+        let mut mem = FileContextMemory::new(100);
+        mem.record_read("a.rs", None);
+        mem.record_read("b.rs", None);
+        mem.record_read("c.rs", None);
+        let recent = mem.recent_files(2);
+        assert_eq!(recent.len(), 2);
+    }
+
+    #[test]
+    fn test_file_context_memory_search() {
+        let mut mem = FileContextMemory::new(100);
+        mem.record_read("src/main.rs", None);
+        mem.record_read("src/lib.rs", None);
+        mem.record_read("Cargo.toml", None);
+        let results = mem.search_by_path("src");
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_session_state_new() {
+        let session = SessionState::new();
+        assert!(session.name.is_none());
+        assert!(session.working_directory.is_none());
+        assert!(session.file_contexts.is_empty());
+    }
+
+    #[test]
+    fn test_session_state_with_id() {
+        let id = uuid::Uuid::new_v4();
+        let session = SessionState::with_id(id);
+        assert_eq!(session.id, id);
+    }
+
+    #[test]
+    fn test_conversation_no_args() {
+        let conv = Conversation::new();
+        assert_eq!(conv.recent_messages(10).len(), 0);
+    }
+
+    #[test]
+    fn test_conversation_add_and_count() {
+        let mut conv = Conversation::new();
+        conv.add_user_message("hello");
+        conv.add_assistant_message("hi", None);
+        let recent = conv.recent_messages(10);
+        assert_eq!(recent.len(), 2);
+    }
+
+    #[test]
+    fn test_conversation_recent_messages_limit() {
+        let mut conv = Conversation::new();
+        conv.add_user_message("msg1");
+        conv.add_user_message("msg2");
+        conv.add_user_message("msg3");
+        let recent = conv.recent_messages(2);
+        assert_eq!(recent.len(), 2);
+    }
+
+    #[test]
+    fn test_entity_creation_simple() {
+        let entity = Entity::new("test_entity", EntityType::File);
+        assert_eq!(entity.name, "test_entity");
+    }
+
+    #[test]
+    fn test_entity_set_get_property() {
+        let mut entity = Entity::new("test", EntityType::Function);
+        entity.set_property("language", serde_json::Value::String("rust".to_string()));
+        let prop = entity.get_property("language");
+        assert!(prop.is_some());
+    }
+
+    #[test]
+    fn test_knowledge_graph_add_remove() {
+        let mut kg = KnowledgeGraph::in_memory().unwrap();
+        let entity = Entity::new("main.rs", EntityType::File);
+        let id = entity.id;
+        kg.add_entity(entity).unwrap();
+        assert!(kg.get_entity(id).unwrap().is_some());
+        kg.delete_entity(id).unwrap();
+        assert!(kg.get_entity(id).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_knowledge_graph_stats_count() {
+        let mut kg = KnowledgeGraph::in_memory().unwrap();
+        kg.add_entity(Entity::new("a.rs", EntityType::File)).unwrap();
+        kg.add_entity(Entity::new("main", EntityType::Function)).unwrap();
+        let stats = kg.stats().unwrap();
+        assert_eq!(stats.entity_count, 2);
+    }
+
+    #[test]
+    fn test_entity_query_by_type() {
+        let mut kg = KnowledgeGraph::in_memory().unwrap();
+        kg.add_entity(Entity::new("a.rs", EntityType::File)).unwrap();
+        kg.add_entity(Entity::new("main", EntityType::Function)).unwrap();
+        kg.add_entity(Entity::new("b.rs", EntityType::File)).unwrap();
+        let results = kg.query_entities(&EntityQuery::new().with_type(EntityType::File)).unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_entity_query_by_name() {
+        let mut kg = KnowledgeGraph::in_memory().unwrap();
+        kg.add_entity(Entity::new("main.rs", EntityType::File)).unwrap();
+        kg.add_entity(Entity::new("lib.rs", EntityType::File)).unwrap();
+        kg.add_entity(Entity::new("helper", EntityType::Function)).unwrap();
+        let results = kg.query_entities(&EntityQuery::new().with_name_pattern("rs")).unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_file_status_variants() {
+        let _ = FileStatus::Read;
+        let _ = FileStatus::Modified;
+        let _ = FileStatus::Created;
+    }
+
+    #[test]
+    fn test_role_ne() {
+        assert_ne!(Role::User, Role::Assistant);
+        assert_ne!(Role::System, Role::Tool);
+    }
+
+    #[test]
+    fn test_conversation_within_budget() {
+        let mut conv = Conversation::new();
+        for i in 0..10 {
+            conv.add_user_message(&format!("message {}", i));
+        }
+        let msgs = conv.messages_within_budget(1000);
+        assert!(!msgs.is_empty());
+        assert!(msgs.len() <= 10);
+    }
 }
