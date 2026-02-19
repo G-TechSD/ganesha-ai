@@ -2223,6 +2223,12 @@ const SLASH_COMMANDS: &[SlashCommand] = &[
         handler: cmd_provider,
     },
     SlashCommand {
+        name: "context",
+        aliases: &["ctx"],
+        description: "Show/manage conversation context",
+        handler: cmd_context,
+    },
+    SlashCommand {
         name: "stash",
         aliases: &["save"],
         description: "Stash/restore conversation (save|pop|peek|drop)",
@@ -3778,6 +3784,104 @@ fn cmd_provider(args: &str, _state: &mut ReplState) -> anyhow::Result<()> {
             println!();
         }
     }
+    Ok(())
+}
+
+fn cmd_context(args: &str, state: &mut ReplState) -> anyhow::Result<()> {
+    let arg = args.trim().to_lowercase();
+
+    if arg == "clear" || arg == "reset" {
+        let count = state.messages.len();
+        state.messages.clear();
+        println!("  {} Cleared {} messages", "🗑️", count);
+        return Ok(());
+    }
+
+    if arg == "trim" {
+        // Keep system message + last 10 exchanges
+        if state.messages.len() > 22 {
+            let system: Vec<_> = state.messages.iter().take(1).cloned().collect();
+            let recent: Vec<_> = state.messages.iter().rev().take(20).cloned().collect::<Vec<_>>().into_iter().rev().collect();
+            let removed = state.messages.len() - (system.len() + recent.len());
+            state.messages = system;
+            state.messages.extend(recent);
+            println!("  {} Trimmed {} old messages, kept 20 recent", "✂️", removed);
+        } else {
+            println!("  {} Nothing to trim ({} messages)", "✂️".dimmed(), state.messages.len());
+        }
+        return Ok(());
+    }
+
+    println!();
+    println!("  {}", "Conversation Context".bright_cyan().bold());
+    println!("  {}", "─────────────────────────────────".dimmed());
+
+    // Message counts by role
+    let mut system_count = 0;
+    let mut user_count = 0;
+    let mut assistant_count = 0;
+    let mut total_chars: usize = 0;
+
+    for msg in &state.messages {
+        total_chars += msg.content.len();
+        match &msg.role {
+            ganesha_providers::MessageRole::System => system_count += 1,
+            ganesha_providers::MessageRole::User => user_count += 1,
+            ganesha_providers::MessageRole::Assistant => assistant_count += 1,
+            _ => {}
+        }
+    }
+
+    let total = state.messages.len();
+    let est_tokens = total_chars / 4; // rough estimate: 4 chars per token
+
+    println!("  {} {} total ({} system, {} user, {} assistant)",
+        "Messages:".bright_white(), total, system_count, user_count, assistant_count);
+    println!("  {} ~{} chars, ~{} tokens (est.)",
+        "Size:".bright_white(), total_chars.to_string().bright_yellow(),
+        est_tokens.to_string().bright_yellow());
+
+    // Context files
+    if !state.context_files.is_empty() {
+        println!("  {} {} file(s):", "Files:".bright_white(), state.context_files.len());
+        for f in &state.context_files {
+            let size = std::fs::metadata(f).map(|m| m.len()).unwrap_or(0);
+            println!("    {} {} ({})", "·".dimmed(),
+                f.file_name().unwrap_or_default().to_string_lossy(),
+                format_size(size).dimmed());
+        }
+    }
+
+    // Stash info
+    if let Some((msgs, files)) = &state.stash {
+        println!("  {} {} messages, {} files", "Stash:".bright_white(), msgs.len(), files.len());
+    }
+
+    // Token budget estimate
+    let budget_pct = (est_tokens as f64 / 128000.0 * 100.0).min(100.0);
+    let budget_bar_len = 20;
+    let filled = (budget_pct / 100.0 * budget_bar_len as f64) as usize;
+    let bar: String = "█".repeat(filled) + &"░".repeat(budget_bar_len - filled);
+    let bar_color = if budget_pct > 80.0 { "red" } else if budget_pct > 50.0 { "yellow" } else { "green" };
+    println!("  {} [{}] {:.1}% of ~128K",
+        "Budget:".bright_white(),
+        match bar_color {
+            "red" => bar.bright_red().to_string(),
+            "yellow" => bar.bright_yellow().to_string(),
+            _ => bar.bright_green().to_string(),
+        },
+        budget_pct);
+
+    // Show last message preview
+    if let Some(last) = state.messages.last() {
+        let preview: String = last.content.chars().take(60).collect();
+        println!("  {} [{}] {}...", "Last:".bright_white(), format!("{:?}", last.role).dimmed(), preview.dimmed());
+    }
+
+    println!();
+    println!("  {} {}", "Commands:".dimmed(), "/context clear | /context trim".dimmed());
+    println!();
+
     Ok(())
 }
 
