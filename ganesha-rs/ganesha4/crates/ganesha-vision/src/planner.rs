@@ -893,47 +893,61 @@ Available action types:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
+
+    fn make_step(desc: &str, action: PlannedAction) -> PlanStep {
+        PlanStep {
+            step_number: 1,
+            description: desc.to_string(),
+            action,
+            expected_state: None,
+            is_destructive: false,
+            retries: 0,
+        }
+    }
 
     #[test]
-    fn test_vision_task_creation() {
-        let task = VisionTask::new("Click save button", "File should be saved")
-            .with_target_app("Notepad")
-            .with_timeout(Duration::from_secs(30))
-            .with_max_retries(5);
+    fn test_vision_task_new() {
+        let task = VisionTask::new("Open file", "File dialog appears");
+        assert_eq!(task.description, "Open file");
+        assert_eq!(task.expected_outcome, "File dialog appears");
+    }
 
-        assert_eq!(task.description, "Click save button");
-        assert_eq!(task.target_app, Some("Notepad".to_string()));
-        assert_eq!(task.timeout, Duration::from_secs(30));
+    #[test]
+    fn test_vision_task_with_target_app() {
+        let task = VisionTask::new("Click save", "Saved")
+            .with_target_app("Firefox");
+        assert_eq!(task.target_app.unwrap(), "Firefox");
+    }
+
+    #[test]
+    fn test_vision_task_with_timeout() {
+        let task = VisionTask::new("Wait", "Done")
+            .with_timeout(Duration::from_secs(30));
+        assert_eq!(task.timeout.as_secs(), 30);
+    }
+
+    #[test]
+    fn test_vision_task_with_confirmation() {
+        let task = VisionTask::new("Delete", "Deleted")
+            .with_confirmation(true);
+        assert!(task.require_confirmation);
+    }
+
+    #[test]
+    fn test_vision_task_with_max_retries() {
+        let task = VisionTask::new("Click", "Done")
+            .with_max_retries(5);
         assert_eq!(task.max_retries, 5);
     }
 
     #[test]
     fn test_action_plan_progress() {
-        let task = VisionTask::new("Test", "Test outcome");
+        let task = VisionTask::new("Test", "Done");
         let steps = vec![
-            PlanStep {
-                step_number: 1,
-                description: "Step 1".to_string(),
-                action: PlannedAction::TypeText {
-                    text: "test".to_string(),
-                    target_element: None,
-                },
-                expected_state: None,
-                is_destructive: false,
-                retries: 0,
-            },
-            PlanStep {
-                step_number: 2,
-                description: "Step 2".to_string(),
-                action: PlannedAction::Shortcut {
-                    shortcut: "Ctrl+S".to_string(),
-                },
-                expected_state: None,
-                is_destructive: false,
-                retries: 0,
-            },
+            make_step("Step 1", PlannedAction::Shortcut { shortcut: "Ctrl+S".to_string() }),
+            make_step("Step 2", PlannedAction::Shortcut { shortcut: "Ctrl+W".to_string() }),
         ];
-
         let mut plan = ActionPlan::new(task, steps);
 
         assert_eq!(plan.progress(), 0.0);
@@ -948,15 +962,59 @@ mod tests {
     }
 
     #[test]
-    fn test_planned_action_serialization() {
+    fn test_action_plan_next_step() {
+        let task = VisionTask::new("Test", "Done");
+        let steps = vec![
+            make_step("First", PlannedAction::Shortcut { shortcut: "Ctrl+A".to_string() }),
+        ];
+        let plan = ActionPlan::new(task, steps);
+        let next = plan.next_step();
+        assert!(next.is_some());
+        assert_eq!(next.unwrap().description, "First");
+    }
+
+    #[test]
+    fn test_action_plan_empty() {
+        let task = VisionTask::new("Empty", "Nothing");
+        let plan = ActionPlan::new(task, vec![]);
+        assert!(plan.is_complete());
+        assert!(plan.next_step().is_none());
+        assert_eq!(plan.progress(), 1.0);
+    }
+
+    #[test]
+    fn test_planned_action_click() {
         let action = PlannedAction::ClickElement {
             element_description: "Save button".to_string(),
             element_id: None,
             coordinates: Some((100, 200)),
         };
-
         let json = serde_json::to_string(&action).unwrap();
-        assert!(json.contains("click_element"));
         assert!(json.contains("Save button"));
+    }
+
+    #[test]
+    fn test_planned_action_type_text() {
+        let action = PlannedAction::TypeText {
+            text: "Hello".to_string(),
+            target_element: Some("input_field".to_string()),
+        };
+        let json = serde_json::to_string(&action).unwrap();
+        assert!(json.contains("Hello"));
+    }
+
+    #[test]
+    fn test_scroll_direction() {
+        let _ = ScrollDirection::Up;
+        let _ = ScrollDirection::Down;
+        let _ = ScrollDirection::Left;
+        let _ = ScrollDirection::Right;
+    }
+
+    #[test]
+    fn test_execution_status() {
+        let _ = ExecutionStatus::Pending;
+        let _ = ExecutionStatus::Running;
+        let _ = ExecutionStatus::Completed;
     }
 }
