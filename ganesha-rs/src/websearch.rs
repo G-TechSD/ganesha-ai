@@ -194,6 +194,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore = "Network test - requires internet access, run with: cargo test -- --ignored"]
     async fn test_duckduckgo_search() {
         let result = duckduckgo_search("rust programming language", 5).await;
         assert!(result.is_ok());

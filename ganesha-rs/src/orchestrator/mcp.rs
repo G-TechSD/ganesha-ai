@@ -171,6 +171,19 @@ impl McpManager {
             category: ServerCategory::System,
         });
 
+
+        // Desktop Commander - System control and file operations (by wonderwhy-er)
+        servers.insert("desktop-commander".into(), McpServer {
+            name: "desktop-commander".into(),
+            description: "System-level control: terminal, file ops, process management".into(),
+            command: "npx".into(),
+            args: vec!["-y".into(), "@wonderwhy-er/desktop-commander@latest".into()],
+            env: HashMap::new(),
+            status: ServerStatus::NotInstalled,
+            auto_start: false,
+            category: ServerCategory::System,
+        });
+
         servers
     }
 

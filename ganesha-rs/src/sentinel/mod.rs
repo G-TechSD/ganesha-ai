@@ -532,9 +532,9 @@ impl Sentinel {
             if count > threshold.max(5) {
                 return Some((
                     ThreatCategory::InfiniteLoop,
-                    Severity::Medium,
+                    Severity::High,
                     format!("Action repeated {} times consecutively", count),
-                    0.8,
+                    0.9,
                 ));
             }
         } else {

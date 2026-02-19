@@ -32,6 +32,28 @@ impl MemoryDb {
         Ok(db)
     }
 
+
+    /// Open database in a specific directory (useful for testing)
+    pub fn open_in_dir(base_dir: PathBuf) -> SqliteResult<Self> {
+        std::fs::create_dir_all(&base_dir).ok();
+        let db_path = base_dir.join("ganesha_memory.db");
+        let conn = Connection::open(&db_path)?;
+        let mut db = Self { conn, base_dir };
+        db.init_schema()?;
+        Ok(db)
+    }
+
+    /// Open an in-memory database (for testing only)
+    #[cfg(test)]
+    pub fn open_memory() -> SqliteResult<Self> {
+        use std::path::PathBuf;
+        let conn = Connection::open_in_memory()?;
+        let base_dir = PathBuf::from("/tmp/ganesha-test");
+        let mut db = Self { conn, base_dir };
+        db.init_schema()?;
+        Ok(db)
+    }
+
     /// Get the base directory for memory storage
     fn get_base_dir() -> PathBuf {
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
@@ -728,7 +750,7 @@ mod tests {
 
     #[test]
     fn test_memory_db_init() {
-        let db = MemoryDb::open().unwrap();
+        let db = MemoryDb::open_memory().unwrap();
         let stats = db.stats().unwrap();
         assert_eq!(stats.total_sessions, 0);
     }
