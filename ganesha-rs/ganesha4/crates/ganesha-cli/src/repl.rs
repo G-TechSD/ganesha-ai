@@ -1990,6 +1990,8 @@ pub struct ReplState {
     pub mcp_tools: Vec<(String, McpTool)>,
     /// Current risk level (safe/normal/trusted/yolo)
     pub risk_level: crate::cli::RiskLevel,
+    /// Stashed conversation state (messages + context files)
+    pub stash: Option<(Vec<Message>, Vec<PathBuf>)>,
 }
 
 impl ReplState {
@@ -2018,6 +2020,7 @@ impl ReplState {
             mcp_manager: Arc::new(McpManager::new()),
             mcp_tools: Vec::new(),
             risk_level: cli.risk,
+            stash: None,
         }
     }
 
@@ -2218,6 +2221,12 @@ const SLASH_COMMANDS: &[SlashCommand] = &[
         aliases: &["p"],
         description: "Add or manage AI providers",
         handler: cmd_provider,
+    },
+    SlashCommand {
+        name: "stash",
+        aliases: &["save"],
+        description: "Stash/restore conversation (save|pop|peek|drop)",
+        handler: cmd_stash,
     },
     SlashCommand {
         name: "risk",
@@ -3767,6 +3776,64 @@ fn cmd_provider(args: &str, _state: &mut ReplState) -> anyhow::Result<()> {
             println!("  • LM Studio, Ollama, vLLM");
             println!("  • Any OpenAI-compatible server");
             println!();
+        }
+    }
+    Ok(())
+}
+
+fn cmd_stash(args: &str, state: &mut ReplState) -> anyhow::Result<()> {
+    let arg = args.trim().to_lowercase();
+
+    match arg.as_str() {
+        "" | "save" | "push" => {
+            // Stash current conversation
+            let msg_count = state.messages.len();
+            let ctx_count = state.context_files.len();
+            state.stash = Some((state.messages.clone(), state.context_files.clone()));
+            state.messages.clear();
+            state.context_files.clear();
+            println!("  {} Stashed {} messages and {} context files",
+                "📦".bright_green(), msg_count, ctx_count);
+            println!("  {}", "Conversation cleared. Use /stash pop to restore.".dimmed());
+        }
+        "pop" | "restore" => {
+            if let Some((msgs, files)) = state.stash.take() {
+                let msg_count = msgs.len();
+                let ctx_count = files.len();
+                state.messages = msgs;
+                state.context_files = files;
+                println!("  {} Restored {} messages and {} context files",
+                    "📦".bright_green(), msg_count, ctx_count);
+            } else {
+                println!("  {} Nothing stashed", "⚠".yellow());
+            }
+        }
+        "peek" => {
+            if let Some((msgs, files)) = &state.stash {
+                println!("  {} Stash contains: {} messages, {} context files",
+                    "📦", msgs.len(), files.len());
+                if let Some(last) = msgs.last() {
+                    let preview: String = last.content.chars().take(80).collect();
+                    println!("  {} Last message: {}...", "│".dimmed(), preview.dimmed());
+                }
+            } else {
+                println!("  {} Stash is empty", "📦".dimmed());
+            }
+        }
+        "drop" => {
+            if state.stash.is_some() {
+                state.stash = None;
+                println!("  {} Stash dropped", "🗑️");
+            } else {
+                println!("  {} Nothing to drop", "⚠".yellow());
+            }
+        }
+        _ => {
+            println!("  {} Usage: /stash [save|pop|peek|drop]", "📦");
+            println!("    {} save/push  — stash current conversation (default)", "•".dimmed());
+            println!("    {} pop/restore — restore stashed conversation", "•".dimmed());
+            println!("    {} peek        — preview what's stashed", "•".dimmed());
+            println!("    {} drop        — discard stash", "•".dimmed());
         }
     }
     Ok(())
