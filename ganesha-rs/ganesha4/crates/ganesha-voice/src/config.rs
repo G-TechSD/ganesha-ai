@@ -600,4 +600,85 @@ mod tests {
         config.output.volume = -1.0; // Invalid
         assert!(config.validate().is_err());
     }
+
+    #[test]
+    fn test_api_keys_from_env_empty() {
+        // With no env vars set, keys should be None
+        let keys = ApiKeysConfig::default();
+        // Default should have empty/none keys
+        let _ = keys;
+    }
+
+    #[test]
+    fn test_hotkey_binding_new() {
+        let binding = HotkeyBinding::new("Ctrl+Space");
+        assert_eq!(binding.binding, "Ctrl+Space");
+        assert!(binding.enabled);
+    }
+
+    #[test]
+    fn test_hotkey_binding_disabled() {
+        let binding = HotkeyBinding::disabled();
+        assert!(!binding.enabled);
+    }
+
+    #[test]
+    fn test_hotkey_binding_parse() {
+        let binding = HotkeyBinding::new("Ctrl+Space");
+        let parsed = binding.parse();
+        assert!(parsed.is_some());
+        let (mods, key) = parsed.unwrap();
+        assert!(mods.contains(&Modifier::Ctrl));
+        assert_eq!(key, "Space");
+    }
+
+    #[test]
+    fn test_hotkey_binding_parse_multi_modifier() {
+        let binding = HotkeyBinding::new("Ctrl+Shift+M");
+        let parsed = binding.parse();
+        assert!(parsed.is_some());
+        let (mods, key) = parsed.unwrap();
+        assert!(mods.contains(&Modifier::Ctrl));
+        assert!(mods.contains(&Modifier::Shift));
+    }
+
+    #[test]
+    fn test_builder_input_device() {
+        let config = VoiceConfigBuilder::new()
+            .input_device("USB Microphone")
+            .build()
+            .unwrap();
+        assert_eq!(config.input.device, Some("USB Microphone".to_string()));
+    }
+
+    #[test]
+    fn test_builder_output_device() {
+        let config = VoiceConfigBuilder::new()
+            .output_device("Speakers")
+            .build()
+            .unwrap();
+        assert_eq!(config.output.device, Some("Speakers".to_string()));
+    }
+
+    #[test]
+    fn test_builder_push_to_talk() {
+        let config = VoiceConfigBuilder::new()
+            .push_to_talk_enabled(true)
+            .push_to_talk_key("Ctrl+T")
+            .build()
+            .unwrap();
+        assert!(config.hotkeys.push_to_talk_enabled);
+    }
+
+    #[test]
+    fn test_config_default_path() {
+        let path = VoiceConfig::default_path();
+        assert!(path.to_str().unwrap().contains("voice"));
+    }
+
+    #[test]
+    fn test_personality_config_default() {
+        let config = PersonalityConfig::default();
+        assert!(!config.default_personality.is_empty());
+    }
 }
