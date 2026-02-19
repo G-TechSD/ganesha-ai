@@ -2821,15 +2821,199 @@ fn cmd_clear(_args: &str, state: &mut ReplState) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn cmd_undo(_args: &str, _state: &mut ReplState) -> anyhow::Result<()> {
-    // TODO: Implement rollback
-    println!("Undo not yet implemented");
+fn cmd_undo(args: &str, state: &mut ReplState) -> anyhow::Result<()> {
+    // Check if we're in a git repo
+    let git_check = std::process::Command::new("git")
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .current_dir(&state.working_dir)
+        .output();
+
+    match git_check {
+        Ok(output) if output.status.success() => {}
+        _ => {
+            println!("{} Not in a git repository", "Error:".red());
+            return Ok(());
+        }
+    }
+
+    let target = args.trim();
+
+    if target.is_empty() || target == "last" {
+        // Undo last changed file(s) - restore from HEAD
+        let status = std::process::Command::new("git")
+            .args(["diff", "--name-only"])
+            .current_dir(&state.working_dir)
+            .output()?;
+
+        let status_str = String::from_utf8_lossy(&status.stdout).to_string();
+        let files: Vec<&str> = status_str
+            .lines()
+            .filter(|l| !l.is_empty())
+            .collect();
+
+        if files.is_empty() {
+            // Try staged files
+            let staged = std::process::Command::new("git")
+                .args(["diff", "--cached", "--name-only"])
+                .current_dir(&state.working_dir)
+                .output()?;
+
+            let staged_files: Vec<String> = String::from_utf8_lossy(&staged.stdout)
+                .lines()
+                .filter(|l| !l.is_empty())
+                .map(|l| l.to_string())
+                .collect();
+
+            if staged_files.is_empty() {
+                println!("No changes to undo");
+                return Ok(());
+            }
+
+            // Unstage files
+            for file in &staged_files {
+                let _ = std::process::Command::new("git")
+                    .args(["restore", "--staged", file])
+                    .current_dir(&state.working_dir)
+                    .output();
+                println!("  {} Unstaged: {}", "↩".bright_yellow(), file);
+            }
+            return Ok(());
+        }
+
+        // Ask confirmation
+        println!("
+{} files with changes:", files.len());
+        for f in &files {
+            println!("  {} {}", "•".dimmed(), f);
+        }
+        println!();
+        print!("{} Restore all from HEAD? [y/N] ", "⚠".yellow());
+        std::io::Write::flush(&mut std::io::stdout()).ok();
+
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input).ok();
+
+        if input.trim().to_lowercase() == "y" {
+            let restore = std::process::Command::new("git")
+                .args(["checkout", "--", "."])
+                .current_dir(&state.working_dir)
+                .output()?;
+
+            if restore.status.success() {
+                println!("{} Restored {} file(s) from HEAD", "✓".green(), files.len());
+            } else {
+                println!("{} {}", "Error:".red(), String::from_utf8_lossy(&restore.stderr));
+            }
+        } else {
+            println!("Cancelled");
+        }
+    } else {
+        // Undo specific file
+        let restore = std::process::Command::new("git")
+            .args(["checkout", "--", target])
+            .current_dir(&state.working_dir)
+            .output()?;
+
+        if restore.status.success() {
+            println!("{} Restored: {}", "✓".green(), target);
+        } else {
+            println!("{} {}", "Error:".red(), String::from_utf8_lossy(&restore.stderr));
+        }
+    }
+
     Ok(())
 }
 
-fn cmd_diff(_args: &str, _state: &mut ReplState) -> anyhow::Result<()> {
-    // TODO: Show recent file changes
-    println!("Diff not yet implemented");
+fn cmd_diff(args: &str, state: &mut ReplState) -> anyhow::Result<()> {
+    let target = args.trim();
+
+    // Check if in git repo
+    let git_check = std::process::Command::new("git")
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .current_dir(&state.working_dir)
+        .output();
+
+    match git_check {
+        Ok(output) if output.status.success() => {}
+        _ => {
+            println!("{} Not in a git repository", "Error:".red());
+            return Ok(());
+        }
+    }
+
+    // Build git diff command
+    let mut git_args = vec!["diff", "--stat"];
+
+    if target == "staged" || target == "cached" {
+        git_args.push("--cached");
+    } else if target == "all" || target == "full" {
+        // Show full diff
+        git_args = vec!["diff"];
+    } else if !target.is_empty() {
+        // Diff specific file
+        git_args = vec!["diff", target];
+    }
+
+    let output = std::process::Command::new("git")
+        .args(&git_args)
+        .current_dir(&state.working_dir)
+        .output()?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    if stdout.is_empty() {
+        // Try staged
+        let staged = std::process::Command::new("git")
+            .args(["diff", "--cached", "--stat"])
+            .current_dir(&state.working_dir)
+            .output()?;
+
+        let staged_out = String::from_utf8_lossy(&staged.stdout);
+        if staged_out.is_empty() {
+            println!("No changes detected (working tree clean)");
+        } else {
+            println!("
+{}", "Staged changes:".bright_green().bold());
+            print!("{}", staged_out);
+        }
+    } else {
+        if target == "all" || target == "full" {
+            // Colorize full diff output
+            for line in stdout.lines() {
+                if line.starts_with('+') && !line.starts_with("+++") {
+                    println!("{}", line.green());
+                } else if line.starts_with('-') && !line.starts_with("---") {
+                    println!("{}", line.red());
+                } else if line.starts_with("@@") {
+                    println!("{}", line.cyan());
+                } else if line.starts_with("diff") || line.starts_with("index") {
+                    println!("{}", line.dimmed());
+                } else {
+                    println!("{}", line);
+                }
+            }
+        } else {
+            println!("
+{}", "Working tree changes:".bright_yellow().bold());
+            print!("{}", stdout);
+        }
+
+        // Also check for staged
+        if target.is_empty() {
+            let staged = std::process::Command::new("git")
+                .args(["diff", "--cached", "--stat"])
+                .current_dir(&state.working_dir)
+                .output()?;
+            let staged_out = String::from_utf8_lossy(&staged.stdout);
+            if !staged_out.is_empty() {
+                println!("
+{}", "Staged changes:".bright_green().bold());
+                print!("{}", staged_out);
+            }
+        }
+    }
+
+    println!();
     Ok(())
 }
 
@@ -2844,9 +3028,247 @@ fn cmd_git(args: &str, _state: &mut ReplState) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn cmd_commit(_args: &str, _state: &mut ReplState) -> anyhow::Result<()> {
-    // TODO: Generate commit message with AI
-    println!("Commit not yet implemented");
+fn cmd_commit(args: &str, state: &mut ReplState) -> anyhow::Result<()> {
+    // Check if in git repo
+    let git_check = std::process::Command::new("git")
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .current_dir(&state.working_dir)
+        .output();
+
+    match git_check {
+        Ok(output) if output.status.success() => {}
+        _ => {
+            println!("{} Not in a git repository", "Error:".red());
+            return Ok(());
+        }
+    }
+
+    let user_msg = args.trim();
+
+    // Get diff for commit message generation
+    // First check staged, then unstaged
+    let staged_diff = std::process::Command::new("git")
+        .args(["diff", "--cached", "--stat"])
+        .current_dir(&state.working_dir)
+        .output()?;
+    let staged_out = String::from_utf8_lossy(&staged_diff.stdout).to_string();
+
+    let has_staged = !staged_out.trim().is_empty();
+
+    // If nothing staged, stage everything
+    if !has_staged {
+        let unstaged = std::process::Command::new("git")
+            .args(["diff", "--stat"])
+            .current_dir(&state.working_dir)
+            .output()?;
+        let unstaged_out = String::from_utf8_lossy(&unstaged.stdout).to_string();
+
+        if unstaged_out.trim().is_empty() {
+            // Check for untracked files
+            let untracked = std::process::Command::new("git")
+                .args(["ls-files", "--others", "--exclude-standard"])
+                .current_dir(&state.working_dir)
+                .output()?;
+            let untracked_out = String::from_utf8_lossy(&untracked.stdout).to_string();
+
+            if untracked_out.trim().is_empty() {
+                println!("Nothing to commit (working tree clean)");
+                return Ok(());
+            }
+        }
+
+        // Stage all changes
+        println!("{} Staging all changes...", "→".bright_blue());
+        let _ = std::process::Command::new("git")
+            .args(["add", "-A"])
+            .current_dir(&state.working_dir)
+            .output()?;
+    }
+
+    // Get the final staged diff for message generation
+    let diff_output = std::process::Command::new("git")
+        .args(["diff", "--cached"])
+        .current_dir(&state.working_dir)
+        .output()?;
+    let diff = String::from_utf8_lossy(&diff_output.stdout);
+
+    // Truncate diff if too long
+    let diff_truncated = if diff.len() > 4000 {
+        format!("{}
+... (truncated, {} total bytes)", &diff[..4000], diff.len())
+    } else {
+        diff.to_string()
+    };
+
+    // Show what will be committed
+    let stat = std::process::Command::new("git")
+        .args(["diff", "--cached", "--stat"])
+        .current_dir(&state.working_dir)
+        .output()?;
+    println!("
+{}", "Changes to commit:".bright_green().bold());
+    print!("{}", String::from_utf8_lossy(&stat.stdout));
+    println!();
+
+    // If user provided a message, use it directly
+    if !user_msg.is_empty() {
+        let commit = std::process::Command::new("git")
+            .args(["commit", "-m", user_msg])
+            .current_dir(&state.working_dir)
+            .output()?;
+
+        if commit.status.success() {
+            println!("{} Committed: {}", "✓".green(), user_msg);
+            let hash = std::process::Command::new("git")
+                .args(["rev-parse", "--short", "HEAD"])
+                .current_dir(&state.working_dir)
+                .output()?;
+            println!("  Hash: {}", String::from_utf8_lossy(&hash.stdout).trim().bright_cyan());
+        } else {
+            println!("{} {}", "Error:".red(), String::from_utf8_lossy(&commit.stderr));
+        }
+        return Ok(());
+    }
+
+    // Try to generate commit message with AI
+    let has_provider = tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(state.provider_manager.has_available_provider())
+    });
+
+    if has_provider {
+        println!("{} Generating commit message...", "🤖".bright_cyan());
+
+        let prompt = format!(
+            "Generate a concise git commit message for this diff. \
+             Use conventional commit format (feat/fix/refactor/docs/test/chore). \
+             First line under 72 chars. Add bullet points for details if needed. \
+             Only output the commit message, nothing else.\n\nDiff:\n```\n{}\n```",
+            diff_truncated
+        );
+
+        let messages = vec![
+            ganesha_providers::Message::system("You are a helpful git commit message generator. Output ONLY the commit message text, no markdown, no quotes, no explanation."),
+            ganesha_providers::Message::user(&prompt),
+        ];
+
+        let options = ganesha_providers::GenerateOptions {
+            model: state.model.clone(),
+            temperature: Some(0.3),
+            max_tokens: Some(256),
+            ..Default::default()
+        };
+
+        let response = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(state.provider_manager.chat(&messages, &options))
+        });
+
+        match response {
+            Ok(resp) => {
+                let msg = resp.content.trim().trim_matches('\'').trim_matches('"').to_string();
+                println!("
+{}", "Suggested commit message:".bright_yellow());
+                println!("{}", "─".repeat(50).dimmed());
+                println!("{}", msg);
+                println!("{}", "─".repeat(50).dimmed());
+                println!();
+
+                print!("{} ", "Accept? [Y/n/e(dit)] ".bright_white());
+                std::io::Write::flush(&mut std::io::stdout()).ok();
+
+                let mut input = String::new();
+                std::io::stdin().read_line(&mut input).ok();
+                let choice = input.trim().to_lowercase();
+
+                if choice.is_empty() || choice == "y" || choice == "yes" {
+                    let commit = std::process::Command::new("git")
+                        .args(["commit", "-m", &msg])
+                        .current_dir(&state.working_dir)
+                        .output()?;
+
+                    if commit.status.success() {
+                        println!("{} Committed!", "✓".green());
+                        let hash = std::process::Command::new("git")
+                            .args(["rev-parse", "--short", "HEAD"])
+                            .current_dir(&state.working_dir)
+                            .output()?;
+                        println!("  Hash: {}", String::from_utf8_lossy(&hash.stdout).trim().bright_cyan());
+                    } else {
+                        println!("{} {}", "Error:".red(), String::from_utf8_lossy(&commit.stderr));
+                    }
+                } else if choice == "e" || choice == "edit" {
+                    print!("{} ", "Enter commit message:".bright_white());
+                    std::io::Write::flush(&mut std::io::stdout()).ok();
+                    let mut custom_msg = String::new();
+                    std::io::stdin().read_line(&mut custom_msg).ok();
+                    let custom_msg = custom_msg.trim();
+
+                    if !custom_msg.is_empty() {
+                        let commit = std::process::Command::new("git")
+                            .args(["commit", "-m", custom_msg])
+                            .current_dir(&state.working_dir)
+                            .output()?;
+
+                        if commit.status.success() {
+                            println!("{} Committed: {}", "✓".green(), custom_msg);
+                        } else {
+                            println!("{} {}", "Error:".red(), String::from_utf8_lossy(&commit.stderr));
+                        }
+                    } else {
+                        println!("Cancelled (no message)");
+                    }
+                } else {
+                    // Unstage if user cancels
+                    println!("Cancelled");
+                }
+            }
+            Err(e) => {
+                println!("{} AI generation failed: {}", "⚠".yellow(), e);
+                print!("{} ", "Enter commit message manually:".bright_white());
+                std::io::Write::flush(&mut std::io::stdout()).ok();
+                let mut manual_msg = String::new();
+                std::io::stdin().read_line(&mut manual_msg).ok();
+                let manual_msg = manual_msg.trim();
+
+                if !manual_msg.is_empty() {
+                    let commit = std::process::Command::new("git")
+                        .args(["commit", "-m", manual_msg])
+                        .current_dir(&state.working_dir)
+                        .output()?;
+
+                    if commit.status.success() {
+                        println!("{} Committed: {}", "✓".green(), manual_msg);
+                    } else {
+                        println!("{} {}", "Error:".red(), String::from_utf8_lossy(&commit.stderr));
+                    }
+                } else {
+                    println!("Cancelled");
+                }
+            }
+        }
+    } else {
+        // No AI provider, ask for message directly
+        print!("{} ", "Commit message:".bright_white());
+        std::io::Write::flush(&mut std::io::stdout()).ok();
+        let mut msg = String::new();
+        std::io::stdin().read_line(&mut msg).ok();
+        let msg = msg.trim();
+
+        if !msg.is_empty() {
+            let commit = std::process::Command::new("git")
+                .args(["commit", "-m", msg])
+                .current_dir(&state.working_dir)
+                .output()?;
+
+            if commit.status.success() {
+                println!("{} Committed: {}", "✓".green(), msg);
+            } else {
+                println!("{} {}", "Error:".red(), String::from_utf8_lossy(&commit.stderr));
+            }
+        } else {
+            println!("Cancelled");
+        }
+    }
+
     Ok(())
 }
 
